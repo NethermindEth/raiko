@@ -1,7 +1,7 @@
 [
     {
-        "name": "taiko_dev_l1",
-        "chain_id": 32382,
+        "name": "surge_dev_l1",
+        "chain_id": 3151908,
         "max_spec_id": "CANCUN",
         "hard_forks": {
             "FRONTIER": {
@@ -22,8 +22,8 @@
         },
         "l1_contract": null,
         "l2_contract": null,
-        "rpc": "https://l1rpc.internal.taiko.xyz",
-        "beacon_rpc": "https://l1beacon.internal.taiko.xyz/",
+        "rpc": "http://185.3.95.99:32002",
+        "beacon_rpc": "http://185.3.95.99:33001",
         "verifier_address_forks": {
             "FRONTIER": {
                 "SGX": null,
@@ -36,17 +36,22 @@
         "is_taiko": false
     },
     {
-        "name": "taiko_dev",
-        "chain_id": 167001,
+        "name": "surge_dev",
+        "chain_id": 167000,
         "max_spec_id": "ONTAKE",
         "hard_forks": {
             "HEKLA": {
                 "Block": 0
             },
             "ONTAKE": {
-                "Block": 500
+                "Block": 1
             },
-            "CANCUN": "TBD"
+            "CANCUN": {
+                "Timestamp": 0
+            },
+            "PRAGUE": {
+                "Timestamp": 0
+            }
         },
         "eip_1559_constants": {
             "base_fee_change_denominator": "0x8",
@@ -54,20 +59,20 @@
             "base_fee_max_decrease_denominator": "0x8",
             "elasticity_multiplier": "0x2"
         },
-        "l1_contract": "0xA4702E22F8807Df82Fe5B6dDdd99eB3Fcb0237B0",
+        "l1_contract": "0x086f77C5686dfe3F2f8FE487C5f8d357952C8556",
         "l2_contract": "0x1670010000000000000000000000000000010001",
-        "rpc": "https://rpc.internal.taiko.xyz",
+        "rpc": "http://185.3.95.99:8547",
         "beacon_rpc": null,
         "verifier_address_forks": {
             "HEKLA": {
-                "SGX": "0xebB0DA61818F639f460F67940EB269b36d1F104E",
-                "SP1": "0x748d4a7e3a49adEbA2157B2d581434A6Cc226D1F",
-                "RISC0": "0xDf8038e9f4535040D7421A89ead398b3A38366EC"
+                "SGX": "0x86A0679C7987B5BA9600affA994B78D0660088ff",
+                "SP1": "0x0000000000000000000000000000000000000000",
+                "RISC0": "0x0000000000000000000000000000000000000000"
             },
             "ONTAKE": {
-                "SGX": "0xebB0DA61818F639f460F67940EB269b36d1F104E",
-                "SP1": "0x748d4a7e3a49adEbA2157B2d581434A6Cc226D1F",
-                "RISC0": "0xDf8038e9f4535040D7421A89ead398b3A38366EC"
+                "SGX": "0x86A0679C7987B5BA9600affA994B78D0660088ff",
+                "SP1": "0x0000000000000000000000000000000000000000",
+                "RISC0": "0x0000000000000000000000000000000000000000"
             }
         },
         "genesis_time": 0,

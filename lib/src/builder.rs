@@ -1,5 +1,5 @@
 use core::mem;
-use std::sync::Arc;
+use std::{collections::BTreeMap, sync::Arc};
 
 use crate::primitives::keccak::keccak;
 use crate::primitives::mpt::StateAccount;
@@ -11,9 +11,11 @@ use crate::{
     mem_db::{AccountState, DbAccount, MemDb},
     CycleTracker,
 };
+use once_cell::sync::Lazy;
+use reth_ethereum_forks::ForkCondition;
 use anyhow::{bail, ensure, Result};
 use reth_chainspec::{
-    ChainSpecBuilder, Hardfork, HOLESKY, MAINNET, TAIKO_A7, TAIKO_DEV, TAIKO_MAINNET,
+    ChainSpecBuilder, ChainSpec as RethChainSpec, Hardfork, HOLESKY, MAINNET, TAIKO_A7, TAIKO_MAINNET,
 };
 use reth_evm::execute::{BlockExecutionOutput, BlockValidationError, Executor, ProviderError};
 use reth_evm_ethereum::execute::{
@@ -26,6 +28,46 @@ use reth_primitives::revm_primitives::{
 };
 use reth_primitives::{Address, BlockWithSenders, Header, B256, KECCAK_EMPTY, U256};
 use tracing::{debug, error};
+
+pub static SURGE_DEV: Lazy<Arc<RethChainSpec>> = Lazy::new(|| {
+    RethChainSpec {
+        chain: 167000.into(),
+        genesis_hash: None,
+        paris_block_and_final_difficulty: None,
+        hardforks: BTreeMap::from([
+            (Hardfork::Frontier, ForkCondition::Block(0)),
+            (Hardfork::Homestead, ForkCondition::Block(0)),
+            (Hardfork::Dao, ForkCondition::Block(0)),
+            (Hardfork::Tangerine, ForkCondition::Block(0)),
+            (Hardfork::SpuriousDragon, ForkCondition::Block(0)),
+            (Hardfork::Byzantium, ForkCondition::Block(0)),
+            (Hardfork::Constantinople, ForkCondition::Block(0)),
+            (Hardfork::Petersburg, ForkCondition::Block(0)),
+            (Hardfork::Istanbul, ForkCondition::Block(0)),
+            (Hardfork::Berlin, ForkCondition::Block(0)),
+            (Hardfork::London, ForkCondition::Block(0)),
+            (
+                Hardfork::Paris,
+                ForkCondition::TTD { fork_block: None, total_difficulty: U256::from(0) },
+            ),
+            (Hardfork::Shanghai, ForkCondition::Timestamp(0)),
+            (Hardfork::Prague, ForkCondition::Timestamp(0)),
+            #[cfg(feature = "taiko")]
+            (Hardfork::Hekla, ForkCondition::Block(0)),
+            #[cfg(feature = "taiko")]
+            (
+                Hardfork::Ontake,
+                ForkCondition::Block(
+                    std::env::var("SURGE_DEV_ONTAKE_HEIGHT")
+                        .map_or(1, |h| h.parse().unwrap_or(1)),
+                ),
+            ),
+        ]),
+        deposit_contract: None,
+        ..Default::default()
+    }
+    .into()
+});
 
 pub fn calculate_block_header(input: &GuestInput) -> Header {
     let cycle_tracker = CycleTracker::start("initialize_database");
@@ -94,7 +136,7 @@ impl<DB: Database<Error = ProviderError> + DatabaseCommit + OptimisticDatabase>
                 )
             }
             "holesky" => HOLESKY.clone(),
-            "taiko_dev" => TAIKO_DEV.clone(),
+            "surge_dev" => SURGE_DEV.clone(),
             _ => unimplemented!(),
         };
 
