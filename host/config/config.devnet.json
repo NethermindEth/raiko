@@ -1,6 +1,6 @@
 {
-  "network": "taiko_dev",
-  "l1_network": "taiko_dev_l1",
+  "network": "surge_dev",
+  "l1_network": "surge_dev_l1",
   "sgx": {
     "instance_id": 0
   }

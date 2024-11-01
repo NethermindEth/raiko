@@ -51,6 +51,7 @@ reth-chainspec = { git = "https://github.com/taikoxyz/taiko-reth.git", branch = 
     "taiko",
 ] }
 reth-provider = { git = "https://github.com/taikoxyz/taiko-reth.git", branch = "v1.0.0-rc.2-taiko", default-features = false }
+reth-ethereum-forks = { git = "https://github.com/taikoxyz/taiko-reth.git", branch = "v1.0.0-rc.2-taiko", default-features = false }
 
 # risc zero
 risc0-zkvm = { version = "=1.1.2", features = ["prove", "getrandom"] }
@@ -70,6 +71,7 @@ alloy-dyn-abi = { version = "0.7.2", default-features = false }
 alloy-json-abi = { version = "0.7.2", default-features = false }
 alloy-primitives = { version = "0.7.2", default-features = false }
 alloy-sol-types = { version = "0.7.2", default-features = false }
+alloy-chains = { version = "0.1.15", default-features = false }
 reqwest_alloy = { package = "reqwest", version = "0.12.4", features = ["json"] }
 alloy-rpc-types = { version = "0.1", default-features = false }
 alloy-rpc-client = { version = "0.1", default-features = false }
