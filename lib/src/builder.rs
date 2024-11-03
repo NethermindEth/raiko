@@ -51,7 +51,7 @@ pub static SURGE_DEV: Lazy<Arc<RethChainSpec>> = Lazy::new(|| {
                 ForkCondition::TTD { fork_block: None, total_difficulty: U256::from(0) },
             ),
             (Hardfork::Shanghai, ForkCondition::Timestamp(0)),
-            (Hardfork::Prague, ForkCondition::Timestamp(0)),
+            (Hardfork::Cancun, ForkCondition::Timestamp(0)),
             (Hardfork::Hekla, ForkCondition::Block(0)),
             (
                 Hardfork::Ontake,
