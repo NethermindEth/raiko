@@ -59,7 +59,7 @@
             "base_fee_max_decrease_denominator": "0x8",
             "elasticity_multiplier": "0x2"
         },
-        "l1_contract": "0x086f77C5686dfe3F2f8FE487C5f8d357952C8556",
+        "l1_contract": "0xaE37C7A711bcab9B0f8655a97B738d6ccaB6560B",
         "l2_contract": "0x1670010000000000000000000000000000010001",
         "rpc": "http://185.3.95.99:8547",
         "beacon_rpc": null,
