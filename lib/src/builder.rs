@@ -52,9 +52,7 @@ pub static SURGE_DEV: Lazy<Arc<RethChainSpec>> = Lazy::new(|| {
             ),
             (Hardfork::Shanghai, ForkCondition::Timestamp(0)),
             (Hardfork::Prague, ForkCondition::Timestamp(0)),
-            #[cfg(feature = "taiko")]
             (Hardfork::Hekla, ForkCondition::Block(0)),
-            #[cfg(feature = "taiko")]
             (
                 Hardfork::Ontake,
                 ForkCondition::Block(
