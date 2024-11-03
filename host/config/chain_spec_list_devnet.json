@@ -38,7 +38,7 @@
     {
         "name": "surge_dev",
         "chain_id": 167000,
-        "max_spec_id": "CANCUN",
+        "max_spec_id": "ONTAKE",
         "hard_forks": {
             "HEKLA": {
                 "Block": 0
@@ -46,9 +46,7 @@
             "ONTAKE": {
                 "Block": 1
             },
-            "CANCUN": {
-                "Timestamp": 0
-            }
+            "CANCUN": "TBD"
         },
         "eip_1559_constants": {
             "base_fee_change_denominator": "0x8",
