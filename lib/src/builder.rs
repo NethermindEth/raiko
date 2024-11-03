@@ -143,29 +143,24 @@ impl<DB: Database<Error = ProviderError> + DatabaseCommit + OptimisticDatabase>
         if reth_chain_spec.is_taiko() {
             let block_num = self.input.taiko.block_proposed.block_number();
             let block_timestamp = 0u64; // self.input.taiko.block_proposed.block_timestamp();
-            let taiko_fork = self
+            let ontake_active = self
                 .input
                 .chain_spec
-                .spec_id(block_num, block_timestamp)
-                .unwrap();
-            match taiko_fork {
-                SpecId::HEKLA => {
-                    assert!(
-                        reth_chain_spec
-                            .fork(Hardfork::Hekla)
-                            .active_at_block(block_num),
-                        "evm fork is not active, please update the chain spec"
-                    );
-                }
-                SpecId::ONTAKE => {
-                    assert!(
-                        reth_chain_spec
-                            .fork(Hardfork::Ontake)
-                            .active_at_block(block_num),
-                        "evm fork is not active, please update the chain spec"
-                    );
-                }
-                _ => unimplemented!(),
+                .is_ontake_active(block_num, block_timestamp);
+            if ontake_active {
+                assert!(
+                    reth_chain_spec
+                        .fork(Hardfork::Hekla)
+                        .active_at_block(block_num),
+                    "evm fork is not active, please update the chain spec"
+                );
+            } else {
+                assert!(
+                    reth_chain_spec
+                        .fork(Hardfork::Ontake)
+                        .active_at_block(block_num),
+                    "evm fork is not active, please update the chain spec"
+                );
             }
         }
 

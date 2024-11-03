@@ -81,24 +81,19 @@ pub async fn prepare_taiko_chain_input(
         .first()
         .ok_or_else(|| RaikoError::Preflight("No anchor tx in the block".to_owned()))?;
 
-    // get anchor block num and state root
-    let fork = taiko_chain_spec.active_fork(block.number, block.timestamp)?;
-    let (anchor_block_height, anchor_state_root) = match fork {
-        SpecId::ONTAKE => {
-            let anchor_call = decode_anchor_ontake(anchor_tx.input())?;
-            (anchor_call._anchorBlockId, anchor_call._anchorStateRoot)
-        }
-        _ => {
-            let anchor_call = decode_anchor(anchor_tx.input())?;
-            (anchor_call.l1BlockId, anchor_call.l1StateRoot)
-        }
+    let ontake_active = taiko_chain_spec.is_ontake_active(block.number, block.timestamp);
+
+    let (anchor_block_height, anchor_state_root) = if ontake_active {
+        let anchor_call = decode_anchor_ontake(anchor_tx.input())?;
+        (anchor_call._anchorBlockId, anchor_call._anchorStateRoot)
+    } else {
+        let anchor_call = decode_anchor(anchor_tx.input())?;
+        (anchor_call.l1BlockId, anchor_call.l1StateRoot)
     };
 
     // // Get the L1 block in which the L2 block was included so we can fetch the DA data.
     // // Also get the L1 state block header so that we can prove the L1 state root.
     let provider_l1 = RpcBlockDataProvider::new(&l1_chain_spec.rpc, block_number)?;
-
-    info!("current taiko chain fork: {fork:?}");
 
     let (l1_inclusion_block_number, proposal_tx, block_proposed) =
         if let Some(l1_block_number) = l1_inclusion_block_number {
@@ -108,7 +103,7 @@ pub async fn prepare_taiko_chain_input(
                 taiko_chain_spec.clone(),
                 l1_block_number,
                 block_number,
-                fork,
+                ontake_active,
             )
             .await?
         } else {
@@ -118,7 +113,7 @@ pub async fn prepare_taiko_chain_input(
                 taiko_chain_spec.clone(),
                 anchor_block_height,
                 block_number,
-                fork,
+                ontake_active,
             )
             .await?
         };
@@ -150,26 +145,23 @@ pub async fn prepare_taiko_chain_input(
         )
         .await?
     } else {
-        match fork {
-            SpecId::ONTAKE => {
-                // Get the tx list data directly from the propose block CalldataTxList event
-                let (_, CalldataTxList { txList, .. }) = get_calldata_txlist_event(
-                    provider_l1.provider(),
-                    taiko_chain_spec.clone(),
-                    l1_inclusion_block_hash,
-                    block_number,
-                )
-                .await?;
-                (txList.to_vec(), None, None)
-            }
-            _ => {
-                // Get the tx list data directly from the propose transaction data
-                let proposeBlockCall { txList, .. } =
-                    proposeBlockCall::abi_decode(&proposal_tx.input, false).map_err(|_| {
-                        RaikoError::Preflight("Could not decode proposeBlockCall".to_owned())
-                    })?;
-                (txList.to_vec(), None, None)
-            }
+        if ontake_active {
+            // Get the tx list data directly from the propose block CalldataTxList event
+            let (_, CalldataTxList { txList, .. }) = get_calldata_txlist_event(
+                provider_l1.provider(),
+                taiko_chain_spec.clone(),
+                l1_inclusion_block_hash,
+                block_number,
+            )
+            .await?;
+            (txList.to_vec(), None, None)
+        } else {
+            // Get the tx list data directly from the propose transaction data
+            let proposeBlockCall { txList, .. } =
+                proposeBlockCall::abi_decode(&proposal_tx.input, false).map_err(|_| {
+                    RaikoError::Preflight("Could not decode proposeBlockCall".to_owned())
+                })?;
+            (txList.to_vec(), None, None)
         }
     };
 
@@ -299,7 +291,7 @@ pub async fn filter_block_proposed_event(
     chain_spec: ChainSpec,
     filter_condition: EventFilterConditioin,
     l2_block_number: u64,
-    fork: SpecId,
+    ontake_active: bool,
 ) -> Result<(u64, AlloyRpcTransaction, BlockProposedFork)> {
     // Get the address that emitted the event
     let Some(l1_address) = chain_spec.l1_contract else {
@@ -307,9 +299,10 @@ pub async fn filter_block_proposed_event(
     };
 
     // Get the event signature (value can differ between chains)
-    let event_signature = match fork {
-        SpecId::ONTAKE => BlockProposedV2::SIGNATURE_HASH,
-        _ => BlockProposed::SIGNATURE_HASH,
+    let event_signature = if ontake_active {
+        BlockProposedV2::SIGNATURE_HASH
+    } else {
+        BlockProposed::SIGNATURE_HASH
     };
     // Setup the filter to get the relevant events
     let logs = filter_blockchain_event(provider, || match filter_condition {
@@ -340,17 +333,14 @@ pub async fn filter_block_proposed_event(
         ) else {
             bail!("Could not create log")
         };
-        let (block_id, block_propose_event) = match fork {
-            SpecId::ONTAKE => {
-                let event = BlockProposedV2::decode_log(&log_struct, false)
-                    .map_err(|_| RaikoError::Anyhow(anyhow!("Could not decode log")))?;
-                (event.blockId, BlockProposedFork::Ontake(event.data))
-            }
-            _ => {
-                let event = BlockProposed::decode_log(&log_struct, false)
-                    .map_err(|_| RaikoError::Anyhow(anyhow!("Could not decode log")))?;
-                (event.blockId, BlockProposedFork::Hekla(event.data))
-            }
+        let (block_id, block_propose_event) = if ontake_active {
+            let event = BlockProposedV2::decode_log(&log_struct, false)
+                .map_err(|_| RaikoError::Anyhow(anyhow!("Could not decode log")))?;
+            (event.blockId, BlockProposedFork::Ontake(event.data))
+        } else {
+            let event = BlockProposed::decode_log(&log_struct, false)
+                .map_err(|_| RaikoError::Anyhow(anyhow!("Could not decode log")))?;
+            (event.blockId, BlockProposedFork::Hekla(event.data))
         };
 
         if block_id == raiko_lib::primitives::U256::from(l2_block_number) {
@@ -376,14 +366,14 @@ pub async fn _get_block_proposed_event_by_hash(
     chain_spec: ChainSpec,
     l1_inclusion_block_hash: B256,
     l2_block_number: u64,
-    fork: SpecId,
+    ontake_active: bool,
 ) -> Result<(u64, AlloyRpcTransaction, BlockProposedFork)> {
     filter_block_proposed_event(
         provider,
         chain_spec,
         EventFilterConditioin::Hash(l1_inclusion_block_hash),
         l2_block_number,
-        fork,
+        ontake_active,
     )
     .await
 }
@@ -393,14 +383,14 @@ pub async fn get_block_proposed_event_by_height(
     chain_spec: ChainSpec,
     l1_inclusion_block_number: u64,
     l2_block_number: u64,
-    fork: SpecId,
+    ontake_active: bool,
 ) -> Result<(u64, AlloyRpcTransaction, BlockProposedFork)> {
     filter_block_proposed_event(
         provider,
         chain_spec,
         EventFilterConditioin::Height(l1_inclusion_block_number),
         l2_block_number,
-        fork,
+        ontake_active,
     )
     .await
 }
@@ -410,14 +400,14 @@ pub async fn get_block_proposed_event_by_traversal(
     chain_spec: ChainSpec,
     l1_anchor_block_number: u64,
     l2_block_number: u64,
-    fork: SpecId,
+    ontake_active: bool,
 ) -> Result<(u64, AlloyRpcTransaction, BlockProposedFork)> {
     filter_block_proposed_event(
         provider,
         chain_spec,
         EventFilterConditioin::Range((l1_anchor_block_number + 1, l1_anchor_block_number + 65)),
         l2_block_number,
-        fork,
+        ontake_active,
     )
     .await
 }
