@@ -96,6 +96,9 @@ pub async fn prepare_taiko_chain_input(
     // // Also get the L1 state block header so that we can prove the L1 state root.
     let provider_l1 = RpcBlockDataProvider::new(&l1_chain_spec.rpc, block_number)?;
 
+    let l1_block_number = provider_l1.provider().get_block_number().await?;
+    info!("Current L1 block number: {l1_block_number}");
+
     let (l1_inclusion_block_number, proposal_tx, block_proposed) =
         if let Some(l1_block_number) = l1_inclusion_block_number {
             // Get the block proposal data
@@ -108,12 +111,13 @@ pub async fn prepare_taiko_chain_input(
             )
             .await?
         } else {
-            // traversal next 64 blocks to get proposal data
+            // traversal next blocks to get proposal data
             get_block_proposed_event_by_traversal(
                 provider_l1.provider(),
                 taiko_chain_spec.clone(),
                 anchor_block_height,
                 block_number,
+                l1_block_number,
                 ontake_active,
             )
             .await?
@@ -403,12 +407,16 @@ pub async fn get_block_proposed_event_by_traversal(
     chain_spec: ChainSpec,
     l1_anchor_block_number: u64,
     l2_block_number: u64,
+    l1_block_number: u64,
     ontake_active: bool,
 ) -> Result<(u64, AlloyRpcTransaction, BlockProposedFork)> {
     filter_block_proposed_event(
         provider,
         chain_spec,
-        EventFilterConditioin::Range((l1_anchor_block_number + 1, l1_anchor_block_number + 65)),
+        EventFilterConditioin::Range((
+            l1_anchor_block_number + 1,
+            std::cmp::min(l1_anchor_block_number + 65, l1_block_number),
+        )),
         l2_block_number,
         ontake_active,
     )
