@@ -96,7 +96,12 @@ pub async fn prepare_taiko_chain_input(
     // // Also get the L1 state block header so that we can prove the L1 state root.
     let provider_l1 = RpcBlockDataProvider::new(&l1_chain_spec.rpc, block_number)?;
 
-    let l1_block_number = provider_l1.provider().get_block_number().await?;
+    let l1_block_number = provider_l1
+        .provider()
+        .get_block_number()
+        .await
+        .map_err(|e| anyhow::anyhow!("Failed to get L1 block number: {}", e).into())?;
+
     info!("Current L1 block number: {l1_block_number}");
 
     let (l1_inclusion_block_number, proposal_tx, block_proposed) =
