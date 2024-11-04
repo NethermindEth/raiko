@@ -99,7 +99,7 @@ pub async fn prepare_taiko_chain_input(
         .provider()
         .get_block_number()
         .await
-        .map_err(|e| anyhow::anyhow!("Failed to get L1 block number: {}", e).into())?;
+        .map_err(|e| RaikoError::Preflight(format!("Failed to get L1 block number: {}", e)))?;
 
     info!("Current L1 block number: {l1_block_number}");
 
