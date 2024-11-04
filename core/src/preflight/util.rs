@@ -22,7 +22,6 @@ use raiko_lib::{
 };
 use reth_evm_ethereum::taiko::{decode_anchor, decode_anchor_ontake};
 use reth_primitives::Block;
-use reth_revm::primitives::SpecId;
 use serde::{Deserialize, Serialize};
 use tracing::{debug, error, info, warn};
 
