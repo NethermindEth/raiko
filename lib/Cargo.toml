@@ -8,6 +8,7 @@ edition = "2021"
 reth-primitives = { workspace = true }
 reth-evm-ethereum = { workspace = true }
 reth-evm = { workspace = true }
+reth-revm = { workspace = true }
 reth-chainspec = { workspace = true }
 reth-ethereum-forks = { workspace = true }
 # alloy
