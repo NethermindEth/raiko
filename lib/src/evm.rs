@@ -32,7 +32,7 @@ impl CustomEthEvmConfig {
     {
         let spec_id = handler.cfg.spec_id;
         handler.pre_execution.load_precompiles = Arc::new(move || {
-            let mut precompiles = ContextPrecompiles::new(PrecompileSpecId::from_spec_id(spec_id));
+            let mut precompiles: ContextPrecompiles<DB> = ContextPrecompiles::new(PrecompileSpecId::from_spec_id(spec_id));
             precompiles.extend(secp256r1::precompiles());
             precompiles
         });
