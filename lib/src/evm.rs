@@ -14,7 +14,7 @@ use reth_revm::{
     precompile::{PrecompileSpecId},
     ContextPrecompiles,
 };
-use reth_primitives::revm_precompile::secp256r1;
+use revm_precompile::secp256r1;
 
 #[derive(Debug, Clone, Copy, Default)]
 #[non_exhaustive]
