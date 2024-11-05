@@ -11,9 +11,10 @@ use reth_revm::{
     Database, EvmBuilder,
     taiko::handler_register,
     handler::register::EvmHandler,
-    precompile::{PrecompileSpecId, secp256r1},
+    precompile::{PrecompileSpecId},
     ContextPrecompiles,
 };
+use revm_precompile::secp256r1;
 
 #[derive(Debug, Clone, Copy, Default)]
 #[non_exhaustive]
