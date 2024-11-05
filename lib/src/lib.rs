@@ -26,6 +26,7 @@ pub mod primitives;
 pub mod protocol_instance;
 pub mod prover;
 pub mod utils;
+pub mod evm;
 
 #[cfg(not(target_os = "zkvm"))]
 mod time {

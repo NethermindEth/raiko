@@ -9,8 +9,8 @@ use crate::{
     guest_mem_forget,
     input::GuestInput,
     mem_db::{AccountState, DbAccount, MemDb},
+    evm::CustomEthEvmConfig,
     CycleTracker,
-    CustomEthEvmConfig,
 };
 use once_cell::sync::Lazy;
 use reth_ethereum_forks::ForkCondition;
