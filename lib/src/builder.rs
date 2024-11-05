@@ -176,7 +176,7 @@ impl<DB: Database<Error = ProviderError> + DatabaseCommit + OptimisticDatabase>
             .ok_or(BlockValidationError::SenderRecoveryError)?;
 
         // Execute transactions
-        let executor = EthExecutorProvider::<CustomEthEvmConfig>::ethereum(reth_chain_spec.clone())
+        let executor = EthExecutorProvider::new(reth_chain_spec.clone(), CustomEthEvmConfig::default())
             .eth_executor(self.db.take().unwrap())
             .taiko_data(TaikoData {
                 l1_header: self.input.taiko.l1_header.clone(),
