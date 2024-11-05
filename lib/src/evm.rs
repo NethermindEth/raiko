@@ -7,7 +7,7 @@ use reth_primitives::{
     revm_primitives::{AnalysisKind, CfgEnvWithHandlerCfg, TxEnv},
     Address, Head, Header, TransactionSigned, U256,
 };
-use reth_revm::{
+use reth_evm::{
     Database, EvmBuilder,
     taiko::handler_register,
     handler::register::EvmHandler,
@@ -82,7 +82,7 @@ impl ConfigureEvm for CustomEthEvmConfig {
         &self,
         db: DB,
         is_taiko: bool,
-    ) -> reth_revm::Evm<'a, Self::DefaultExternalContext<'a>, DB> {
+    ) -> reth_evm::Evm<'a, Self::DefaultExternalContext<'a>, DB> {
         let builder = EvmBuilder::default().with_db(db);
         if is_taiko {
             builder.append_handler_register(handler_register::taiko_handle_register).build()
