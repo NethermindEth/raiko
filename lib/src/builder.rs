@@ -66,6 +66,43 @@ pub static SURGE_DEV: Lazy<Arc<RethChainSpec>> = Lazy::new(|| {
     .into()
 });
 
+pub static SURGE_DEV2: Lazy<Arc<RethChainSpec>> = Lazy::new(|| {
+    RethChainSpec {
+        chain: DEV2TODO_L2_CHAIN_ID.into(),
+        genesis_hash: None,
+        paris_block_and_final_difficulty: None,
+        hardforks: BTreeMap::from([
+            (Hardfork::Frontier, ForkCondition::Block(0)),
+            (Hardfork::Homestead, ForkCondition::Block(0)),
+            (Hardfork::Dao, ForkCondition::Block(0)),
+            (Hardfork::Tangerine, ForkCondition::Block(0)),
+            (Hardfork::SpuriousDragon, ForkCondition::Block(0)),
+            (Hardfork::Byzantium, ForkCondition::Block(0)),
+            (Hardfork::Constantinople, ForkCondition::Block(0)),
+            (Hardfork::Petersburg, ForkCondition::Block(0)),
+            (Hardfork::Istanbul, ForkCondition::Block(0)),
+            (Hardfork::Berlin, ForkCondition::Block(0)),
+            (Hardfork::London, ForkCondition::Block(0)),
+            (
+                Hardfork::Paris,
+                ForkCondition::TTD { fork_block: None, total_difficulty: U256::from(0) },
+            ),
+            (Hardfork::Shanghai, ForkCondition::Timestamp(0)),
+            (Hardfork::Hekla, ForkCondition::Block(0)),
+            (
+                Hardfork::Ontake,
+                ForkCondition::Block(
+                    std::env::var("SURGE_DEV2_ONTAKE_HEIGHT")
+                        .map_or(1, |h| h.parse().unwrap_or(1)),
+                ),
+            ),
+        ]),
+        deposit_contract: None,
+        ..Default::default()
+    }
+    .into()
+});
+
 pub fn calculate_block_header(input: &GuestInput) -> Header {
     let cycle_tracker = CycleTracker::start("initialize_database");
     let db = create_mem_db(&mut input.clone()).unwrap();
@@ -134,6 +171,7 @@ impl<DB: Database<Error = ProviderError> + DatabaseCommit + OptimisticDatabase>
             }
             "holesky" => HOLESKY.clone(),
             "surge_dev" => SURGE_DEV.clone(),
+            "surge_dev2" => SURGE_DEV2.clone(),
             _ => unimplemented!(),
         };
 

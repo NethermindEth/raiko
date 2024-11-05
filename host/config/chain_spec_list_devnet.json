@@ -73,5 +73,80 @@
         "genesis_time": 0,
         "seconds_per_slot": 1,
         "is_taiko": true
+    },
+    {
+        "name": "surge_dev2_l1",
+        "chain_id": "DEV2TODO_L1_CHAIN_ID",
+        "max_spec_id": "CANCUN",
+        "hard_forks": {
+            "FRONTIER": {
+                "Block": 0
+            },
+            "SHANGHAI": {
+                "Timestamp": 0
+            },
+            "CANCUN": {
+                "Timestamp": 0
+            }
+        },
+        "eip_1559_constants": {
+            "base_fee_change_denominator": "0x8",
+            "base_fee_max_increase_denominator": "0x8",
+            "base_fee_max_decrease_denominator": "0x8",
+            "elasticity_multiplier": "0x2"
+        },
+        "l1_contract": null,
+        "l2_contract": null,
+        "rpc": "DEV2TODO_L1_RPC",
+        "beacon_rpc": "DEV2TODO_L1_BEACON_RPC",
+        "verifier_address_forks": {
+            "FRONTIER": {
+                "SGX": null,
+                "SP1": null,
+                "RISC0": null
+            }
+        },
+        "genesis_time": 1728872400,
+        "seconds_per_slot": 12,
+        "is_taiko": false
+    },
+    {
+        "name": "surge_dev2",
+        "chain_id": "DEV2TODO_L2_CHAIN_ID",
+        "max_spec_id": "ONTAKE",
+        "hard_forks": {
+            "HEKLA": {
+                "Block": 0
+            },
+            "ONTAKE": {
+                "Block": 1
+            },
+            "CANCUN": "TBD"
+        },
+        "eip_1559_constants": {
+            "base_fee_change_denominator": "0x8",
+            "base_fee_max_increase_denominator": "0x8",
+            "base_fee_max_decrease_denominator": "0x8",
+            "elasticity_multiplier": "0x2"
+        },
+        "l1_contract": "DEV2TODO_L1_CONTRACT",
+        "l2_contract": "DEV2TODO_L2_CONTRACT",
+        "rpc": "DEV2TODO_L2_RPC",
+        "beacon_rpc": null,
+        "verifier_address_forks": {
+            "HEKLA": {
+                "SGX": "DEV2TODO_L2_SGX_VERIFIER_ADDRESS",
+                "SP1": "0x0000000000000000000000000000000000000000",
+                "RISC0": "0x0000000000000000000000000000000000000000"
+            },
+            "ONTAKE": {
+                "SGX": "DEV2TODO_L2_SGX_VERIFIER_ADDRESS",
+                "SP1": "0x0000000000000000000000000000000000000000",
+                "RISC0": "0x0000000000000000000000000000000000000000"
+            }
+        },
+        "genesis_time": 0,
+        "seconds_per_slot": 1,
+        "is_taiko": true
     }
 ]
