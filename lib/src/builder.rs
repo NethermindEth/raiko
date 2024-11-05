@@ -10,7 +10,7 @@ use crate::{
     input::GuestInput,
     mem_db::{AccountState, DbAccount, MemDb},
     CycleTracker,
-    CustomExecutorProvider,
+    CustomEthEvmConfig,
 };
 use once_cell::sync::Lazy;
 use reth_ethereum_forks::ForkCondition;
