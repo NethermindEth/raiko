@@ -39,8 +39,8 @@ raiko-core = { path = "./core" }
 raiko-tasks = { path = "./taskdb" }
 
 # revm
-revm-precompile = { git = "https://github.com/taikoxyz/revm.git", branch = "v36-taiko", features = ["secp256r1"] }
-revm-primitives = { git = "https://github.com/taikoxyz/revm.git", branch = "v36-taiko", features = ["secp256r1"] }
+revm-precompile = { git = "https://github.com/taikoxyz/revm.git", branch = "v36-taiko-reth", features = ["secp256r1"] }
+revm-primitives = { git = "https://github.com/taikoxyz/revm.git", branch = "v36-taiko-reth", features = ["secp256r1"] }
 
 # reth
 reth-primitives = { git = "https://github.com/taikoxyz/taiko-reth.git", branch = "v1.0.0-rc.2-taiko", default-features = false, features = [
@@ -194,9 +194,9 @@ pathdiff = "0.2.1"
 dotenv = "0.15.0"
 
 [patch.crates-io]
-revm = { git = "https://github.com/taikoxyz/revm.git", branch = "v36-taiko" }
-revm-primitives = { git = "https://github.com/taikoxyz/revm.git", branch = "v36-taiko" }
-revm-precompile = { git = "https://github.com/taikoxyz/revm.git", branch = "v36-taiko" }
+revm = { git = "https://github.com/taikoxyz/revm.git", branch = "v36-taiko-reth" }
+revm-primitives = { git = "https://github.com/taikoxyz/revm.git", branch = "v36-taiko-reth" }
+revm-precompile = { git = "https://github.com/taikoxyz/revm.git", branch = "v36-taiko-reth" }
 secp256k1 = { git = "https://github.com/CeciliaZ030/rust-secp256k1", branch = "sp1-patch" }
 blst = { git = "https://github.com/CeciliaZ030/blst.git", branch = "v0.3.12-serialize" }
 alloy-serde = { git = "https://github.com/CeciliaZ030/alloy.git", branch = "v0.1.4-fix" }
