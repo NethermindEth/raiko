@@ -5,7 +5,7 @@ edition = "2021"
 
 [dependencies]
 # revm
-revm-primitives = { workspace = true, features = ["secp256r1"] }
+revm-precompile = { workspace = true, features = ["secp256r1"] }
 # reth
 reth-primitives = { workspace = true }
 reth-evm-ethereum = { workspace = true }

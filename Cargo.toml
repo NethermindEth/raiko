@@ -40,7 +40,7 @@ raiko-tasks = { path = "./taskdb" }
 
 # revm
 revm-precompile = { git = "https://github.com/taikoxyz/revm.git", branch = "v36-taiko-reth", features = ["secp256r1"] }
-revm-primitives = { git = "https://github.com/taikoxyz/revm.git", branch = "v36-taiko-reth", features = ["secp256r1"] }
+revm-primitives = { git = "https://github.com/taikoxyz/revm.git", branch = "v36-taiko-reth" }
 
 # reth
 reth-primitives = { git = "https://github.com/taikoxyz/taiko-reth.git", branch = "v1.0.0-rc.2-taiko", default-features = false, features = [
