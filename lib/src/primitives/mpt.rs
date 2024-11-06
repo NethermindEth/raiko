@@ -918,46 +918,61 @@ pub fn parse_proof(proof: &[impl AsRef<[u8]>]) -> Result<Vec<MptNode>> {
 /// Creates a Merkle Patricia trie from an EIP-1186 proof.
 /// For inclusion proofs the returned trie contains exactly one leaf with the value.
 pub fn mpt_from_proof(proof_nodes: &[MptNode]) -> Result<MptNode> {
+    info!("Creating MPT from proof with {} nodes", proof_nodes.len());
+    let len = proof_nodes.len();
     let mut next: Option<MptNode> = None;
     for (i, node) in proof_nodes.iter().enumerate().rev() {
+        info!("Processing node {}/{} of type {:?}", i, len, node.as_data());
         // there is nothing to replace for the last node
         let Some(replacement) = next else {
+            info!("No replacement needed for last node {}/{}", i, len);
             next = Some(node.clone());
             continue;
         };
 
         // the next node must have a digest reference
         let MptNodeReference::Digest(ref child_ref) = replacement.reference() else {
+            info!("Node {}/{} not referenced by hash", i + 1, len);
             panic!("node {} in proof is not referenced by hash", i + 1);
         };
+        info!("Found child reference digest for node {}/{}", i, len);
+        
         // find the child that references the next node
         let resolved: MptNode = match node.as_data().clone() {
             MptNodeData::Branch(mut children) => {
+                info!("Processing branch node {}/{} with {} children", i, len, children.len());
                 if let Some(child) = children.iter_mut().flatten().find(
                     |child| matches!(child.as_data(), MptNodeData::Digest(d) if d == child_ref),
                 ) {
+                    info!("Found matching child in branch node {}/{}", i, len);
                     *child = Box::new(replacement);
                 } else {
+                    info!("No matching child found in branch node {}/{}", i, len);
                     panic!("node {i} does not reference the successor");
                 }
                 MptNodeData::Branch(children).into()
             }
             MptNodeData::Extension(prefix, child) => {
+                info!("Processing extension node {}/{} with prefix length {}", i, len, prefix.len());
                 assert!(
                     matches!(child.as_data(), MptNodeData::Digest(d) if d == child_ref),
                     "node {i} does not reference the successor"
                 );
+                info!("Extension node {}/{} references match confirmed", i, len);
                 MptNodeData::Extension(prefix, Box::new(replacement)).into()
             }
             MptNodeData::Null | MptNodeData::Leaf(_, _) | MptNodeData::Digest(_) => {
+                info!("Invalid node type encountered at node {}/{}", i, len);
                 panic!("node {i} has no children to replace");
             }
         };
 
+        info!("Successfully resolved node {}/{}", i, len);
         next = Some(resolved);
     }
 
     // the last node in the proof should be the root
+    info!("MPT construction complete");
     Ok(next.unwrap_or_default())
 }
 
