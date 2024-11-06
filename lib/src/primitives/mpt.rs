@@ -28,6 +28,7 @@ use reth_primitives::revm_primitives::{Address, HashMap};
 use rlp::{Decodable, DecoderError, Prototype, Rlp};
 use serde::{Deserialize, Serialize};
 use thiserror::Error as ThisError;
+use tracing::{debug, info, trace};
 
 pub type StorageEntry = (MptNode, Vec<U256>);
 
@@ -1035,54 +1036,86 @@ pub fn proofs_to_tries(
     parent_proofs: HashMap<Address, EIP1186AccountProofResponse>,
     proofs: HashMap<Address, EIP1186AccountProofResponse>,
 ) -> Result<(MptNode, HashMap<Address, StorageEntry>)> {
+    // Log start of process
+    info!("Starting proofs_to_tries conversion with state root: {}", state_root);
+    
     // if no addresses are provided, return the trie only consisting of the state root
     if parent_proofs.is_empty() {
+        info!("No parent proofs provided, returning empty trie with state root");
         return Ok((node_from_digest(state_root), HashMap::new()));
     }
 
     let mut storage: HashMap<Address, StorageEntry> = HashMap::with_capacity(parent_proofs.len());
+    info!("Processing {} parent proofs", parent_proofs.len());
 
     let mut state_nodes = HashMap::new();
     let mut state_root_node = MptNode::default();
+    
+    // Process each parent proof
     for (address, proof) in parent_proofs {
-        let proof_nodes = parse_proof(&proof.account_proof).unwrap();
-        mpt_from_proof(&proof_nodes).unwrap();
+        info!("Processing parent proof for address: {}", address);
+        
+        let proof_nodes = parse_proof(&proof.account_proof)
+            .with_context(|| format!("Failed to parse account proof for address {}", address))?;
+        
+        info!("Parsed {} proof nodes for address {}", proof_nodes.len(), address);
+        
+        mpt_from_proof(&proof_nodes)
+            .with_context(|| format!("Failed to create MPT from proof for address {}", address))?;
 
         // the first node in the proof is the root
         if let Some(node) = proof_nodes.first() {
+            info!("Using first proof node as state root node for address {}", address);
             state_root_node = node.clone();
         }
 
+        // Store all nodes in state_nodes map
         for node in proof_nodes {
-            state_nodes.insert(node.reference(), node);
+            let ref_key = node.reference();
+            info!("Adding state node with reference: {:?}", ref_key);
+            state_nodes.insert(ref_key, node);
         }
 
-        let fini_proofs = proofs.get(&address).unwrap();
+        let fini_proofs = proofs.get(&address)
+            .with_context(|| format!("No final proof found for address {}", address))?;
 
+        info!("Adding orphaned leafs for address {}", address);
         // assure that addresses can be deleted from the state trie
         add_orphaned_leafs(address, &fini_proofs.account_proof, &mut state_nodes)?;
 
         // if no slots are provided, return the trie only consisting of the storage root
         let storage_root = proof.storage_hash;
         if proof.storage_proof.is_empty() {
+            info!("No storage proofs for address {}, using empty storage root", address);
             let storage_root_node = node_from_digest(storage_root);
             storage.insert(address, (storage_root_node, vec![]));
             continue;
         }
 
+        info!("Processing {} storage proofs for address {}", proof.storage_proof.len(), address);
         let mut storage_nodes = HashMap::new();
         let mut storage_root_node = MptNode::default();
-        for storage_proof in &proof.storage_proof {
-            let proof_nodes = parse_proof(&storage_proof.proof).unwrap();
-            mpt_from_proof(&proof_nodes).unwrap();
+        
+        // Process each storage proof
+        for (i, storage_proof) in proof.storage_proof.iter().enumerate() {
+            info!("Processing storage proof {} for address {}", i, address);
+            
+            let proof_nodes = parse_proof(&storage_proof.proof)
+                .with_context(|| format!("Failed to parse storage proof {} for address {}", i, address))?;
+            
+            mpt_from_proof(&proof_nodes)
+                .with_context(|| format!("Failed to create MPT from storage proof {} for address {}", i, address))?;
 
             // the first node in the proof is the root
             if let Some(node) = proof_nodes.first() {
+                info!("Using first node as storage root for proof {} address {}", i, address);
                 storage_root_node = node.clone();
             }
 
             for node in proof_nodes {
-                storage_nodes.insert(node.reference(), node);
+                let ref_key = node.reference();
+                info!("Adding storage node with reference: {:?}", ref_key);
+                storage_nodes.insert(ref_key, node);
             }
         }
 
