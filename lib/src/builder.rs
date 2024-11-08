@@ -147,14 +147,14 @@ impl<DB: Database<Error = ProviderError> + DatabaseCommit + OptimisticDatabase>
             if ontake_active {
                 assert!(
                     reth_chain_spec
-                        .fork(Hardfork::Hekla)
+                        .fork(Hardfork::Ontake)
                         .active_at_block(block_num),
                     "evm fork is not active, please update the chain spec"
                 );
             } else {
                 assert!(
                     reth_chain_spec
-                        .fork(Hardfork::Ontake)
+                        .fork(Hardfork::Hekla)
                         .active_at_block(block_num),
                     "evm fork is not active, please update the chain spec"
                 );
