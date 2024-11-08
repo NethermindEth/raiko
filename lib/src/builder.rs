@@ -31,7 +31,7 @@ use tracing::{debug, error};
 
 pub static SURGE_DEV: Lazy<Arc<RethChainSpec>> = Lazy::new(|| {
     RethChainSpec {
-        chain: 167000.into(),
+        chain: 763374.into(),
         genesis_hash: None,
         paris_block_and_final_difficulty: None,
         hardforks: BTreeMap::from([
