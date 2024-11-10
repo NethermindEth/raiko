@@ -104,14 +104,19 @@ impl Prover for Risc0Prover {
                     .map_err(|e| ProverError::GuestError(e.to_string()))
             } else {
                 warn!("proof is not in snark mode, please check.");
-                let (_, stark_receipt) = result.clone().unwrap();
+                let (stark_uuid, stark_receipt) = result.clone().unwrap();
+                bonsai::bonsai_stark_to_snark(stark_uuid, stark_receipt, output.hash)
+                    .await
+                    .map(|r0_response| r0_response.into())
+                    .map_err(|e| ProverError::GuestError(e.to_string()))
+                /*let (_, stark_receipt) = result.clone().unwrap();
                 Ok(Risc0Response {
                     proof: stark_receipt.journal.encode_hex_with_prefix(),
                     receipt: serde_json::to_string(&receipt).unwrap(),
                     uuid,
                     input: output.hash,
                 }
-                .into())
+                .into())*/
             }
         } else {
             Err(ProverError::GuestError(
