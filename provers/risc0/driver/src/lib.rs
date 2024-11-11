@@ -18,7 +18,7 @@ use raiko_lib::{
 };
 use risc0_zkvm::{
     compute_image_id, default_prover, serde::to_vec, sha::Digestible, ExecutorEnv, ProverOpts,
-    Receipt,
+    Receipt, InnerReceipt,
 };
 use serde::{Deserialize, Serialize};
 use serde_with::serde_as;
