@@ -110,7 +110,7 @@ impl Prover for Risc0Prover {
                 let seal_bytes = receipt.get_seal_bytes();
 
                 let seal = risc0_zkvm::stark_to_snark(&seal_bytes).unwrap();
-                info!("Snark Seal: {}", hex::encode(&seal));
+                info!("Snark Seal");
                 
                 //TODO verification
                 panic!("Verification not implemented");
