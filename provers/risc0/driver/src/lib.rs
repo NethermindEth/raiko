@@ -105,10 +105,16 @@ impl Prover for Risc0Prover {
             } else {
                 warn!("proof is not in snark mode, please check.");
                 let (stark_uuid, stark_receipt) = result.clone().unwrap();
-                bonsai::bonsai_stark_to_snark(stark_uuid, stark_receipt, output.hash)
-                    .await
-                    .map(|r0_response| r0_response.into())
-                    .map_err(|e| ProverError::GuestError(e.to_string()))
+                let succinct_receipt = stark_receipt.inner.succinct().unwrap();
+                let receipt = risc0_zkvm::recursion::identity_p254(&succinct_receipt).unwrap();
+                let seal_bytes = receipt.get_seal_bytes();
+
+                let seal = risc0_zkvm::stark_to_snark(&seal_bytes).unwrap();
+                tracing_info!("Snark Seal: {}", hex::encode(&seal));
+                
+                //TODO verification
+                panic!("Verification not implemented");
+        
                 /*let (_, stark_receipt) = result.clone().unwrap();
                 Ok(Risc0Response {
                     proof: stark_receipt.journal.encode_hex_with_prefix(),
