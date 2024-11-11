@@ -105,11 +105,29 @@ impl Prover for Risc0Prover {
             } else {
                 warn!("proof is not in snark mode, please check.");
                 let (stark_uuid, stark_receipt) = result.clone().unwrap();
-                let succinct_receipt = stark_receipt.inner.succinct().unwrap();
-                let receipt = risc0_zkvm::recursion::identity_p254(&succinct_receipt).unwrap();
-                let seal_bytes = receipt.get_seal_bytes();
+                match stark_receipt.inner {
+                    InnerReceipt::Succinct(_) => {
+                        info!("Succinct receipt");
+                    },
+                    InnerReceipt::Compressed(_) => {
+                        info!("Compressed receipt");
+                    },
+                    InnerReceipt::Groth16(_) => {
+                        info!("Groth16 receipt");
+                    },
+                    InnerReceipt::Fake => {
+                        info!("Fake receipt");
+                    },
+                    _ => {
+                        warn!("Unsupported receipt type");
+                    }
+                }
+                //let succinct_receipt = stark_receipt.inner.succinct().unwrap();
+                //let groth16_receipt = succinct_receipt.compress();
+                //let receipt = risc0_zkvm::recursion::identity_p254(&succinct_receipt).unwrap();
+                //let seal_bytes = receipt.get_seal_bytes();
 
-                let seal = risc0_zkvm::stark_to_snark(&seal_bytes).unwrap();
+                //let seal = risc0_zkvm::stark_to_snark(&seal_bytes).unwrap();
                 info!("Snark Seal");
                 
                 //TODO verification
