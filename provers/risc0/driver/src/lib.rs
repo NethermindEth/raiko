@@ -109,13 +109,13 @@ impl Prover for Risc0Prover {
                     InnerReceipt::Succinct(_) => {
                         info!("Succinct receipt");
                     },
-                    InnerReceipt::Compressed(_) => {
-                        info!("Compressed receipt");
+                    InnerReceipt::Composite(_) => {
+                        info!("Composite receipt");
                     },
                     InnerReceipt::Groth16(_) => {
                         info!("Groth16 receipt");
                     },
-                    InnerReceipt::Fake => {
+                    InnerReceipt::Fake(_) => {
                         info!("Fake receipt");
                     },
                     _ => {
