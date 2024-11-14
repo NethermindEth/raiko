@@ -439,6 +439,8 @@ pub async fn locally_verify_snark(
     
     info!("Validating SNARK uuid: {snark_uuid}");
 
+    let receipt = serde_json::to_string(&snark_receipt).unwrap();
+
     let enc_proof = verify_groth16_from_snark_receipt(image_id, snark_receipt)
         .await
         .map_err(|err| format!("Failed to verify SNARK: {err:?}"))?;
@@ -446,7 +448,7 @@ pub async fn locally_verify_snark(
     let snark_proof = format!("0x{}", hex::encode(enc_proof));
     Ok(Risc0Response {
         proof: snark_proof,
-        receipt: serde_json::to_string(&snark_receipt).unwrap(),
+        receipt,
         uuid: snark_uuid,
         input,
     })
