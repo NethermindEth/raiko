@@ -261,7 +261,7 @@ pub async fn verify_groth16_snark_impl(
         .await;
 
     if verify_call_res.is_ok() {
-        tracing_info!("SNARK verified successfully using {groth16_verifier_addr:?}! Result: {verify_call_res:?}");
+        tracing_info!("SNARK verified successfully using {groth16_verifier_addr:?}!");
     } else {
         tracing_err!("SNARK verification failed: {verify_call_res:?}!");
     }

@@ -103,7 +103,6 @@ impl Prover for Risc0Prover {
                     .map(|r0_response| r0_response.into())
                     .map_err(|e| ProverError::GuestError(e.to_string()))
             } else {
-                warn!("proof is not in snark mode, please check.");
                 let (snark_uuid, snark_receipt) = result.clone().unwrap();
                 match snark_receipt.inner {
                     InnerReceipt::Succinct(_) => {
@@ -122,26 +121,12 @@ impl Prover for Risc0Prover {
                         warn!("Unsupported receipt type");
                     }
                 }
-                //let succinct_receipt = stark_receipt.inner.succinct().unwrap();
-                //let groth16_receipt = succinct_receipt.compress();
-                //let receipt = risc0_zkvm::recursion::identity_p254(&succinct_receipt).unwrap();
-                //let seal_bytes = receipt.get_seal_bytes();
 
-                //let seal = risc0_zkvm::stark_to_snark(&seal_bytes).unwrap();
-                info!("Snark Seal");
                 bonsai::locally_verify_snark(snark_uuid, snark_receipt, output.hash)
                     .await
                     .map(|r0_response| r0_response.into())
                     .map_err(|e| ProverError::GuestError(e.to_string()))
 
-                /*let (_, stark_receipt) = result.clone().unwrap();
-                Ok(Risc0Response {
-                    proof: stark_receipt.journal.encode_hex_with_prefix(),
-                    receipt: serde_json::to_string(&receipt).unwrap(),
-                    uuid,
-                    input: output.hash,
-                }
-                .into())*/
             }
         } else {
             Err(ProverError::GuestError(

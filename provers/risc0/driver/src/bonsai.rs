@@ -322,60 +322,6 @@ pub async fn bonsai_stark_to_snark(
     })
 }
 
-/// Prove the given ELF locally with the given input and assumptions. The segments are
-/// stored in a temporary directory, to allow for proofs larger than the available memory.
-/*pub fn prove_locally(
-    segment_limit_po2: u32,
-    encoded_input: Vec<u32>,
-    elf: &[u8],
-    assumptions: Vec<impl Into<AssumptionReceipt>>,
-    profile: bool,
-) -> ProverResult<Receipt> {
-    debug!("Proving with segment_limit_po2 = {segment_limit_po2:?}");
-    debug!(
-        "Input size: {} words ( {} MB )",
-        encoded_input.len(),
-        encoded_input.len() * 4 / 1_000_000
-    );
-
-    info!("Running the prover...");
-    let session = {
-        let mut env_builder = ExecutorEnv::builder();
-        env_builder
-            .session_limit(None)
-            .segment_limit_po2(segment_limit_po2)
-            .write_slice(&encoded_input);
-
-        if profile {
-            info!("Profiling enabled.");
-            env_builder.enable_profiler("profile_r0_local.pb");
-        }
-
-        for assumption in assumptions {
-            env_builder.add_assumption(assumption);
-        }
-
-        let segment_dir = PathBuf::from("/tmp/risc0-cache");
-        if !segment_dir.exists() {
-            fs::create_dir(segment_dir.clone()).map_err(|e| ProverError::FileIo(e))?;
-        }
-        let env = env_builder
-            .segment_path(segment_dir)
-            .build()
-            .map_err(|e| ProverError::GuestError(e.to_string()))?;
-        let mut exec =
-            ExecutorImpl::from_elf(env, elf).map_err(|e| ProverError::GuestError(e.to_string()))?;
-
-        exec.run()
-            .map_err(|e| ProverError::GuestError(e.to_string()))?
-    };
-    let receipt = session
-        .prove()
-        .map_err(|e| ProverError::GuestError(e.to_string()))?
-        .receipt;
-    Ok(receipt)
-}*/
-
 pub fn prove_locally(
     segment_limit_po2: u32,
     encoded_input: Vec<u32>,
