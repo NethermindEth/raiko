@@ -104,8 +104,8 @@ impl Prover for Risc0Prover {
                     .map_err(|e| ProverError::GuestError(e.to_string()))
             } else {
                 warn!("proof is not in snark mode, please check.");
-                let (stark_uuid, stark_receipt) = result.clone().unwrap();
-                match stark_receipt.inner {
+                let (snark_uuid, snark_receipt) = result.clone().unwrap();
+                match snark_receipt.inner {
                     InnerReceipt::Succinct(_) => {
                         info!("Succinct receipt");
                     }
@@ -129,9 +129,10 @@ impl Prover for Risc0Prover {
 
                 //let seal = risc0_zkvm::stark_to_snark(&seal_bytes).unwrap();
                 info!("Snark Seal");
-
-                //TODO verification
-                panic!("Verification not implemented");
+                bonsai::locally_verify_snark(stark_uuid, stark_receipt, output.hash)
+                    .await
+                    .map(|r0_response| r0_response.into())
+                    .map_err(|e| ProverError::GuestError(e.to_string()))
 
                 /*let (_, stark_receipt) = result.clone().unwrap();
                 Ok(Risc0Response {

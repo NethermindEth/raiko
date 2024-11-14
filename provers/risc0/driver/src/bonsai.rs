@@ -430,6 +430,28 @@ pub fn prove_locally(
     Ok(receipt)
 }
 
+pub async fn locally_verify_snark(
+    snark_uuid: String,
+    snark_receipt: Receipt,
+    input: B256,
+) -> ProverResult<Risc0Response> {
+    let image_id = Digest::from(RISC0_GUEST_ID);
+    
+    info!("Validating SNARK uuid: {snark_uuid}");
+
+    let enc_proof = verify_groth16_from_snark_receipt(image_id, snark_receipt)
+        .await
+        .map_err(|err| format!("Failed to verify SNARK: {err:?}"))?;
+
+    let snark_proof = format!("0x{}", hex::encode(enc_proof));
+    Ok(Risc0Response {
+        proof: snark_proof,
+        receipt: serde_json::to_string(&snark_receipt).unwrap(),
+        uuid: snark_uuid,
+        input,
+    })
+}
+
 pub fn load_receipt<T: serde::de::DeserializeOwned>(
     file_name: &String,
 ) -> anyhow::Result<Option<(String, T)>> {
