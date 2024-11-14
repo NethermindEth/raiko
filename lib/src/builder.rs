@@ -11,12 +11,13 @@ use crate::{
     mem_db::{AccountState, DbAccount, MemDb},
     CycleTracker,
 };
-use once_cell::sync::Lazy;
-use reth_ethereum_forks::ForkCondition;
 use anyhow::{bail, ensure, Result};
+use once_cell::sync::Lazy;
 use reth_chainspec::{
-    ChainSpecBuilder, ChainSpec as RethChainSpec, Hardfork, HOLESKY, MAINNET, TAIKO_A7, TAIKO_MAINNET,
+    ChainSpec as RethChainSpec, ChainSpecBuilder, Hardfork, HOLESKY, MAINNET, TAIKO_A7,
+    TAIKO_MAINNET,
 };
+use reth_ethereum_forks::ForkCondition;
 use reth_evm::execute::{BlockExecutionOutput, BlockValidationError, Executor, ProviderError};
 use reth_evm_ethereum::execute::{
     validate_block_post_execution, Consensus, EthBeaconConsensus, EthExecutorProvider,
@@ -48,15 +49,17 @@ pub static SURGE_DEV: Lazy<Arc<RethChainSpec>> = Lazy::new(|| {
             (Hardfork::London, ForkCondition::Block(0)),
             (
                 Hardfork::Paris,
-                ForkCondition::TTD { fork_block: None, total_difficulty: U256::from(0) },
+                ForkCondition::TTD {
+                    fork_block: None,
+                    total_difficulty: U256::from(0),
+                },
             ),
             (Hardfork::Shanghai, ForkCondition::Timestamp(0)),
             (Hardfork::Hekla, ForkCondition::Block(0)),
             (
                 Hardfork::Ontake,
                 ForkCondition::Block(
-                    std::env::var("SURGE_DEV_ONTAKE_HEIGHT")
-                        .map_or(1, |h| h.parse().unwrap_or(1)),
+                    std::env::var("SURGE_DEV_ONTAKE_HEIGHT").map_or(1, |h| h.parse().unwrap_or(1)),
                 ),
             ),
         ]),

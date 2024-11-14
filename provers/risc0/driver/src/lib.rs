@@ -17,8 +17,8 @@ use raiko_lib::{
     prover::{IdStore, IdWrite, Proof, ProofKey, Prover, ProverConfig, ProverError, ProverResult},
 };
 use risc0_zkvm::{
-    compute_image_id, default_prover, serde::to_vec, sha::Digestible, ExecutorEnv, ProverOpts,
-    Receipt, InnerReceipt,
+    compute_image_id, default_prover, serde::to_vec, sha::Digestible, ExecutorEnv, InnerReceipt,
+    ProverOpts, Receipt,
 };
 use serde::{Deserialize, Serialize};
 use serde_with::serde_as;
@@ -108,16 +108,16 @@ impl Prover for Risc0Prover {
                 match stark_receipt.inner {
                     InnerReceipt::Succinct(_) => {
                         info!("Succinct receipt");
-                    },
+                    }
                     InnerReceipt::Composite(_) => {
                         info!("Composite receipt");
-                    },
+                    }
                     InnerReceipt::Groth16(_) => {
                         info!("Groth16 receipt");
-                    },
+                    }
                     InnerReceipt::Fake(_) => {
                         info!("Fake receipt");
-                    },
+                    }
                     _ => {
                         warn!("Unsupported receipt type");
                     }
@@ -129,10 +129,10 @@ impl Prover for Risc0Prover {
 
                 //let seal = risc0_zkvm::stark_to_snark(&seal_bytes).unwrap();
                 info!("Snark Seal");
-                
+
                 //TODO verification
                 panic!("Verification not implemented");
-        
+
                 /*let (_, stark_receipt) = result.clone().unwrap();
                 Ok(Risc0Response {
                     proof: stark_receipt.journal.encode_hex_with_prefix(),
