@@ -129,7 +129,7 @@ impl Prover for Risc0Prover {
 
                 //let seal = risc0_zkvm::stark_to_snark(&seal_bytes).unwrap();
                 info!("Snark Seal");
-                bonsai::locally_verify_snark(stark_uuid, stark_receipt, output.hash)
+                bonsai::locally_verify_snark(snark_uuid, snark_receipt, output.hash)
                     .await
                     .map(|r0_response| r0_response.into())
                     .map_err(|e| ProverError::GuestError(e.to_string()))
