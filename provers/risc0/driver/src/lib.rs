@@ -70,7 +70,9 @@ impl Prover for Risc0Prover {
         id_store: Option<&mut dyn IdWrite>,
     ) -> ProverResult<Proof> {
         let mut id_store = id_store;
-        let config = Risc0Param::deserialize(config.get("risc0").unwrap()).unwrap();
+        let mut config = Risc0Param::deserialize(config.get("risc0").unwrap()).unwrap();
+        // TODO remove hardcode
+        config.bonsai = false;
         let proof_key = (
             input.chain_spec.chain_id,
             input.block.header.number,
