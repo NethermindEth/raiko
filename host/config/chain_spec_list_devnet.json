@@ -22,8 +22,8 @@
         },
         "l1_contract": null,
         "l2_contract": null,
-        "rpc": "http://185.3.95.99:32002",
-        "beacon_rpc": "http://185.3.95.99:33001",
+        "rpc": "http://139.162.249.67:32002",
+        "beacon_rpc": "http://139.162.249.67:33001",
         "verifier_address_forks": {
             "FRONTIER": {
                 "SGX": null,
@@ -56,7 +56,7 @@
         },
         "l1_contract": "0xaE37C7A711bcab9B0f8655a97B738d6ccaB6560B",
         "l2_contract": "0x7633740000000000000000000000000000010001",
-        "rpc": "http://185.3.95.99:8549",
+        "rpc": "http://139.162.249.67:8549",
         "beacon_rpc": null,
         "verifier_address_forks": {
             "HEKLA": {
