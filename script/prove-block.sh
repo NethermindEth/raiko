@@ -127,7 +127,7 @@ if [ "$rangeEnd" == "" ]; then
 	rangeEnd=$rangeStart
 fi
 
-prover="0x70997970C51812dc3A010C7d01b50e0d17dc79C8"
+prover="0x614561d2d143621e126e87831aef287678b442b8"
 graffiti="8008500000000000000000000000000000000000000000000000000000000000"
 
 for block in $(eval echo {$rangeStart..$rangeEnd}); do

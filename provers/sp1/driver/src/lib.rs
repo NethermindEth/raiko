@@ -106,10 +106,13 @@ impl Prover for Sp1Prover {
         config: &ProverConfig,
         id_store: Option<&mut dyn IdWrite>,
     ) -> ProverResult<Proof> {
-        let param = Sp1Param::deserialize(config.get("sp1").unwrap()).unwrap();
-        let mode = param.prover.clone().unwrap_or_else(get_env_mock);
-
+        let mut param = Sp1Param::deserialize(config.get("sp1").unwrap()).unwrap();
+        
         println!("param: {param:?}");
+        param.prover = Some(ProverMode::Local);
+        println!("param after: {param:?}");
+
+        let mode = param.prover.clone().unwrap_or_else(get_env_mock);
 
         let mut stdin = SP1Stdin::new();
         stdin.write(&input);
@@ -119,8 +122,15 @@ impl Prover for Sp1Prover {
             .prover
             .map(|mode| match mode {
                 ProverMode::Mock => ProverClient::mock(),
-                ProverMode::Local => ProverClient::local(),
-                ProverMode::Network => ProverClient::network(),
+                ProverMode::Local =>
+                {
+                    println!("Create local sp1 prover");
+                     ProverClient::local()
+                },
+                ProverMode::Network => {
+                    println!("Create network sp1 prover");
+                    ProverClient::network()
+                },
             })
             .unwrap_or_else(ProverClient::new);
 
@@ -141,6 +151,7 @@ impl Prover for Sp1Prover {
             }
             .map_err(|e| ProverError::GuestError(format!("Sp1: local proving failed: {e}")))?
         } else {
+            debug!("Proving network with recursion mode: {:?}", param.recursion);
             let network_prover = NetworkProver::new();
 
             let proof_id = network_prover

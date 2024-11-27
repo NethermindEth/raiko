@@ -2139,6 +2139,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "ctrlc"
+version = "3.4.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "90eeab0aa92f3f9b4e87f258c72b139c207d251f9cbc1080a0086b86a8870dd3"
+dependencies = [
+ "nix",
+ "windows-sys 0.59.0",
+]
+
+[[package]]
 name = "cuckoofilter"
 version = "0.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4842,6 +4852,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "nix"
+version = "0.29.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "71e2746dc3a24dd78b3cfcb7be93368c6de9963d30f43a6a73998a9cf4b17b46"
+dependencies = [
+ "bitflags 2.6.0",
+ "cfg-if",
+ "cfg_aliases",
+ "libc",
+]
+
+[[package]]
 name = "nohash-hasher"
 version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6142,6 +6164,7 @@ dependencies = [
 name = "raiko-lib"
 version = "0.1.0"
 dependencies = [
+ "alloy-chains",
  "alloy-consensus",
  "alloy-eips",
  "alloy-primitives 0.7.7",
@@ -6163,6 +6186,7 @@ dependencies = [
  "log",
  "once_cell",
  "reth-chainspec",
+ "reth-ethereum-forks",
  "reth-evm",
  "reth-evm-ethereum",
  "reth-primitives",
@@ -8754,6 +8778,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "sp1-cuda"
+version = "3.0.0-rc3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4f34e3c5873254b2fefe551c88db145ee6515211bfa41c8da23d2534e5d737f9"
+dependencies = [
+ "bincode",
+ "ctrlc",
+ "prost",
+ "serde",
+ "sp1-core-machine",
+ "sp1-prover",
+ "tokio",
+ "tracing",
+ "twirp-rs",
+]
+
+[[package]]
 name = "sp1-curves"
 version = "3.0.0-rc3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -9039,6 +9080,7 @@ dependencies = [
  "serde",
  "sp1-core-executor",
  "sp1-core-machine",
+ "sp1-cuda",
  "sp1-primitives",
  "sp1-prover",
  "sp1-stark",
