@@ -13,7 +13,6 @@ use reth_primitives::B256;
 use serde::{Deserialize, Serialize};
 use serde_with::serde_as;
 use sp1_sdk::{
-    action,
     network::client::NetworkClient,
     network::proto::network::{ProofMode, UnclaimReason},
     NetworkProverV1 as NetworkProver, SP1Proof, SP1ProofWithPublicValues, SP1VerifyingKey,
@@ -125,7 +124,7 @@ impl Prover for Sp1Prover {
                 ProverMode::Local =>
                 {
                     println!("Create local sp1 prover");
-                     ProverClient::local()
+                     ProverClient::new()
                 },
                 ProverMode::Network => {
                     println!("Create network sp1 prover");
@@ -141,13 +140,13 @@ impl Prover for Sp1Prover {
             vk.bytes32()
         );
 
-        let prove_action = action::Prove::new(client.prover.as_ref(), &pk, stdin.clone());
+        //let prove_action = action::Prove::new(client.prover.as_ref(), &pk, stdin.clone());
         let prove_result = if !matches!(mode, ProverMode::Network) {
             debug!("Proving locally with recursion mode: {:?}", param.recursion);
             match param.recursion {
-                RecursionMode::Core => prove_action.run(),
-                RecursionMode::Compressed => prove_action.compressed().run(),
-                RecursionMode::Plonk => prove_action.plonk().run(),
+                RecursionMode::Core => client.prove(&pk, stdin).run(),
+                RecursionMode::Compressed => client.prove(&pk, stdin).compressed().run(),
+                RecursionMode::Plonk => client.prove(&pk, stdin).plonk().run(),
             }
             .map_err(|e| ProverError::GuestError(format!("Sp1: local proving failed: {e}")))?
         } else {
@@ -178,7 +177,7 @@ impl Prover for Sp1Prover {
                 output.header.number
             );
             network_prover
-                .wait_proof::<sp1_sdk::SP1ProofWithPublicValues>(
+                .wait_proof(
                     &proof_id,
                     Some(Duration::from_secs(3600)),
                 )
