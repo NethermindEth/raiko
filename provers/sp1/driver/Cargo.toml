@@ -49,7 +49,7 @@ enable = [
     "serde",
     "serde_json",
     "raiko-lib",
-    "sp1-sdk",
+    "sp1-sdk/cuda",
     "anyhow",
     "alloy-contract",
     "alloy-primitives",
