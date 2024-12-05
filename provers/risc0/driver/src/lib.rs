@@ -6,9 +6,9 @@ use crate::{
     methods::risc0_aggregation::RISC0_AGGREGATION_ELF,
     methods::risc0_guest::{RISC0_GUEST_ELF, RISC0_GUEST_ID},
 };
-use alloy_primitives::{hex::ToHexExt, B256};
+use alloy_primitives::B256;
 use bonsai::{cancel_proof, maybe_prove};
-use log::{info, warn};
+use log::info;
 use raiko_lib::{
     input::{
         AggregationGuestInput, AggregationGuestOutput, GuestInput, GuestOutput,
@@ -92,9 +92,6 @@ impl Prover for Risc0Prover {
         )
         .await;
 
-        let receipt = result.clone().unwrap().1.clone();
-        let uuid = result.clone().unwrap().0;
-
         let proof_gen_result = if result.is_some() {
             if config.snark && config.bonsai {
                 let (stark_uuid, stark_receipt) = result.clone().unwrap();
@@ -103,15 +100,11 @@ impl Prover for Risc0Prover {
                     .map(|r0_response| r0_response.into())
                     .map_err(|e| ProverError::GuestError(e.to_string()))
             } else {
-                warn!("proof is not in snark mode, please check.");
-                let (_, stark_receipt) = result.clone().unwrap();
-                Ok(Risc0Response {
-                    proof: stark_receipt.journal.encode_hex_with_prefix(),
-                    receipt: serde_json::to_string(&receipt).unwrap(),
-                    uuid,
-                    input: output.hash,
-                }
-                .into())
+                let (snark_uuid, snark_receipt) = result.clone().unwrap();
+                bonsai::locally_verify_snark(snark_uuid, snark_receipt, output.hash)
+                    .await
+                    .map(|r0_response| r0_response.into())
+                    .map_err(|e| ProverError::GuestError(e.to_string()))
             }
         } else {
             Err(ProverError::GuestError(

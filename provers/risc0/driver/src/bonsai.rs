@@ -12,7 +12,7 @@ use raiko_lib::{
 };
 use risc0_zkvm::{
     compute_image_id, is_dev_mode, serde::to_vec, sha::Digest, AssumptionReceipt, ExecutorEnv,
-    ExecutorImpl, Receipt,
+    Receipt,
 };
 use serde::{de::DeserializeOwned, Serialize};
 use std::{
@@ -339,41 +339,67 @@ pub fn prove_locally(
     );
 
     info!("Running the prover...");
-    let session = {
-        let mut env_builder = ExecutorEnv::builder();
-        env_builder
-            .session_limit(None)
-            .segment_limit_po2(segment_limit_po2)
-            .write_slice(&encoded_input);
+    // Build the environment
+    let mut env_builder = ExecutorEnv::builder();
+    env_builder
+        .session_limit(None)
+        .segment_limit_po2(segment_limit_po2)
+        .write_slice(&encoded_input);
 
-        if profile {
-            info!("Profiling enabled.");
-            env_builder.enable_profiler("profile_r0_local.pb");
-        }
+    if profile {
+        info!("Profiling enabled.");
+        env_builder.enable_profiler("profile_r0_local.pb");
+    }
 
-        for assumption in assumptions {
-            env_builder.add_assumption(assumption);
-        }
+    for assumption in assumptions {
+        env_builder.add_assumption(assumption);
+    }
 
-        let segment_dir = PathBuf::from("/tmp/risc0-cache");
-        if !segment_dir.exists() {
-            fs::create_dir(segment_dir.clone()).map_err(|e| ProverError::FileIo(e))?;
-        }
-        let env = env_builder
-            .segment_path(segment_dir)
-            .build()
-            .map_err(|e| ProverError::GuestError(e.to_string()))?;
-        let mut exec =
-            ExecutorImpl::from_elf(env, elf).map_err(|e| ProverError::GuestError(e.to_string()))?;
+    let segment_dir = PathBuf::from("/tmp/risc0-cache");
+    if !segment_dir.exists() {
+        fs::create_dir(segment_dir.clone()).map_err(|e| ProverError::FileIo(e))?;
+    }
+    let env = env_builder
+        .segment_path(segment_dir)
+        .build()
+        .map_err(|e| ProverError::GuestError(e.to_string()))?;
 
-        exec.run()
-            .map_err(|e| ProverError::GuestError(e.to_string()))?
-    };
-    let receipt = session
-        .prove()
+    // prove
+    let prover = risc0_zkvm::default_prover();
+    let receipt = prover
+        .prove_with_opts(
+            env,
+            elf,
+            &risc0_zkvm::ProverOpts::groth16(),
+        )
         .map_err(|e| ProverError::GuestError(e.to_string()))?
         .receipt;
+
     Ok(receipt)
+}
+
+pub async fn locally_verify_snark(
+    snark_uuid: String,
+    snark_receipt: Receipt,
+    input: B256,
+) -> ProverResult<Risc0Response> {
+    let image_id = Digest::from(RISC0_GUEST_ID);
+
+    info!("Validating SNARK uuid: {snark_uuid}");
+
+    let receipt = serde_json::to_string(&snark_receipt).unwrap();
+
+    let enc_proof = verify_groth16_from_snark_receipt(image_id, snark_receipt)
+        .await
+        .map_err(|err| format!("Failed to verify SNARK: {err:?}"))?;
+
+    let snark_proof = format!("0x{}", hex::encode(enc_proof));
+    Ok(Risc0Response {
+        proof: snark_proof,
+        receipt,
+        uuid: snark_uuid,
+        input,
+    })
 }
 
 pub fn load_receipt<T: serde::de::DeserializeOwned>(
