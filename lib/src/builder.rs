@@ -24,7 +24,7 @@ use reth_evm_ethereum::execute::{
 use reth_evm_ethereum::taiko::TaikoData;
 use reth_primitives::revm_primitives::db::{Database, DatabaseCommit};
 use reth_primitives::revm_primitives::{
-    Account, AccountInfo, AccountStatus, Bytecode, Bytes, HashMap, SpecId,
+    Account, AccountInfo, AccountStatus, Bytecode, Bytes, HashMap,
 };
 use reth_primitives::{Address, BlockWithSenders, Header, B256, KECCAK_EMPTY, U256};
 use tracing::{debug, error};
