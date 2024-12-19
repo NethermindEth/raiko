@@ -81,7 +81,10 @@ pub async fn prepare_taiko_chain_input(
         .ok_or_else(|| RaikoError::Preflight("No anchor tx in the block".to_owned()))?;
 
     let ontake_active = taiko_chain_spec.is_ontake_active(block.number, block.timestamp);
-    info!("Generating input for block {} where ontake is {}", block_number, ontake_active);
+    info!(
+        "Generating input for block {} where ontake is {}",
+        block_number, ontake_active
+    );
 
     let (anchor_block_height, anchor_state_root) = if ontake_active {
         let anchor_call = decode_anchor_ontake(anchor_tx.input())?;
