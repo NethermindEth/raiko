@@ -55,7 +55,7 @@
             "elasticity_multiplier": "0x2"
         },
         "l1_contract": "0xaE37C7A711bcab9B0f8655a97B738d6ccaB6560B",
-        "l2_contract": "0x7633740000000000000000000000000000010001",
+        "l2_contract": "0x0000000000000000000000000000000000000000",
         "rpc": "http://185.3.95.99:8549",
         "beacon_rpc": null,
         "verifier_address_forks": {
