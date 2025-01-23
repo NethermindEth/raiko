@@ -136,7 +136,7 @@ impl Prover for Sp1Prover {
                 let network_client = Arc::new(ProverClient::builder().network().build());
                 let base_client: Box<dyn SP1ProverTrait<CpuProverComponents>> = match mode {
                     ProverMode::Mock => Box::new(ProverClient::builder().mock().build()),
-                    ProverMode::Local => Box::new(ProverClient::builder().cpu().build()),
+                    ProverMode::Local => Box::new(ProverClient::builder().gpu().build()),
                     ProverMode::Network => Box::new(ProverClient::builder().network().build()),
                 };
 
