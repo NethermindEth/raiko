@@ -56,7 +56,7 @@ elif [ "$proof" == "sp1" ]; then
     "blob_proof_type": "proof_of_equivalence",
 	"sp1": {
 		"recursion": "plonk",
-		"prover": "network",
+		"prover": "local",
 		"verify": true
 	}
   '

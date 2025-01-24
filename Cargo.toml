@@ -59,10 +59,10 @@ bonsai-sdk = { version = "=1.2.0" }
 risc0-binfmt = { version = "=1.2.0" }
 
 # SP1
-sp1-sdk = { version = "=4.0.1" , features = ["cuda"] }
-sp1-prover = { version = "=4.0.1" }
-sp1-zkvm = { version = "=4.0.1" }
-sp1-helper = { version = "=4.0.1" }
+sp1-sdk = { git = "https://github.com/NethermindEth/sp1.git", branch = "v4.0.1-no-ctrlc", features = ["cuda"] }
+sp1-prover = { git = "https://github.com/NethermindEth/sp1.git", branch = "v4.0.1-no-ctrlc" }
+sp1-zkvm = { git = "https://github.com/NethermindEth/sp1.git", branch = "v4.0.1-no-ctrlc" }
+sp1-helper = { git = "https://github.com/NethermindEth/sp1.git", branch = "v4.0.1-no-ctrlc" }
 
 # alloy
 alloy-rlp = { version = "0.3.4", default-features = false }
