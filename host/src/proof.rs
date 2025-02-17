@@ -174,10 +174,11 @@ impl ProofActor {
                     };
                 }
             }
-            // TODO think
             {
                 let mut gpus = gpus.lock().await;
                 gpus.push_back(proof_request.gpu_number.unwrap());
+            }
+            {
                 let mut tasks = tasks.lock().await;
                 tasks.remove(&key);
             }
@@ -273,14 +274,15 @@ impl ProofActor {
                     let running_task_count = self.running_tasks.lock().await.len();
                     if running_task_count < self.opts.concurrency_limit {
                         // Set gpu number for task
-                        if proof_request.gpu_number.is_some() {  panic!("GPU number is already set"); }
-                        let mut available_gpus = self.available_gpus.lock().await;
-                        if let Some(gpu_number) = available_gpus.pop_front() {
-                            proof_request.set_gpu_number(Some(gpu_number));
-                        } else {
-                            panic!("No available GPU");
+                        if proof_request.gpu_number.is_some() {
+                            panic!("GPU number is already set");
                         }
-                        drop(available_gpus);
+                        {
+                            let mut available_gpus = self.available_gpus.lock().await;
+                            let gpu_number = available_gpus.pop_front().expect("No available GPU");
+                            proof_request.set_gpu_number(Some(gpu_number));
+                        }
+
 
                         info!("Running task {proof_request:?}");
                         self.run_task(proof_request).await;
@@ -296,7 +298,6 @@ impl ProofActor {
                 Message::TaskComplete(req) => {
                     // pop up pending task if any task complete
                     debug!("Message::TaskComplete({req:?})");
-                    // TODO fix
                     info!(
                         "task {req:?} completed, current running {:?}, pending: {:?}",
                         self.running_tasks.lock().await.len(),

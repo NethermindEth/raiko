@@ -293,7 +293,7 @@ impl Prover for Sp1Prover {
             }
         }
 
-        // TODO it is None now
+        // TODO Produce aggregation proof on a single gpu. gpu_number is None now
        let gpu_number: u32 = config.get("gpu_number")
             .and_then(|v| v.as_i64())
             .map(|v| v as u32)
