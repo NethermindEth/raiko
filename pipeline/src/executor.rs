@@ -7,6 +7,7 @@ use std::{
     path::PathBuf,
     process::{Command, Stdio},
     thread,
+    panic,
 };
 
 #[derive(Debug)]
@@ -18,55 +19,132 @@ pub struct Executor {
 
 impl Executor {
     pub fn execute(mut self) -> anyhow::Result<Self> {
-        let mut child = self
+        println!("[DEBUG] Starting execute with command: {:?}", self.cmd);
+        
+        // Spawn the child process with enhanced error handling
+        let child = match self
             .cmd
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
-            .spawn()
-            .expect("Couldn't spawn child process");
+            .spawn() {
+                Ok(child) => child,
+                Err(e) => {
+                    println!("[DEBUG] Failed to spawn child process: {:?}", e);
+                    return Err(anyhow::anyhow!("Couldn't spawn child process: {}", e));
+                }
+            };
 
-        let stdout = BufReader::new(child.stdout.take().expect("Couldn't take stdout of child"));
-        let stderr = BufReader::new(child.stderr.take().expect("Couldn't take stderr of child"));
+        let stdout = match child.stdout.take() {
+            Some(stdout) => BufReader::new(stdout),
+            None => {
+                println!("[DEBUG] Failed to capture stdout");
+                return Err(anyhow::anyhow!("Couldn't take stdout of child"));
+            }
+        };
+        
+        let stderr = match child.stderr.take() {
+            Some(stderr) => BufReader::new(stderr),
+            None => {
+                println!("[DEBUG] Failed to capture stderr");
+                return Err(anyhow::anyhow!("Couldn't take stderr of child"));
+            }
+        };
 
+        // Use catch_unwind to debug potential panics in the stdout thread
         let stdout_handle = thread::spawn(move || {
-            for line in stdout.lines().enumerate().map(|(index, line)| {
-                line.unwrap_or_else(|e| {
-                    panic!("Couldn't get stdout line: {index}\n with error: {e}")
-                })
-            }) {
-                println!("[docker] {line}");
+            let result = panic::catch_unwind(|| {
+                for line in stdout.lines().enumerate().map(|(index, line)| {
+                    match line {
+                        Ok(l) => l,
+                        Err(e) => {
+                            println!("[DEBUG] Error reading stdout at line {}: {:?}", index, e);
+                            format!("Error reading line: {}", e)
+                        }
+                    }
+                }) {
+                    println!("[docker] {line}");
+                }
+            });
+            
+            if let Err(e) = result {
+                println!("[DEBUG] Panic in stdout thread: {:?}", e);
             }
         });
 
-        for line in stderr.lines().enumerate().map(|(index, line)| {
-            line.unwrap_or_else(|e| panic!("Couldn't get stderr line: {index}\n with error: {e}"))
-        }) {
-            println!("[zkvm-stdout] {line}");
+        // Process stderr with better error handling
+        let process_stderr = || -> anyhow::Result<()> {
+            for line_result in stderr.lines().enumerate() {
+                let (index, line) = line_result;
+                let line = match line {
+                    Ok(l) => l,
+                    Err(e) => {
+                        println!("[DEBUG] Error reading stderr at line {}: {:?}", index, e);
+                        return Err(anyhow::anyhow!("Couldn't get stderr line {}: {}", index, e));
+                    }
+                };
+                
+                println!("[zkvm-stdout] {line}");
 
-            if self.test && line.contains("Executable unittests") {
-                if let Some(test) = extract_path(&line) {
-                    let Some(artifact) = self
-                        .artifacts
-                        .iter_mut()
-                        .find(|a| file_name(&test).contains(&file_name(a).replace('-', "_")))
-                    else {
-                        bail!("Failed to find test artifact");
-                    };
-
-                    *artifact = test;
+                if self.test && line.contains("Executable unittests") {
+                    println!("[DEBUG] Found test line: {}", line);
+                    if let Some(test) = extract_path(&line) {
+                        println!("[DEBUG] Extracted path: {:?}", test);
+                        let artifact = self
+                            .artifacts
+                            .iter_mut()
+                            .find(|a| file_name(&test).contains(&file_name(a).replace('-', "_")));
+                            
+                        match artifact {
+                            Some(a) => {
+                                println!("[DEBUG] Matched artifact: {:?}", a);
+                                *a = test;
+                            },
+                            None => {
+                                println!("[DEBUG] Failed to find test artifact for {:?}", test);
+                                return Err(anyhow::anyhow!("Failed to find test artifact"));
+                            }
+                        }
+                    }
                 }
+            }
+            Ok(())
+        };
+
+        // Catch any panics in stderr processing
+        let stderr_result = panic::catch_unwind(process_stderr);
+        if let Err(e) = stderr_result {
+            println!("[DEBUG] Panic in stderr processing: {:?}", e);
+            return Err(anyhow::anyhow!("Panic while processing stderr"));
+        } else if let Ok(Err(e)) = stderr_result {
+            println!("[DEBUG] Error in stderr processing: {:?}", e);
+            return Err(e);
+        }
+
+        // Wait for the stdout thread to complete
+        match stdout_handle.join() {
+            Ok(_) => println!("[DEBUG] Stdout thread completed successfully"),
+            Err(e) => {
+                println!("[DEBUG] Error joining stdout thread: {:?}", e);
+                return Err(anyhow::anyhow!("Couldn't wait for stdout handle to finish"));
             }
         }
 
-        stdout_handle
-            .join()
-            .expect("Couldn't wait for stdout handle to finish");
-
-        let result = child.wait()?;
+        // Wait for the child process to complete
+        let result = match child.wait() {
+            Ok(r) => r,
+            Err(e) => {
+                println!("[DEBUG] Error waiting for child process: {:?}", e);
+                return Err(anyhow::anyhow!("Error waiting for child process: {}", e));
+            }
+        };
+        
         if !result.success() {
+            println!("[DEBUG] Child process exited with non-zero code: {:?}", result.code());
             // Error message is already printed by cargo
             std::process::exit(result.code().unwrap_or(1))
         }
+        
+        println!("[DEBUG] Execute completed successfully");
         Ok(self)
     }
 

@@ -193,6 +193,45 @@ impl<DB: Database<Error = ProviderError> + DatabaseCommit + OptimisticDatabase>
             })
             .optimistic(optimistic);
         info!("execute_transactions: executor done");
+        
+        // Add panic catching around the execute call
+        info!("[DEBUG] About to call executor.execute with block: {:?}, difficulty: {:?}", block, total_difficulty);
+        
+        let execution_result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            executor
+                .execute((&block, total_difficulty).into())
+                .map_err(|e| {
+                    error!("[DEBUG] Error executing block: {e:?}");
+                    error!("{e:?}");
+                    e
+                })
+        }));
+        
+        let block_execution_output = match execution_result {
+            Ok(result) => match result {
+                Ok(output) => {
+                    info!("[DEBUG] Execute call completed successfully");
+                    output
+                },
+                Err(e) => {
+                    error!("[DEBUG] Execute call returned an error: {:?}", e);
+                    return Err(anyhow::anyhow!("Error executing block: {:?}", e));
+                }
+            },
+            Err(panic_err) => {
+                let panic_info = if let Some(s) = panic_err.downcast_ref::<String>() {
+                    s.clone()
+                } else if let Some(s) = panic_err.downcast_ref::<&str>() {
+                    s.to_string()
+                } else {
+                    "Unknown panic".to_string()
+                };
+                
+                error!("[DEBUG] PANIC during execute call: {}", panic_info);
+                return Err(anyhow::anyhow!("Panic during execute: {}", panic_info));
+            }
+        };
+        
         let BlockExecutionOutput {
             state,
             receipts,
@@ -200,12 +239,8 @@ impl<DB: Database<Error = ProviderError> + DatabaseCommit + OptimisticDatabase>
             gas_used: _,
             db: full_state,
             valid_transaction_indices,
-        } = executor
-            .execute((&block, total_difficulty).into())
-            .map_err(|e| {
-                error!("Error executing block: {e:?}");
-                e
-            })?;
+        } = block_execution_output;
+        
         info!("execute_transactions: execute done");
         // Filter out the valid transactions so that the header checks only take these into account
         block.body = valid_transaction_indices
