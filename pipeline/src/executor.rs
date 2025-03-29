@@ -21,7 +21,7 @@ impl Executor {
         println!("[DEBUG] Starting execute with command: {:?}", self.cmd);
         
         // Spawn the child process with enhanced error handling
-        let child = match self
+        let mut child = match self
             .cmd
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
