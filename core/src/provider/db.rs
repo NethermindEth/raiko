@@ -8,6 +8,7 @@ use reth_revm::{
 };
 use std::{collections::HashSet, mem::take};
 use tokio::runtime::Handle;
+use tracing::info;
 
 use crate::{
     interfaces::{RaikoError, RaikoResult},
@@ -296,70 +297,104 @@ impl<BDP: BlockDataProvider> DatabaseCommit for ProviderDb<BDP> {
 
 impl<BDP: BlockDataProvider> OptimisticDatabase for ProviderDb<BDP> {
     async fn fetch_data(&mut self) -> bool {
-        //println!("all accounts touched: {:?}", self.pending_accounts);
-        //println!("all slots touched: {:?}", self.pending_slots);
-        //println!("all block hashes touched: {:?}", self.pending_block_hashes);
+        info!("[DEBUG] fetch_data: Starting data fetch operation");
 
         // This run was valid when no pending work was scheduled
         let valid_run = self.is_valid_run();
+        info!("[DEBUG] fetch_data: valid_run before fetching: {}", valid_run);
 
-        let Ok(accounts) = self
-            .provider
-            .get_accounts(&self.pending_accounts.iter().copied().collect::<Vec<_>>())
-            .await
-        else {
-            return false;
-        };
-        for (address, account) in take(&mut self.pending_accounts)
-            .into_iter()
-            .zip(accounts.iter())
-        {
-            self.staging_db
-                .insert_account_info(address, account.clone());
+        if !self.pending_accounts.is_empty() {
+            info!("[DEBUG] fetch_data: Fetching {} pending accounts", self.pending_accounts.len());
+            match self
+                .provider
+                .get_accounts(&self.pending_accounts.iter().copied().collect::<Vec<_>>())
+                .await
+            {
+                Ok(accounts) => {
+                    info!("[DEBUG] fetch_data: Successfully fetched {} accounts", accounts.len());
+                    for (address, account) in take(&mut self.pending_accounts)
+                        .into_iter()
+                        .zip(accounts.iter())
+                    {
+                        info!("[DEBUG] fetch_data: Processing account: {:?}", address);
+                        self.staging_db
+                            .insert_account_info(address, account.clone());
+                    }
+                }
+                Err(e) => {
+                    info!("[DEBUG] fetch_data: Failed to fetch accounts: {:?}", e);
+                    return false;
+                }
+            }
         }
 
-        let Ok(slots) = self
-            .provider
-            .get_storage_values(&self.pending_slots.iter().copied().collect::<Vec<_>>())
-            .await
-        else {
-            return false;
-        };
-        for ((address, index), value) in take(&mut self.pending_slots).into_iter().zip(slots.iter())
-        {
-            self.staging_db
-                .insert_account_storage(&address, index, *value);
+        if !self.pending_slots.is_empty() {
+            info!("[DEBUG] fetch_data: Fetching {} pending slots", self.pending_slots.len());
+            match self
+                .provider
+                .get_storage_values(&self.pending_slots.iter().copied().collect::<Vec<_>>())
+                .await
+            {
+                Ok(slots) => {
+                    info!("[DEBUG] fetch_data: Successfully fetched {} storage slots", slots.len());
+                    for ((address, index), value) in take(&mut self.pending_slots).into_iter().zip(slots.iter())
+                    {
+                        self.staging_db
+                            .insert_account_storage(&address, index, *value);
+                    }
+                }
+                Err(e) => {
+                    info!("[DEBUG] fetch_data: Failed to fetch storage slots: {:?}", e);
+                    return false;
+                }
+            }
         }
 
-        let Ok(blocks) = self
-            .provider
-            .get_blocks(
-                &self
-                    .pending_block_hashes
-                    .iter()
-                    .copied()
-                    .map(|block_number| (block_number, false))
-                    .collect::<Vec<_>>(),
-            )
-            .await
-        else {
-            return false;
-        };
-        for (block_number, block) in take(&mut self.pending_block_hashes)
-            .into_iter()
-            .zip(blocks.iter())
-        {
-            self.staging_db
-                .insert_block_hash(block_number, block.header.hash.unwrap());
-            self.initial_headers
-                .insert(block_number, block.header.clone().try_into().unwrap());
+        if !self.pending_block_hashes.is_empty() {
+            info!("[DEBUG] fetch_data: Fetching {} pending block hashes", self.pending_block_hashes.len());
+            match self
+                .provider
+                .get_blocks(
+                    &self
+                        .pending_block_hashes
+                        .iter()
+                        .copied()
+                        .map(|block_number| (block_number, false))
+                        .collect::<Vec<_>>(),
+                )
+                .await
+            {
+                Ok(blocks) => {
+                    info!("[DEBUG] fetch_data: Successfully fetched {} blocks", blocks.len());
+                    for (block_number, block) in take(&mut self.pending_block_hashes)
+                        .into_iter()
+                        .zip(blocks.iter())
+                    {
+                        info!("[DEBUG] fetch_data: Processing block: {}", block_number);
+                        if let Some(hash) = block.header.hash {
+                            self.staging_db.insert_block_hash(block_number, hash);
+                            self.initial_headers
+                                .insert(block_number, block.header.clone().try_into().unwrap());
+                        } else {
+                            info!("[DEBUG] fetch_data: Block {} has no hash!", block_number);
+                            return false;
+                        }
+                    }
+                }
+                Err(e) => {
+                    info!("[DEBUG] fetch_data: Failed to fetch blocks: {:?}", e);
+                    return false;
+                }
+            }
         }
 
         // If this wasn't a valid run, clear the post execution database
         if !valid_run {
+            info!("[DEBUG] fetch_data: Not a valid run, clearing current_db");
             self.current_db = Default::default();
         }
 
+        info!("[DEBUG] fetch_data: Completed with result: {}", valid_run);
         valid_run
     }
 
