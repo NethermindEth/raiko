@@ -330,6 +330,7 @@ impl<BDP: BlockDataProvider> OptimisticDatabase for ProviderDb<BDP> {
 
         if !self.pending_slots.is_empty() {
             info!("[DEBUG] fetch_data: Fetching {} pending slots", self.pending_slots.len());
+            info!("[DEBUG] fetch_data: Pending slots: {:?}", self.pending_slots);
             match self
                 .provider
                 .get_storage_values(&self.pending_slots.iter().copied().collect::<Vec<_>>())
