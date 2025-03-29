@@ -51,6 +51,7 @@ kzg_traits = { workspace = true }
 
 # async
 tokio = { workspace = true }
+futures = { workspace = true }
 reqwest = { workspace = true }
 reqwest_alloy = { workspace = true }
 

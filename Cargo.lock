@@ -6280,6 +6280,7 @@ dependencies = [
  "bincode",
  "clap 4.5.27",
  "ethers-core",
+ "futures",
  "kzg",
  "raiko-lib",
  "reqwest 0.11.27",

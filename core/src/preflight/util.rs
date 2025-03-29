@@ -3,7 +3,7 @@ use alloy_provider::{Provider, ReqwestProvider};
 use alloy_rpc_types::{Filter, Header, Log, Transaction as AlloyRpcTransaction};
 use alloy_sol_types::{SolCall, SolEvent};
 use anyhow::{anyhow, bail, ensure, Result};
-use futures_util::future::FutureExt;
+use futures::future::FutureExt;
 use kzg::kzg_types::ZFr;
 use kzg_traits::{
     eip_4844::{blob_to_kzg_commitment_rust, Blob},
