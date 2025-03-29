@@ -1,4 +1,3 @@
-use anyhow::bail;
 use regex::Regex;
 use std::io::BufRead;
 use std::path::Path;
@@ -110,8 +109,8 @@ impl Executor {
             Ok(())
         };
 
-        // Catch any panics in stderr processing
-        let stderr_result = panic::catch_unwind(process_stderr);
+        // Catch any panics in stderr processing - wrap with AssertUnwindSafe to fix compiler error
+        let stderr_result = panic::catch_unwind(panic::AssertUnwindSafe(process_stderr));
         if let Err(e) = stderr_result {
             println!("[DEBUG] Panic in stderr processing: {:?}", e);
             return Err(anyhow::anyhow!("Panic while processing stderr"));
