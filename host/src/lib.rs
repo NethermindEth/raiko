@@ -93,7 +93,7 @@ impl Opts {
     }
 
     fn default_concurrency_limit() -> usize {
-        8
+        1
     }
 
     fn default_max_log() -> usize {
