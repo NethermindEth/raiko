@@ -8,7 +8,7 @@ use reqwest_alloy::Client;
 use reth_primitives::revm_primitives::{AccountInfo, Bytecode};
 use std::{collections::HashMap, future::Future, time::Duration};
 use tokio::time::sleep;
-use tracing::trace;
+use tracing::{info, trace};
 
 use crate::{
     interfaces::{RaikoError, RaikoResult},
@@ -103,10 +103,14 @@ impl BlockDataProvider for RpcBlockDataProvider {
     }
 
     async fn get_accounts(&self, accounts: &[Address]) -> RaikoResult<Vec<AccountInfo>> {
+        info!("[DEBUG] get_accounts: Starting to fetch {} accounts", accounts.len());
+        info!("[DEBUG] get_accounts: Accounts to fetch: {:?}", accounts);
+        
         let mut all_accounts = Vec::with_capacity(accounts.len());
 
         let max_batch_size = 250;
-        for accounts in accounts.chunks(max_batch_size) {
+        for (chunk_idx, accounts) in accounts.chunks(max_batch_size).enumerate() {
+            info!("[DEBUG] get_accounts: Processing chunk {} with {} accounts", chunk_idx, accounts.len());
             let mut batch = self.client.new_batch();
 
             let mut nonce_requests = Vec::with_capacity(max_batch_size);
@@ -148,10 +152,12 @@ impl BlockDataProvider for RpcBlockDataProvider {
                 ));
             }
 
+            info!("[DEBUG] get_accounts: Sending batch request for chunk {}", chunk_idx);
             batch
                 .send()
                 .await
                 .map_err(|e| RaikoError::RPC(format!("Error sending batch request {e}")))?;
+            info!("[DEBUG] get_accounts: Successfully sent batch request for chunk {}", chunk_idx);
 
             let mut accounts = vec![];
             // Collect the data from the batch
@@ -183,17 +189,23 @@ impl BlockDataProvider for RpcBlockDataProvider {
                 accounts.push(account_info);
             }
 
+            info!("[DEBUG] get_accounts: Processed {} accounts in chunk {}", accounts.len(), chunk_idx);
             all_accounts.append(&mut accounts);
         }
 
+        info!("[DEBUG] get_accounts: Completed fetching {} accounts", all_accounts.len());
         Ok(all_accounts)
     }
 
     async fn get_storage_values(&self, accounts: &[(Address, U256)]) -> RaikoResult<Vec<U256>> {
+        info!("[DEBUG] get_storage_values: Starting to fetch {} storage slots", accounts.len());
+        info!("[DEBUG] get_storage_values: Storage slots to fetch: {:?}", accounts);
+        
         let mut all_values = Vec::with_capacity(accounts.len());
 
         let max_batch_size = 1000;
-        for accounts in accounts.chunks(max_batch_size) {
+        for (chunk_idx, accounts) in accounts.chunks(max_batch_size).enumerate() {
+            info!("[DEBUG] get_storage_values: Processing chunk {} with {} slots", chunk_idx, accounts.len());
             let mut batch = self.client.new_batch();
 
             let mut requests = Vec::with_capacity(max_batch_size);
@@ -213,10 +225,12 @@ impl BlockDataProvider for RpcBlockDataProvider {
                 ));
             }
 
+            info!("[DEBUG] get_storage_values: Sending batch request for chunk {}", chunk_idx);
             batch
                 .send()
                 .await
                 .map_err(|e| RaikoError::RPC(format!("Error sending batch request {e}")))?;
+            info!("[DEBUG] get_storage_values: Successfully sent batch request for chunk {}", chunk_idx);
 
             let mut values = Vec::with_capacity(max_batch_size);
             // Collect the data from the batch
@@ -228,9 +242,11 @@ impl BlockDataProvider for RpcBlockDataProvider {
                 );
             }
 
+            info!("[DEBUG] get_storage_values: Processed {} values in chunk {}", values.len(), chunk_idx);
             all_values.append(&mut values);
         }
 
+        info!("[DEBUG] get_storage_values: Completed fetching {} storage values", all_values.len());
         Ok(all_values)
     }
 
