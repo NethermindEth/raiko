@@ -3,6 +3,7 @@ use alloy_provider::{Provider, ReqwestProvider};
 use alloy_rpc_types::{Filter, Header, Log, Transaction as AlloyRpcTransaction};
 use alloy_sol_types::{SolCall, SolEvent};
 use anyhow::{anyhow, bail, ensure, Result};
+use futures::FutureExt;
 use kzg::kzg_types::ZFr;
 use kzg_traits::{
     eip_4844::{blob_to_kzg_commitment_rust, Blob},
@@ -62,10 +63,29 @@ where
             return Err(RaikoError::Preflight("No db in builder".to_owned()));
         };
         info!("execute_txs: fetch_data start");
-        if db.fetch_data().await {
-            clear_line();
-            info!("State data fetched in {num_iterations} iterations");
-            break;
+
+        match db.fetch_data().catch_unwind().await {
+            Ok(true) => {
+                clear_line();
+                info!("State data fetched in {num_iterations} iterations");
+                break;
+            }
+            Ok(false) => {
+                // Continue to the next iteration
+            }
+            Err(e) => {
+                // Convert the panic payload to a string if possible
+                let panic_msg = if let Some(s) = e.downcast_ref::<String>() {
+                    s.clone()
+                } else if let Some(s) = e.downcast_ref::<&str>() {
+                    s.to_string()
+                } else {
+                    "Unknown panic occurred in fetch_data".to_string()
+                };
+                
+                error!("fetch_data panicked: {}", panic_msg);
+                return Err(RaikoError::Preflight(format!("fetch_data panicked: {}", panic_msg)));
+            }
         }
     }
 
