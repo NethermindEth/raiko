@@ -305,6 +305,7 @@ impl<BDP: BlockDataProvider> OptimisticDatabase for ProviderDb<BDP> {
 
         if !self.pending_accounts.is_empty() {
             info!("[DEBUG] fetch_data: Fetching {} pending accounts", self.pending_accounts.len());
+            info!("[DEBUG] fetch_data: Pending accounts: {:?}", self.pending_accounts);
             match self
                 .provider
                 .get_accounts(&self.pending_accounts.iter().copied().collect::<Vec<_>>())
