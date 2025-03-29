@@ -4,6 +4,7 @@ use alloy_rpc_types::{Filter, Header, Log, Transaction as AlloyRpcTransaction};
 use alloy_sol_types::{SolCall, SolEvent};
 use anyhow::{anyhow, bail, ensure, Result};
 use futures::future::FutureExt;
+use std::panic::AssertUnwindSafe;
 use kzg::kzg_types::ZFr;
 use kzg_traits::{
     eip_4844::{blob_to_kzg_commitment_rust, Blob},
@@ -64,7 +65,12 @@ where
         };
         info!("execute_txs: fetch_data start");
 
-        match db.fetch_data().catch_unwind().await {
+        // Use AssertUnwindSafe to allow catching panics in futures that are not UnwindSafe
+        let fetch_result = AssertUnwindSafe(db.fetch_data())
+            .catch_unwind()
+            .await;
+
+        match fetch_result {
             Ok(true) => {
                 clear_line();
                 info!("State data fetched in {num_iterations} iterations");
