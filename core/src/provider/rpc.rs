@@ -233,7 +233,7 @@ impl BlockDataProvider for RpcBlockDataProvider {
                 .send()
                 .await
                 .map_err(|e| {
-                    error!("[DEBUG] get_storage_values: Error sending batch request: {}", e);
+                    info!("[DEBUG] get_storage_values: Error sending batch request: {}", e);
                     RaikoError::RPC(format!("Error sending batch request {e}"))
                 })?;
             info!("[DEBUG] get_storage_values: Successfully sent batch request for chunk {}", chunk_idx);
