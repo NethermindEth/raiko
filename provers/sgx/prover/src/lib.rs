@@ -403,7 +403,7 @@ async fn prove(
                 Ok(parse_sgx_result(output.stdout)?)
             }
             (Err(i), output_success) => {
-                println!("SGX guest prover input serialization error");
+                println!("SGX guest prover input serialization error, output is {:?}", output_success);
                 Err(ProverError::GuestError(format!(
                     "Can not serialize input for SGX {i}, output is {output_success:?}"
                 )))
