@@ -8,7 +8,7 @@ use reqwest_alloy::Client;
 use reth_primitives::revm_primitives::{AccountInfo, Bytecode};
 use std::{collections::HashMap, future::Future, time::Duration};
 use tokio::time::sleep;
-use tracing::{info, trace};
+use tracing::{info, trace, error};
 
 use crate::{
     interfaces::{RaikoError, RaikoResult},
@@ -156,7 +156,10 @@ impl BlockDataProvider for RpcBlockDataProvider {
             batch
                 .send()
                 .await
-                .map_err(|e| RaikoError::RPC(format!("Error sending batch request {e}")))?;
+                .map_err(|e| {
+                    error!("[DEBUG] get_accounts: Error sending batch request: {}", e);
+                    RaikoError::RPC(format!("Error sending batch request {e}"))
+                })?;
             info!("[DEBUG] get_accounts: Successfully sent batch request for chunk {}", chunk_idx);
 
             let mut accounts = vec![];
@@ -229,7 +232,10 @@ impl BlockDataProvider for RpcBlockDataProvider {
             batch
                 .send()
                 .await
-                .map_err(|e| RaikoError::RPC(format!("Error sending batch request {e}")))?;
+                .map_err(|e| {
+                    error!("[DEBUG] get_storage_values: Error sending batch request: {}", e);
+                    RaikoError::RPC(format!("Error sending batch request {e}"))
+                })?;
             info!("[DEBUG] get_storage_values: Successfully sent batch request for chunk {}", chunk_idx);
 
             let mut values = Vec::with_capacity(max_batch_size);
