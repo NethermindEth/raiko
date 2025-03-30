@@ -103,8 +103,11 @@ impl Prover for SgxProver {
             .unwrap()
             .to_path_buf();
 
+        println!("Current directory: {cur_dir:?}\n");
+
         // When running in tests we might be in a child folder
         if cur_dir.ends_with("deps") {
+            println!("Deps directory");
             cur_dir = cur_dir.parent().unwrap().to_path_buf();
         }
 
@@ -113,6 +116,7 @@ impl Prover for SgxProver {
         PRIVATE_KEY
             .get_or_init(|| async { cur_dir.join("secrets").join(PRIV_KEY_FILENAME) })
             .await;
+        println!("Private key retrieved");
         GRAMINE_MANIFEST_TEMPLATE
             .get_or_init(|| async {
                 cur_dir
@@ -120,36 +124,46 @@ impl Prover for SgxProver {
                     .join("sgx-guest.local.manifest.template")
             })
             .await;
+        println!("Manifest template retrieved");
 
         // The gramine command (gramine or gramine-direct for testing in non-SGX environment)
         let gramine_cmd = || -> StdCommand {
             let mut cmd = if direct_mode {
+                println!("Using gramine-direct");
                 StdCommand::new("gramine-direct")
             } else {
+                println!("Using sudo gramine-sgx");
                 let mut cmd = StdCommand::new("sudo");
                 cmd.arg("gramine-sgx");
                 cmd
             };
+            println!("Setting current directory to {:?} and using ELF: {}", &cur_dir, ELF_NAME);
             cmd.current_dir(&cur_dir).arg(ELF_NAME);
             cmd
         };
 
         // Setup: run this once while setting up your SGX instance
         if sgx_param.setup {
+            println!("Setting up SGX instance");
             setup(&cur_dir, direct_mode).await?;
         }
 
         let mut sgx_proof = if sgx_param.bootstrap {
+            println!("Bootstrapping SGX instance");
             bootstrap(cur_dir.clone().join("secrets"), gramine_cmd()).await
         } else {
             // Dummy proof: it's ok when only setup/bootstrap was requested
+            println!("Dummy proof");
             Ok(SgxResponse::default())
         };
 
         if sgx_param.prove {
+            println!("Proving");
             // overwrite sgx_proof as the bootstrap quote stays the same in bootstrap & prove.
             sgx_proof = prove(gramine_cmd(), input.clone(), sgx_param.instance_id).await
         }
+
+        println!("SGX proof retrieved");
 
         sgx_proof.map(|r| r.into())
     }
@@ -361,6 +375,7 @@ async fn prove(
     instance_id: u64,
 ) -> ProverResult<SgxResponse, ProverError> {
     tokio::task::spawn_blocking(move || {
+        println!("Setting up SGX guest prover");
         let mut child = gramine_cmd
             .arg("one-shot")
             .arg("--sgx-instance-id")
@@ -370,25 +385,39 @@ async fn prove(
             .stderr(Stdio::piped())
             .spawn()
             .map_err(|e| format!("Could not spawn gramine cmd: {e}"))?;
+        println!("SGX guest prover spawned");
         let stdin = child.stdin.as_mut().expect("Failed to open stdin");
+        println!("SGX guest prover stdin opened");
         let input_success = bincode::serialize_into(stdin, &input);
+        println!("SGX guest prover input serialized");
         let output_success = child.wait_with_output();
 
         match (input_success, output_success) {
             (Ok(_), Ok(output)) => {
+                println!("SGX guest prover output received");
                 handle_output(&output, "SGX prove")?;
+                println!("SGX guest prover output handled");
                 Ok(parse_sgx_result(output.stdout)?)
             }
-            (Err(i), output_success) => Err(ProverError::GuestError(format!(
-                "Can not serialize input for SGX {i}, output is {output_success:?}"
-            ))),
-            (Ok(_), Err(output_err)) => Err(ProverError::GuestError(
-                handle_gramine_error("Could not run SGX guest prover", output_err).to_string(),
-            )),
+            (Err(i), output_success) => {
+                println!("SGX guest prover input serialization error");
+                Err(ProverError::GuestError(format!(
+                    "Can not serialize input for SGX {i}, output is {output_success:?}"
+                )))
+            }
+            (Ok(_), Err(output_err)) => {
+                println!("SGX guest prover output error");
+                Err(ProverError::GuestError(
+                    handle_gramine_error("Could not run SGX guest prover", output_err).to_string(),
+                ))
+            }
         }
     })
     .await
-    .map_err(|e| ProverError::GuestError(e.to_string()))?
+    .map_err(|e| {
+        println!("SGX guest prover error");
+        ProverError::GuestError(e.to_string())
+    })?
 }
 
 async fn aggregate(
