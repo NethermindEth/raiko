@@ -51,7 +51,7 @@ COPY --from=builder /opt/raiko/target/release/raiko-host ./bin/
 COPY --from=builder /opt/raiko/target/release/raiko-setup ./bin/
 COPY --from=builder /opt/raiko/docker/enclave-key.pem /root/.config/gramine/enclave-key.pem
 # Copy tokio-console binary from builder
-COPY --from=builder /root/.cargo/bin/tokio-console ./bin/
+COPY --from=builder /usr/local/cargo/bin/tokio-console ./bin/
 
 ARG EDMM=0
 ENV EDMM=${EDMM}
