@@ -388,7 +388,10 @@ async fn prove(
         println!("SGX guest prover spawned");
         let stdin = child.stdin.as_mut().expect("Failed to open stdin");
         println!("SGX guest prover stdin opened");
-        let input_success = bincode::serialize_into(stdin, &input);
+        let input_success = bincode::serialize_into(stdin, &input).map_err(|e| {
+            println!("Serialization error: {}", e);
+            e
+        });
         println!("SGX guest prover input serialized");
         let output_success = child.wait_with_output();
 
