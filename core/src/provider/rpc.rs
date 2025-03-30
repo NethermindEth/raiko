@@ -157,7 +157,7 @@ impl BlockDataProvider for RpcBlockDataProvider {
                 .send()
                 .await
                 .map_err(|e| {
-                    error!("[DEBUG] get_accounts: Error sending batch request: {}", e);
+                    info!("[DEBUG] get_accounts: Error sending batch request: {}", e);
                     RaikoError::RPC(format!("Error sending batch request {e}"))
                 })?;
             info!("[DEBUG] get_accounts: Successfully sent batch request for chunk {}", chunk_idx);
