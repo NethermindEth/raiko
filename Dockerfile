@@ -14,6 +14,9 @@ COPY . .
 RUN echo "Building for sgx with taskdb: ${TASKDB}"
 RUN cargo build --release ${BUILD_FLAGS} --features "sgx" --features "docker_build" --features ${TASKDB}
 
+# Install tokio-console
+RUN cargo install --locked tokio-console
+
 FROM gramineproject/gramine:1.8-jammy AS runtime
 ENV DEBIAN_FRONTEND=noninteractive
 WORKDIR /opt/raiko
@@ -47,6 +50,8 @@ COPY --from=builder /opt/raiko/target/release/sgx-guest ./bin/
 COPY --from=builder /opt/raiko/target/release/raiko-host ./bin/
 COPY --from=builder /opt/raiko/target/release/raiko-setup ./bin/
 COPY --from=builder /opt/raiko/docker/enclave-key.pem /root/.config/gramine/enclave-key.pem
+# Copy tokio-console binary from builder
+COPY --from=builder /root/.cargo/bin/tokio-console ./bin/
 
 ARG EDMM=0
 ENV EDMM=${EDMM}

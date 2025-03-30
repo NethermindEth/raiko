@@ -10,6 +10,7 @@ use tracing_subscriber::FmtSubscriber;
 
 #[tokio::main]
 async fn main() -> HostResult<()> {
+    console_subscriber::init();
     dotenv::dotenv().ok();
     env_logger::Builder::from_default_env()
         .target(env_logger::Target::Stdout)
