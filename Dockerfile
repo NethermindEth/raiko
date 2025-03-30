@@ -12,6 +12,7 @@ ARG TASKDB=${TASKDB:-raiko-tasks/in-memory}
 WORKDIR /opt/raiko
 COPY . .
 RUN echo "Building for sgx with taskdb: ${TASKDB}"
+ENV RUSTFLAGS="--cfg tokio_unstable"
 RUN cargo build --release ${BUILD_FLAGS} --features "sgx" --features "docker_build" --features ${TASKDB}
 
 # Install tokio-console
