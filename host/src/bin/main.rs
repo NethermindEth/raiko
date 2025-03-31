@@ -6,11 +6,13 @@ use tracing_appender::{
     non_blocking::WorkerGuard,
     rolling::{Builder, Rotation},
 };
-use tracing_subscriber::FmtSubscriber;
+use tracing_subscriber::{FmtSubscriber, prelude::*};
 
 #[tokio::main]
 async fn main() -> HostResult<()> {
-    console_subscriber::init();
+    // Set up console_subscriber with tracing_subscriber instead of initializing separately
+    let console_layer = console_subscriber::ConsoleLayer::builder().with_default_env().spawn();
+    
     dotenv::dotenv().ok();
     env_logger::Builder::from_default_env()
         .target(env_logger::Target::Stdout)
@@ -20,6 +22,7 @@ async fn main() -> HostResult<()> {
         &state.opts.log_path,
         &state.opts.log_level,
         state.opts.max_log,
+        console_layer,
     );
     debug!("Start config:\n{:#?}", state.opts.proof_request_opt);
     debug!("Args:\n{:#?}", state.opts);
@@ -36,6 +39,7 @@ fn subscribe_log(
     log_path: &Option<PathBuf>,
     log_level: &String,
     max_log: usize,
+    console_layer: console_subscriber::ConsoleLayer,
 ) -> Option<WorkerGuard> {
     let subscriber_builder = FmtSubscriber::builder()
         .with_env_filter(log_level)
@@ -49,13 +53,22 @@ fn subscribe_log(
                 .build(log_path)
                 .expect("initializing rolling file appender failed");
             let (non_blocking, guard) = tracing_appender::non_blocking(file_appender);
-            let subscriber = subscriber_builder.json().with_writer(non_blocking).finish();
-            tracing::subscriber::set_global_default(subscriber).unwrap();
+            
+            // Combine the console layer with the file logging
+            tracing_subscriber::registry()
+                .with(console_layer)
+                .with(subscriber_builder.json().with_writer(non_blocking).into_builder())
+                .init();
+                
             Some(guard)
         }
         None => {
-            let subscriber = subscriber_builder.finish();
-            tracing::subscriber::set_global_default(subscriber).unwrap();
+            // Combine the console layer with stdout logging
+            tracing_subscriber::registry()
+                .with(console_layer)
+                .with(subscriber_builder.into_builder())
+                .init();
+                
             None
         }
     }
