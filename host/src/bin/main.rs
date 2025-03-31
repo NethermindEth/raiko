@@ -6,18 +6,19 @@ use tracing_appender::{
     non_blocking::WorkerGuard,
     rolling::{Builder, Rotation},
 };
-use tracing_subscriber::{FmtSubscriber, prelude::*, fmt, layer::SubscriberExt};
-use tracing::instrument::WithSubscriber;
+use tracing_subscriber::{prelude::*, fmt, layer::SubscriberExt, EnvFilter};
 
 #[tokio::main]
 async fn main() -> HostResult<()> {
-    // Initialize the console layer
+    // Get console layer
     let console_layer = console_subscriber::ConsoleLayer::builder().with_default_env().spawn();
     
     dotenv::dotenv().ok();
-    env_logger::Builder::from_default_env()
-        .target(env_logger::Target::Stdout)
-        .init();
+    // Remove env_logger initialization - we'll handle everything with tracing
+    // env_logger::Builder::from_default_env()
+    //    .target(env_logger::Target::Stdout)
+    //    .init();
+    
     let state = ProverState::init()?;
     let _guard = subscribe_log(
         &state.opts.log_path,
@@ -45,10 +46,12 @@ fn subscribe_log<L>(
 where
     L: tracing_subscriber::Layer<tracing_subscriber::Registry> + Send + Sync + 'static,
 {
-    // Use fmt module directly for layer construction
-    let fmt_layer = fmt::layer()
-        .with_test_writer()
-        .with_filter(tracing_subscriber::EnvFilter::new(log_level));
+    // Create a filter based on the log level
+    let filter = EnvFilter::new(log_level);
+    
+    // Create a stdout layer with the filter applied
+    let stdout_layer = fmt::layer()
+        .with_filter(filter.clone());
     
     match log_path {
         Some(ref log_path) => {
@@ -60,25 +63,26 @@ where
                 .expect("initializing rolling file appender failed");
             let (non_blocking, guard) = tracing_appender::non_blocking(file_appender);
             
-            // Create JSON layer for file output
+            // Create a JSON layer for file output
             let file_layer = fmt::layer()
                 .json()
                 .with_writer(non_blocking)
-                .with_filter(tracing_subscriber::EnvFilter::new(log_level));
+                .with_filter(filter);
             
-            // Combine the console layer with the file logging
+            // Set up a registry with all three layers
             tracing_subscriber::registry()
                 .with(console_layer)
+                .with(stdout_layer)  // Include stdout layer
                 .with(file_layer)
                 .init();
                 
             Some(guard)
         }
         None => {
-            // Combine the console layer with stdout logging
+            // Without a log path, just set up stdout and console
             tracing_subscriber::registry()
                 .with(console_layer)
-                .with(fmt_layer)
+                .with(stdout_layer)
                 .init();
                 
             None
