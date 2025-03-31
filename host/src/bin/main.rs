@@ -10,7 +10,7 @@ use tracing_subscriber::{FmtSubscriber, prelude::*};
 
 #[tokio::main]
 async fn main() -> HostResult<()> {
-    // Set up console_subscriber with tracing_subscriber instead of initializing separately
+    // Initialize the console layer
     let console_layer = console_subscriber::ConsoleLayer::builder().with_default_env().spawn();
     
     dotenv::dotenv().ok();
@@ -35,12 +35,15 @@ async fn main() -> HostResult<()> {
     Ok(())
 }
 
-fn subscribe_log(
+fn subscribe_log<L>(
     log_path: &Option<PathBuf>,
     log_level: &String,
     max_log: usize,
-    console_layer: console_subscriber::ConsoleLayer,
-) -> Option<WorkerGuard> {
+    console_layer: L,
+) -> Option<WorkerGuard>
+where
+    L: tracing_subscriber::Layer<tracing_subscriber::Registry> + Send + Sync + 'static,
+{
     let subscriber_builder = FmtSubscriber::builder()
         .with_env_filter(log_level)
         .with_test_writer();
@@ -57,7 +60,7 @@ fn subscribe_log(
             // Combine the console layer with the file logging
             tracing_subscriber::registry()
                 .with(console_layer)
-                .with(subscriber_builder.json().with_writer(non_blocking).into_builder())
+                .with(subscriber_builder.json().with_writer(non_blocking).finish().with_subscriber(tracing_subscriber::Registry::default()))
                 .init();
                 
             Some(guard)
@@ -66,7 +69,7 @@ fn subscribe_log(
             // Combine the console layer with stdout logging
             tracing_subscriber::registry()
                 .with(console_layer)
-                .with(subscriber_builder.into_builder())
+                .with(subscriber_builder.finish().with_subscriber(tracing_subscriber::Registry::default()))
                 .init();
                 
             None
