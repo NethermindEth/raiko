@@ -46,12 +46,9 @@ fn subscribe_log<L>(
 where
     L: tracing_subscriber::Layer<tracing_subscriber::Registry> + Send + Sync + 'static,
 {
-    // Create a filter based on the log level
-    let filter = EnvFilter::new(log_level);
-    
-    // Create a stdout layer with the filter applied
+    // Create a stdout layer with its own filter
     let stdout_layer = fmt::layer()
-        .with_filter(filter.clone());
+        .with_filter(EnvFilter::new(log_level));
     
     match log_path {
         Some(ref log_path) => {
@@ -63,16 +60,16 @@ where
                 .expect("initializing rolling file appender failed");
             let (non_blocking, guard) = tracing_appender::non_blocking(file_appender);
             
-            // Create a JSON layer for file output
+            // Create a JSON layer for file output with its own filter
             let file_layer = fmt::layer()
                 .json()
                 .with_writer(non_blocking)
-                .with_filter(filter);
+                .with_filter(EnvFilter::new(log_level));
             
             // Set up a registry with all three layers
             tracing_subscriber::registry()
                 .with(console_layer)
-                .with(stdout_layer)  // Include stdout layer
+                .with(stdout_layer)
                 .with(file_layer)
                 .init();
                 
