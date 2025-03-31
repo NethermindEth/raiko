@@ -6,7 +6,8 @@ use tracing_appender::{
     non_blocking::WorkerGuard,
     rolling::{Builder, Rotation},
 };
-use tracing_subscriber::{FmtSubscriber, prelude::*};
+use tracing_subscriber::{FmtSubscriber, prelude::*, fmt, layer::SubscriberExt};
+use tracing::instrument::WithSubscriber;
 
 #[tokio::main]
 async fn main() -> HostResult<()> {
@@ -44,9 +45,11 @@ fn subscribe_log<L>(
 where
     L: tracing_subscriber::Layer<tracing_subscriber::Registry> + Send + Sync + 'static,
 {
-    let subscriber_builder = FmtSubscriber::builder()
-        .with_env_filter(log_level)
-        .with_test_writer();
+    // Use fmt module directly for layer construction
+    let fmt_layer = fmt::layer()
+        .with_test_writer()
+        .with_filter(tracing_subscriber::EnvFilter::new(log_level));
+    
     match log_path {
         Some(ref log_path) => {
             let file_appender = Builder::new()
@@ -57,10 +60,16 @@ where
                 .expect("initializing rolling file appender failed");
             let (non_blocking, guard) = tracing_appender::non_blocking(file_appender);
             
+            // Create JSON layer for file output
+            let file_layer = fmt::layer()
+                .json()
+                .with_writer(non_blocking)
+                .with_filter(tracing_subscriber::EnvFilter::new(log_level));
+            
             // Combine the console layer with the file logging
             tracing_subscriber::registry()
                 .with(console_layer)
-                .with(subscriber_builder.json().with_writer(non_blocking).finish().with_subscriber(tracing_subscriber::Registry::default()))
+                .with(file_layer)
                 .init();
                 
             Some(guard)
@@ -69,7 +78,7 @@ where
             // Combine the console layer with stdout logging
             tracing_subscriber::registry()
                 .with(console_layer)
-                .with(subscriber_builder.finish().with_subscriber(tracing_subscriber::Registry::default()))
+                .with(fmt_layer)
                 .init();
                 
             None
