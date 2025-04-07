@@ -89,7 +89,6 @@ pub async fn run_prover(
     store: Option<&mut dyn IdWrite>,
 ) -> RaikoResult<Proof> {
     info!("run_prover: start");
-    let mut stop_handle = false;
     match proof_type {
         ProofType::Native => NativeProver::run(input.clone(), output, config, store)
             .await
@@ -111,13 +110,6 @@ pub async fn run_prover(
             Err(RaikoError::FeatureNotSupportedError(proof_type))
         }
         ProofType::Sgx => {
-            // WIP: Used for stopping the handle of proves in order to clear the output log for debugging
-            if stop_handle {
-                return Err(RaikoError::FeatureNotSupportedError(proof_type));
-            }
-
-            stop_handle = true;
-
             #[cfg(feature = "sgx")]
             return sgx_prover::SgxProver::run(input.clone(), output, config, store)
                 .await

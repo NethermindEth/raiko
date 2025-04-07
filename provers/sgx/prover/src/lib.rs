@@ -378,7 +378,8 @@ async fn prove(
     input: GuestInput,
     instance_id: u64,
 ) -> ProverResult<SgxResponse, ProverError> {
-    let handle = tokio::task::spawn_blocking(move || {
+    // let handle = tokio::task::spawn_blocking(move || {
+    let handle = {
         println!("Setting up SGX guest prover");
         let mut child = gramine_cmd
             .arg("one-shot")
@@ -427,18 +428,19 @@ async fn prove(
                 ))
             }
         }
-    });
+        // });
+    };
 
-    println!("Handle created");
+    println!("Handle created: {:#?}", handle);
 
-    let result = handle.await.map_err(|e| {
-        println!("SGX guest prover error");
-        ProverError::GuestError(e.to_string())
-    })?;
+    // let result = handle.await.map_err(|e| {
+    //     println!("SGX guest prover error");
+    //     ProverError::GuestError(e.to_string())
+    // })?;
 
-    println!("Handle result: {:?}", result);
+    // println!("Handle result: {:?}", result);
 
-    result
+    handle
 }
 
 async fn aggregate(
