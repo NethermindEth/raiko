@@ -12,8 +12,8 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use serde_with::{serde_as, DisplayFromStr};
 use std::{collections::HashMap, fmt::Display, path::Path};
-use utoipa::ToSchema;
 use tracing::info;
+use utoipa::ToSchema;
 
 #[derive(Debug, thiserror::Error, ToSchema)]
 pub enum RaikoError {
@@ -89,6 +89,7 @@ pub async fn run_prover(
     store: Option<&mut dyn IdWrite>,
 ) -> RaikoResult<Proof> {
     info!("run_prover: start");
+    let mut stop_handle = false;
     match proof_type {
         ProofType::Native => NativeProver::run(input.clone(), output, config, store)
             .await
@@ -110,10 +111,18 @@ pub async fn run_prover(
             Err(RaikoError::FeatureNotSupportedError(proof_type))
         }
         ProofType::Sgx => {
+            // WIP: Used for stopping the handle of proves in order to clear the output log for debugging
+            if stop_handle {
+                Err(RaikoError::FeatureNotSupportedError(proof_type))
+            }
+
+            stop_handle = true;
+
             #[cfg(feature = "sgx")]
             return sgx_prover::SgxProver::run(input.clone(), output, config, store)
                 .await
                 .map_err(|e| e.into());
+
             #[cfg(not(feature = "sgx"))]
             Err(RaikoError::FeatureNotSupportedError(proof_type))
         }
