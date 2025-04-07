@@ -113,7 +113,7 @@ pub async fn run_prover(
         ProofType::Sgx => {
             // WIP: Used for stopping the handle of proves in order to clear the output log for debugging
             if stop_handle {
-                Err(RaikoError::FeatureNotSupportedError(proof_type))
+                return Err(RaikoError::FeatureNotSupportedError(proof_type));
             }
 
             stop_handle = true;
