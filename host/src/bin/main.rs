@@ -6,19 +6,21 @@ use tracing_appender::{
     non_blocking::WorkerGuard,
     rolling::{Builder, Rotation},
 };
-use tracing_subscriber::{prelude::*, fmt, layer::SubscriberExt, EnvFilter};
+use tracing_subscriber::{fmt, layer::SubscriberExt, prelude::*, EnvFilter};
 
 #[tokio::main]
 async fn main() -> HostResult<()> {
     // Get console layer
-    let console_layer = console_subscriber::ConsoleLayer::builder().with_default_env().spawn();
-    
+    let console_layer = console_subscriber::ConsoleLayer::builder()
+        .with_default_env()
+        .spawn();
+
     dotenv::dotenv().ok();
     // Remove env_logger initialization - we'll handle everything with tracing
     // env_logger::Builder::from_default_env()
     //    .target(env_logger::Target::Stdout)
     //    .init();
-    
+
     let state = ProverState::init()?;
     let _guard = subscribe_log(
         &state.opts.log_path,
@@ -47,9 +49,8 @@ where
     L: tracing_subscriber::Layer<tracing_subscriber::Registry> + Send + Sync + 'static,
 {
     // Create a stdout layer with its own filter
-    let stdout_layer = fmt::layer()
-        .with_filter(EnvFilter::new(log_level));
-    
+    let stdout_layer = fmt::layer().with_filter(EnvFilter::new("debug"));
+
     match log_path {
         Some(ref log_path) => {
             let file_appender = Builder::new()
@@ -59,20 +60,20 @@ where
                 .build(log_path)
                 .expect("initializing rolling file appender failed");
             let (non_blocking, guard) = tracing_appender::non_blocking(file_appender);
-            
+
             // Create a JSON layer for file output with its own filter
             let file_layer = fmt::layer()
                 .json()
                 .with_writer(non_blocking)
                 .with_filter(EnvFilter::new(log_level));
-            
+
             // Set up a registry with all three layers
             tracing_subscriber::registry()
                 .with(console_layer)
                 .with(stdout_layer)
                 .with(file_layer)
                 .init();
-                
+
             Some(guard)
         }
         None => {
@@ -81,7 +82,7 @@ where
                 .with(console_layer)
                 .with(stdout_layer)
                 .init();
-                
+
             None
         }
     }

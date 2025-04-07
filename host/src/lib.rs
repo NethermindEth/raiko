@@ -63,7 +63,7 @@ pub struct Opts {
     /// Use a local directory as a cache for input. Accepts a custom directory.
     pub cache_path: Option<PathBuf>,
 
-    #[arg(long, require_equals = true, env = "RUST_LOG", default_value = "info")]
+    #[arg(long, require_equals = true, env = "RUST_LOG", default_value = "debug")]
     #[serde(default = "Opts::default_log_level")]
     /// Set the log level
     pub log_level: String,
