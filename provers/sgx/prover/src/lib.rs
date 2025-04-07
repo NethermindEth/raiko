@@ -400,7 +400,12 @@ async fn prove(
                 println!("SGX guest prover output received");
                 handle_output(&output, "SGX prove")?;
                 println!("SGX guest prover output handled");
-                Ok(parse_sgx_result(output.stdout)?)
+                let sgx_response = parse_sgx_result(output.stdout).map_err(|e| {
+                    println!("parse_sgx_result error: {e}");
+                    ProverError::GuestError(e)
+                })?;
+                println!("parse_sgx_result response: {sgx_response:?}");
+                Ok(sgx_response)
             }
             (Err(i), output_success) => {
                 println!("SGX guest prover input serialization error, output is {:?}", output_success);
