@@ -404,7 +404,7 @@ async fn prove(
                     println!("parse_sgx_result error: {e}");
                     ProverError::GuestError(e)
                 })?;
-                println!("parse_sgx_result response: {sgx_response:?}");
+                println!("parse_sgx_result response successful");
                 Ok(sgx_response)
             }
             (Err(i), output_success) => {
