@@ -40,7 +40,7 @@ pub struct SgxParam {
     pub prove: bool,
 }
 
-#[derive(Default, Clone, Serialize, Deserialize)]
+#[derive(Default, Clone, Serialize, Deserialize, Debug)]
 #[serde(rename_all = "camelCase")]
 pub struct SgxResponse {
     /// proof format: 4b(id)+20b(pubkey)+65b(signature)
@@ -378,7 +378,7 @@ async fn prove(
     input: GuestInput,
     instance_id: u64,
 ) -> ProverResult<SgxResponse, ProverError> {
-    tokio::task::spawn_blocking(move || {
+    let handle = tokio::task::spawn_blocking(move || {
         println!("Setting up SGX guest prover");
         let mut child = gramine_cmd
             .arg("one-shot")
@@ -427,12 +427,18 @@ async fn prove(
                 ))
             }
         }
-    })
-    .await
-    .map_err(|e| {
+    });
+
+    println!("Handle created");
+
+    let result = handle.await.map_err(|e| {
         println!("SGX guest prover error");
         ProverError::GuestError(e.to_string())
-    })?
+    })?;
+
+    println!("Handle result: {:?}", result);
+
+    result
 }
 
 async fn aggregate(
