@@ -70,9 +70,11 @@ impl ProofActor {
         >::new()));
         let pending_tasks = Arc::new(Mutex::new(VecDeque::<ProofRequest>::new()));
 
-        let available_gpus: Arc<Mutex<VecDeque<u32>>> = Arc::new(Mutex::new(
-            VecDeque::from((0..opts.concurrency_limit).map(|x| x as u32).collect::<Vec<u32>>()),
-        ));
+        let available_gpus: Arc<Mutex<VecDeque<u32>>> = Arc::new(Mutex::new(VecDeque::from(
+            (0..opts.concurrency_limit)
+                .map(|x| x as u32)
+                .collect::<Vec<u32>>(),
+        )));
 
         Self {
             opts,
@@ -289,7 +291,6 @@ impl ProofActor {
                             let gpu_number = available_gpus.pop_front().expect("No available GPU");
                             proof_request.set_gpu_number(Some(gpu_number));
                         }
-
 
                         info!("Running task {proof_request:?}");
                         self.run_task(proof_request).await;
@@ -604,6 +605,8 @@ pub async fn handle_proof(
         &input,
     )?;
 
+    info!("Sending proof back: {:#?}", proof);
+
     Ok(proof)
 }
 
@@ -637,7 +640,7 @@ mod tests {
             proof_type: Default::default(),
             blob_proof_type: Default::default(),
             prover_args: HashMap::new(),
-            gpu_number: Some(0)
+            gpu_number: Some(0),
         });
 
         let result = actor.handle_system_pause().await;
@@ -711,7 +714,7 @@ mod tests {
                 proof_type: Default::default(),
                 blob_proof_type: Default::default(),
                 prover_args: HashMap::new(),
-                gpu_number: Some(0)
+                gpu_number: Some(0),
             });
         }
 
