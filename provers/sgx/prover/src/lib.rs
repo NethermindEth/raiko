@@ -137,7 +137,10 @@ impl Prover for SgxProver {
                 cmd.arg("gramine-sgx");
                 cmd
             };
-            println!("Setting current directory to {:?} and using ELF: {}", &cur_dir, ELF_NAME);
+            println!(
+                "Setting current directory to {:?} and using ELF: {}",
+                &cur_dir, ELF_NAME
+            );
             cmd.current_dir(&cur_dir).arg(ELF_NAME);
             cmd
         };
@@ -160,7 +163,8 @@ impl Prover for SgxProver {
         if sgx_param.prove {
             println!("Proving");
             // overwrite sgx_proof as the bootstrap quote stays the same in bootstrap & prove.
-            sgx_proof = prove(gramine_cmd(), input.clone(), sgx_param.instance_id).await
+            sgx_proof = prove(gramine_cmd(), input.clone(), sgx_param.instance_id).await;
+            println!("Proved");
         }
 
         println!("SGX proof retrieved");
@@ -408,7 +412,10 @@ async fn prove(
                 Ok(sgx_response)
             }
             (Err(i), output_success) => {
-                println!("SGX guest prover input serialization error, output is {:?}", output_success);
+                println!(
+                    "SGX guest prover input serialization error, output is {:?}",
+                    output_success
+                );
                 Err(ProverError::GuestError(format!(
                     "Can not serialize input for SGX {i}, output is {output_success:?}"
                 )))
