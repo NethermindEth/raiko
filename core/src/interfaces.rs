@@ -78,6 +78,12 @@ impl From<raiko_lib::mem_db::DbError> for RaikoError {
     }
 }
 
+impl From<eyre::Report> for RaikoError {
+    fn from(e: eyre::Report) -> Self {
+        RaikoError::Anyhow(anyhow::anyhow!(e.to_string()))
+    }
+}
+
 pub type RaikoResult<T> = Result<T, RaikoError>;
 
 /// Run the prover driver depending on the proof type.
