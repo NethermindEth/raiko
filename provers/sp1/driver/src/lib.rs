@@ -117,7 +117,6 @@ impl Prover for Sp1Prover {
             .unwrap();
         info!("GPU Number: {}", gpu_number);
 
-        let network_client = Arc::new(ProverClient::builder().network().build());
         let client: Box<dyn SP1ProverTrait<CpuProverComponents>> = match mode {
             ProverMode::Mock => Box::new(ProverClient::builder().mock().build()),
             ProverMode::Local => Box::new(
@@ -148,6 +147,7 @@ impl Prover for Sp1Prover {
                 .prove(&pk, &stdin, prove_mode)
                 .map_err(|e| ProverError::GuestError(format!("Sp1: local proving failed: {e}")))?
         } else {
+            let network_client = Arc::new(ProverClient::builder().network().build());
             let proof_id = network_client
                 .prove(&pk, &stdin)
                 .mode(param.recursion.clone().into())
