@@ -22,7 +22,11 @@ ENV DEBIAN_FRONTEND=noninteractive
 WORKDIR /opt/raiko
 
 RUN apt-get update && \
-    apt-get install -y \
+    apt-get install -y wget && \
+    echo "deb [arch=amd64] https://download.01.org/intel-sgx/sgx_repo/ubuntu focal main" > /etc/apt/sources.list.d/intel-sgx.list && \
+    wget -qO - https://download.01.org/intel-sgx/sgx_repo/ubuntu/intel-sgx-deb.key | apt-key add - && \
+    apt-get update && \
+    apt-get install -y --fix-missing \
     cracklib-runtime \
     libsgx-dcap-default-qpl \
     libsgx-dcap-ql \
