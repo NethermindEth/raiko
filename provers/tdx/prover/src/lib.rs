@@ -20,10 +20,13 @@ use raiko_lib::{
     protocol_instance::aggregation_output_combine,
     Measurement,
 };
+use rand::Rng;
 use serde::{Deserialize, Serialize};
 use sha3::{Digest, Keccak256};
 use tokio::process::Command;
 use tracing::{debug, error, info, warn};
+
+mod attestation;
 
 pub const TDX_PROVER_CODE: u8 = ProofType::Tdx as u8;
 pub const TDX_PROOF_SIZE: usize = 89;
@@ -325,11 +328,28 @@ fn create_aggregation_proof(
 }
 
 fn generate_tdx_quote(user_report_data: &B256) -> Result<TdxQuote> {
-    warn!("TDX quote generation not implemented yet, returning placeholder");
-    let placeholder_quote = TdxQuote {
-        data: vec![0u8; 1024],
-    };
-    Ok(placeholder_quote)
+    // Check if we're running in a TDX environment
+    if !attestation::is_tdx_cvm()? {
+        warn!("Not running in TDX CVM, returning placeholder quote");
+        return Ok(TdxQuote {
+            data: vec![0u8; 1024],
+        });
+    }
+
+    // Use the report data as user data, and generate a nonce
+    let user_data = user_report_data.as_slice();
+    let nonce: [u8; 32] = rand::thread_rng().gen();
+    let nonce = nonce.to_vec();
+    
+    // Issue the attestation document
+    let attestation_doc = attestation::issue(user_data, &nonce)?;
+    
+    // Parse the attestation document to extract the quote
+    let instance_info: attestation::InstanceInfo = serde_json::from_slice(&attestation_doc)?;
+    
+    Ok(TdxQuote {
+        data: instance_info.attestation_report,
+    })
 }
 
 #[cfg(test)]

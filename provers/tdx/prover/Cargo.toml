@@ -37,3 +37,8 @@ dirs = { workspace = true }
 
 # For instance ID
 uuid = { version = "1.10", features = ["v4", "serde"] }
+
+# Azure TDX attestation
+az-tdx-vtpm = "0.7.1"
+sha2 = "0.10"
+rand = { workspace = true }
