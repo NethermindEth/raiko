@@ -121,3 +121,7 @@ if [ -z "$1" ] || [ "$1" == "sp1" ]; then
 	# 	/home/runner/.sp1/bin/sp1up
 	# fi
 fi
+# TDX
+if [ -z "$1" ] || [ "$1" == "tdx" ]; then
+	echo "TDX prover doesn't require additional toolchain installation"
+fi
