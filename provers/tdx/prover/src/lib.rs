@@ -65,10 +65,12 @@ impl Prover for TdxProver {
 
         let private_key = load_private_key(&config_dir)?;
         let public_key = get_public_key_from_private(&private_key)?;
+        let new_instance = public_key_to_address(&public_key);
 
         let instance_id = load_instance_id(&config_dir)?;
 
-        let pi_hash = output.protocol_instance.sgx_instance(instance_id).calc_hash();
+        let pi = ProtocolInstance::new(&input, &input.block.header, ProofType::Tdx)?.sgx_instance(new_instance);
+        let pi_hash = pi.instance_hash();
         let signature = sign_message(&private_key, &pi_hash)?;
         let proof = create_proof(instance_id, &public_key, &signature)?;
         let quote = generate_tdx_quote(&pi_hash)?;

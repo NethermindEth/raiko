@@ -38,6 +38,7 @@ pub struct PreflightData {
     pub taiko_chain_spec: ChainSpec,
     pub prover_data: TaikoProverData,
     pub blob_proof_type: BlobProofType,
+    pub proof_type: ProofType,
 }
 
 pub struct BatchPreflightData {
@@ -58,6 +59,7 @@ impl PreflightData {
         taiko_chain_spec: ChainSpec,
         prover_data: TaikoProverData,
         blob_proof_type: BlobProofType,
+        proof_type: ProofType,
     ) -> Self {
         Self {
             block_number,
@@ -66,6 +68,7 @@ impl PreflightData {
             taiko_chain_spec,
             prover_data,
             blob_proof_type,
+            proof_type,
         }
     }
 }
@@ -78,6 +81,7 @@ pub async fn preflight<BDP: BlockDataProvider>(
         taiko_chain_spec,
         prover_data,
         blob_proof_type,
+        proof_type,
         l1_inclusion_block_number,
     }: PreflightData,
 ) -> RaikoResult<GuestInput> {
@@ -123,6 +127,11 @@ pub async fn preflight<BDP: BlockDataProvider>(
     let initial_db_with_headers = load_state_db((parent_block_number, parent_block.header.hash));
     #[cfg(not(feature = "statedb_lru"))]
     let initial_db_with_headers = None;
+
+    if proof_type == ProofType::Tdx {
+        info!("preflight: skipping re-execution since TDX proof");
+        return Ok(input);
+    }
 
     // Create the block builder, run the transactions and extract the DB
     let provider_db = ProviderDb::new(
