@@ -1,0 +1,39 @@
+[package]
+name = "raiko-tdx"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+# Core dependencies
+raiko-lib = { workspace = true, features = ["std"] }
+raiko-core = { workspace = true }
+
+# Crypto
+secp256k1 = { workspace = true }
+hex = { workspace = true }
+sha3 = { workspace = true }
+
+# Serialization
+serde = { workspace = true }
+serde_json = { workspace = true }
+bincode = { workspace = true }
+
+# Error handling
+thiserror = { workspace = true }
+anyhow = { workspace = true }
+
+# Async runtime
+tokio = { workspace = true }
+
+# Logging
+tracing = { workspace = true }
+
+# Path and file handling
+dirs = { workspace = true }
+
+# For instance ID generation
+uuid = { version = "1.10", features = ["v4", "serde"] }
+
+[features]
+default = []
+enable = []
