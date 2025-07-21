@@ -14,8 +14,10 @@ use raiko_core::{
 };
 use raiko_lib::prover::{IdStore, ProofKey, ProverError};
 use raiko_lib::{
-    primitives::{Address, B256},
+    input::RawAggregationGuestInput,
+    primitives::{Address, B256, keccak},
     proof_type::ProofType,
+    protocol_instance::aggregation_output_combine,
     Measurement,
 };
 use serde::{Deserialize, Serialize};
@@ -25,6 +27,7 @@ use tracing::{debug, error, info, warn};
 
 pub const TDX_PROVER_CODE: u8 = ProofType::Tdx as u8;
 pub const TDX_PROOF_SIZE: usize = 89;
+pub const TDX_AGGREGATION_PROOF_SIZE: usize = 109;
 
 pub struct TdxProver;
 
@@ -80,11 +83,89 @@ impl Prover for TdxProver {
     }
 
     async fn aggregate(
-        _inputs: Vec<AggregationGuestInput>,
-        _output: &AggregationGuestOutput,
+        input: AggregationGuestInput,
+        output: &AggregationGuestOutput,
         _config: &ProofRequestOpt,
     ) -> Result<RaikoProof> {
-        bail!("TDX prover doesn't support aggregation")
+        info!("Running TDX aggregation prover for {} proofs", inputs.len());
+
+        let config_dir = get_config_dir()?;
+
+        let private_key = load_private_key(&config_dir)?;
+        let new_instance = get_public_key_from_private(&private_key)?;
+
+        let instance_id = load_instance_id(&config_dir)?;
+
+        let raw_input = RawAggregationGuestInput {
+            proofs: input
+                .proofs
+                .iter()
+                .map(|proof| {
+                    let proof_data: TdxProverData = serde_json::from_str(&proof.proof.as_ref().unwrap())
+                        .map_err(|e| anyhow!("Failed to parse TDX proof data: {}", e))?;
+                    
+                    Ok(raiko_lib::input::RawProof {
+                        input: proof.input.unwrap(),
+                        proof: hex::decode(&proof_data.proof[2..])?,
+                    })
+                })
+                .collect::<Result<Vec<_>>>()?,
+        };
+
+        let old_instance = if !raw_input.proofs.is_empty() {
+            Address::from_slice(&raw_input.proofs[0].proof[4..24])
+        } else {
+            new_instance
+        };
+        
+        let mut cur_instance = old_instance;
+
+        for proof in raw_input.proofs.iter() {
+            let signature = &proof.proof[24..89];
+            let recovered = recover_signer_unchecked(signature.try_into()?, &proof.input)?;
+            
+            if recovered != cur_instance {
+                bail!("Proof chain verification failed: expected signer {}, got {}", cur_instance, recovered);
+            }
+
+            cur_instance = Address::from_slice(&proof.proof[4..24]);
+        }
+
+        if cur_instance != new_instance {
+            bail!("Proof chain does not end with current instance: expected {}, got {}", new_instance, cur_instance);
+        }
+
+        let aggregation_hash = keccak(aggregation_output_combine(
+            [
+                vec![
+                    B256::left_padding_from(old_instance.as_ref()),
+                    B256::left_padding_from(new_instance.as_ref()),
+                ],
+                raw_input
+                    .proofs
+                    .iter()
+                    .map(|proof| proof.input)
+                    .collect::<Vec<_>>(),
+            ]
+            .concat(),
+        ));
+
+        let signature = sign_message(&private_key, &aggregation_hash)?;
+
+        let proof = create_aggregation_proof(instance_id, &old_instance, &new_instance, &signature)?;
+
+        let quote = generate_tdx_quote(&aggregation_hash)?;
+
+        let prover_data = TdxProverData {
+            proof: hex::encode(&proof),
+            quote: hex::encode(&quote.data),
+            public_key: new_instance.encode_hex(),
+        };
+
+        Ok(RaikoProof {
+            proof: serde_json::to_string(&prover_data)?,
+            proof_type: TDX_PROVER_CODE,
+        })
     }
 
     async fn cancel(_proof_key: ProofKey, _read: Box<&mut dyn IdStore>) -> Result<()> {
@@ -193,9 +274,28 @@ fn sign_message(private_key: &secp256k1::SecretKey, message: &B256) -> Result<[u
     let (recovery_id, sig_bytes) = sig.serialize_compact();
     let mut signature = [0u8; 65];
     signature[..64].copy_from_slice(&sig_bytes);
-    signature[64] = recovery_id.to_i32() as u8;
+    signature[64] = recovery_id.to_i32() as u8 + 27; // Add 27 for Ethereum compatibility
     
     Ok(signature)
+}
+
+fn recover_signer_unchecked(sig: &[u8; 65], msg: &B256) -> Result<Address> {
+    use secp256k1::{ecdsa::{RecoverableSignature, RecoveryId}, Message};
+    
+    let sig = RecoverableSignature::from_compact(
+        &sig[0..64],
+        RecoveryId::from_i32((sig[64] as i32) - 27)?,
+    )?;
+    
+    let secp = secp256k1::Secp256k1::new();
+    let message = Message::from_digest_slice(msg.as_slice())?;
+    let public_key = secp.recover_ecdsa(&message, &sig)?;
+    
+    // Convert public key to Ethereum address
+    let public_key_bytes = public_key.serialize_uncompressed();
+    let hash = Keccak256::digest(&public_key_bytes[1..]); // Skip the 0x04 prefix
+    
+    Ok(Address::from_slice(&hash[12..]))
 }
 
 fn create_proof(instance_id: u32, public_key: &Address, signature: &[u8; 65]) -> Result<Vec<u8>> {
@@ -205,6 +305,22 @@ fn create_proof(instance_id: u32, public_key: &Address, signature: &[u8; 65]) ->
     proof.extend_from_slice(public_key.as_slice());
     proof.extend_from_slice(signature);
     
+    Ok(proof)
+}
+
+fn create_aggregation_proof(
+    instance_id: u32,
+    old_instance: &Address,
+    new_instance: &Address,
+    signature: &[u8; 65],
+) -> Result<Vec<u8>> {
+    let mut proof = Vec::with_capacity(TDX_AGGREGATION_PROOF_SIZE);
+
+    proof.extend_from_slice(&instance_id.to_be_bytes());
+    proof.extend_from_slice(old_instance.as_slice());
+    proof.extend_from_slice(new_instance.as_slice());
+    proof.extend_from_slice(signature);
+
     Ok(proof)
 }
 
