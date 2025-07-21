@@ -55,8 +55,8 @@ pub struct TdxProverData {
 
 impl Prover for TdxProver {
     async fn run(
-        input: ProverGuestInput,
-        output: &ProverGuestOutput,
+        input: GuestInput,
+        _output: &GuestOutput,
         _config: &ProofRequestOpt,
     ) -> Result<RaikoProof> {
         info!("Running TDX prover");
