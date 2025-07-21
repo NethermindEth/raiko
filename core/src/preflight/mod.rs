@@ -6,6 +6,7 @@ use raiko_lib::{
     builder::RethBlockBuilder,
     consts::ChainSpec,
     input::{BlobProofType, GuestInput, TaikoGuestInput, TaikoProverData},
+    proof_type::ProofType,
     primitives::mpt::proofs_to_tries,
     Measurement,
 };
@@ -26,6 +27,7 @@ pub struct PreflightData {
     pub taiko_chain_spec: ChainSpec,
     pub prover_data: TaikoProverData,
     pub blob_proof_type: BlobProofType,
+    pub proof_type: ProofType,
 }
 
 impl PreflightData {
@@ -36,6 +38,7 @@ impl PreflightData {
         taiko_chain_spec: ChainSpec,
         prover_data: TaikoProverData,
         blob_proof_type: BlobProofType,
+        proof_type: ProofType,
     ) -> Self {
         Self {
             block_number,
@@ -44,6 +47,7 @@ impl PreflightData {
             taiko_chain_spec,
             prover_data,
             blob_proof_type,
+            proof_type,
         }
     }
 }
@@ -56,6 +60,7 @@ pub async fn preflight<BDP: BlockDataProvider>(
         taiko_chain_spec,
         prover_data,
         blob_proof_type,
+        proof_type,
         l1_inclusion_block_number,
     }: PreflightData,
 ) -> RaikoResult<GuestInput> {
@@ -101,6 +106,11 @@ pub async fn preflight<BDP: BlockDataProvider>(
     };
 
     info!("preflight: guest input done");
+
+    if proof_type == ProofType::Tdx {
+        info!("preflight: skipping re-execution since TDX proof");
+        return Ok(input);
+    }
 
     // Create the block builder, run the transactions and extract the DB
     let provider_db = ProviderDb::new(provider, taiko_chain_spec, parent_block_number).await?;
