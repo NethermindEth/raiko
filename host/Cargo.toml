@@ -10,6 +10,7 @@ default-run = "raiko-host"
 sp1-driver = { path = "../provers/sp1/driver", optional = true }
 risc0-driver = { path = "../provers/risc0/driver", optional = true }
 sgx-prover = { path = "../provers/sgx/prover", optional = true }
+tdx-prover = { path = "../provers/tdx/prover", optional = true }
 
 # raiko
 raiko-lib = { workspace = true }
@@ -31,6 +32,10 @@ alloy-rpc-client = { workspace = true }
 # crypto
 kzg = { workspace = true }
 kzg_traits = { workspace = true }
+secp256k1 = { workspace = true }
+sha3 = { workspace = true }
+hex = { workspace = true }
+dirs = { workspace = true }
 
 # server
 axum = { workspace = true }
@@ -88,6 +93,7 @@ default = []
 sp1 = ["raiko-core/sp1"]
 risc0 = ["raiko-core/risc0"]
 sgx = ["raiko-core/sgx"]
+tdx = ["raiko-core/tdx", "dep:tdx-prover"]
 integration = []
 
 [[bin]]

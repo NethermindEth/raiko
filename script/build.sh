@@ -6,6 +6,7 @@ set -e
 TOOLCHAIN_RISC0=+nightly-2024-09-05
 TOOLCHAIN_SP1=+nightly-2024-09-05
 TOOLCHAIN_SGX=+nightly-2024-09-05
+TOOLCHAIN_TDX=+nightly-2024-09-05
 
 check_toolchain() {
     local TOOLCHAIN=$1
@@ -167,6 +168,30 @@ if [ "$1" == "sp1" ]; then
             # Don't wannt to span Succinct Network and wait 2 hours in CI
             # echo "Running Sp1 verification"
             # cargo ${TOOLCHAIN_SP1} run ${FLAGS} --bin sp1-verifier --features enable,sp1-verifier -F $TASKDB
+        fi
+    fi
+fi
+
+# TDX
+if [ "$1" == "tdx" ]; then
+    check_toolchain $TOOLCHAIN_TDX
+    if [ -n "${CLIPPY}" ]; then
+        cargo ${TOOLCHAIN_TDX} clippy -p raiko-host -p tdx-prover -F "tdx enable" -F $TASKDB -- -D warnings
+    elif [ -z "${RUN}" ]; then
+        if [ -z "${TEST}" ]; then
+            echo "Building TDX prover"
+            cargo ${TOOLCHAIN_TDX} build ${FLAGS} --features tdx -F $TASKDB
+        else
+            echo "Building TDX tests"
+            cargo ${TOOLCHAIN_TDX} test ${FLAGS} -p raiko-host -p tdx-prover --features "tdx enable" -F $TASKDB --no-run
+        fi
+    else
+        if [ -z "${TEST}" ]; then
+            echo "Running TDX prover"
+            cargo ${TOOLCHAIN_TDX} run ${FLAGS} --features tdx -F $TASKDB
+        else
+            echo "Running TDX tests"
+            cargo ${TOOLCHAIN_TDX} test ${FLAGS} -p raiko-host -p tdx-prover --features "tdx enable" -F $TASKDB
         fi
     fi
 fi
