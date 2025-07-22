@@ -8,43 +8,32 @@ name = "tdx_prover"
 path = "src/lib.rs"
 
 [dependencies]
-raiko-lib = { workspace = true, features = ["std"], optional = true }
+raiko-lib = { workspace = true, features = ["std"] }
 
 # Crypto
-secp256k1 = { workspace = true, optional = true }
-hex = { workspace = true, optional = true }
-sha3 = { workspace = true, optional = true }
+secp256k1 = { workspace = true }
+hex = { workspace = true }
+sha3 = { workspace = true }
 
 # Serialization
-serde = { workspace = true, optional = true }
-serde_json = { workspace = true, optional = true }
-bincode = { workspace = true, optional = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
 
 # Error handling
 thiserror = { workspace = true }
 anyhow = { workspace = true }
 
-# Async runtime
-tokio = { workspace = true, optional = true }
-
 # Logging
-tracing = { workspace = true, optional = true }
+tracing = { workspace = true }
 
 # Path and file handling
-dirs = { workspace = true, optional = true }
-
-# For instance ID
-uuid = { version = "1.10", features = ["v4", "serde"], optional = true }
+dirs = { workspace = true }
 
 # Azure TDX attestation
-az-tdx-vtpm = { version = "0.7.1", optional = true }
-sha2 = { version = "0.10", optional = true }
-rand = { workspace = true, optional = true }
+az-tdx-vtpm = { version = "0.7.1" }
+sha2 = { version = "0.10" }
+rand = { workspace = true }
 
 [features]
 default = []
-enable = [
-    "raiko-lib", "secp256k1", "hex", "sha3", "serde", "serde_json", 
-    "bincode", "tokio", "tracing", "dirs", "uuid", "az-tdx-vtpm", 
-    "sha2", "rand"
-]
+enable = []
