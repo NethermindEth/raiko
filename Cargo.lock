@@ -10049,7 +10049,6 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "az-tdx-vtpm",
- "bincode",
  "dirs",
  "hex",
  "raiko-lib",
@@ -10060,9 +10059,7 @@ dependencies = [
  "sha2",
  "sha3",
  "thiserror 1.0.69",
- "tokio",
  "tracing",
- "uuid",
 ]
 
 [[package]]
