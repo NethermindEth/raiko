@@ -1,3 +1,5 @@
+#![cfg(feature = "enable")]
+
 use std::{
     fs,
     path::{Path, PathBuf},

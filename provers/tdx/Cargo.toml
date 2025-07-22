@@ -5,8 +5,8 @@ edition = "2021"
 
 [dependencies]
 # Prover module
-tdx-prover = { path = "prover", optional = true }
+tdx-prover = { path = "prover", features = ["enable"] }
 
 [features]
 default = []
-enable = ["dep:tdx-prover", "tdx-prover/enable"]
+enable = []
