@@ -6,6 +6,7 @@ set -e
 TOOLCHAIN_RISC0=+nightly-2024-09-05
 TOOLCHAIN_SP1=+nightly-2024-09-05
 TOOLCHAIN_SGX=+nightly-2024-09-05
+TOOLCHAIN_TDX=+nightly-2024-09-05
 export PROOF_TYPE="$1"
 
 check_toolchain() {
@@ -60,4 +61,10 @@ if [ "$1" == "sp1" ]; then
 	check_toolchain $TOOLCHAIN_SP1
 	cargo ${TOOLCHAIN_SP1} run --bin sp1-builder
 	cargo ${TOOLCHAIN_SP1} test -F "sp1 integration" run_scenarios_sequentially
+fi
+
+# TDX
+if [ "$1" == "tdx" ]; then
+	check_toolchain $TOOLCHAIN_TDX
+	cargo ${TOOLCHAIN_TDX} test -F "tdx integration" run_scenarios_sequentially
 fi

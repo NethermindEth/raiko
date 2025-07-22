@@ -32,6 +32,7 @@ pub mod report;
 /// - sgx - uses the sgx environment to construct a block and produce proof of execution
 /// - sp1 - uses the sp1 prover
 /// - risc0 - uses the risc0 prover
+/// - tdx - uses the tdx environment to construct a block and produce proof of execution
 async fn proof_handler(
     State(prover_state): State<ProverState>,
     Json(req): Json<Value>,
@@ -58,6 +59,10 @@ async fn proof_handler(
             "sgx" => {
                 #[cfg(not(feature = "sgx"))]
                 return Ok(TaskStatus::AnyhowError("SGX not supported".to_string()).into());
+            }
+            "tdx" => {
+                #[cfg(not(feature = "tdx"))]
+                return Ok(TaskStatus::AnyhowError("TDX not supported".to_string()).into());
             }
             _ => {
                 return Ok(
