@@ -58,6 +58,7 @@ impl Raiko {
                 prover: self.request.prover,
             },
             self.request.blob_proof_type.clone(),
+            self.request.proof_type,
         )
     }
 
@@ -402,6 +403,14 @@ mod tests {
                     "instance_id": 121,
                     "setup": enable_aggregation,
                     "bootstrap": enable_aggregation,
+                    "prove": true,
+                }
+            },
+        );
+        prover_args.insert(
+            "tdx".to_string(),
+            json! {
+                {
                     "prove": true,
                 }
             },

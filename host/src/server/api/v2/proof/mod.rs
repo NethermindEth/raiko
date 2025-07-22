@@ -42,7 +42,11 @@ pub mod report;
 /// - sgx - uses the sgx environment to construct a block and produce proof of execution
 /// - sp1 - uses the sp1 prover
 /// - risc0 - uses the risc0 prover
-async fn proof_handler(State(actor): State<Actor>, Json(req): Json<Value>) -> HostResult<Status> {
+/// - tdx - uses the tdx environment to construct a block and produce proof of execution
+async fn proof_handler(
+    State(actor): State<Actor>,
+    Json(req): Json<Value>,
+) -> HostResult<Status> {
     inc_current_req();
 
     // Override the existing proof request config from the config file and command line
@@ -91,6 +95,10 @@ async fn proof_handler(State(actor): State<Actor>, Json(req): Json<Value>) -> Ho
                     ProofType::from_str(proof_type)?,
                     TaskStatus::AnyhowError("SGX not supported".to_string()),
                 ));
+            }
+            "tdx" => {
+                #[cfg(not(feature = "tdx"))]
+                return Ok(TaskStatus::AnyhowError("TDX not supported".to_string()).into());
             }
             _ => {
                 return Ok(Status::new_from_task_status(

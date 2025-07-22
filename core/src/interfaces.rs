@@ -477,6 +477,8 @@ pub struct ProverSpecificOpts {
     pub sp1: Option<Value>,
     /// RISC0 prover specific options.
     pub risc0: Option<Value>,
+    /// TDX prover specific options.
+    pub tdx: Option<Value>,
 }
 
 impl<S: ::std::hash::BuildHasher + ::std::default::Default> From<ProverSpecificOpts>
@@ -489,6 +491,7 @@ impl<S: ::std::hash::BuildHasher + ::std::default::Default> From<ProverSpecificO
             ("sgxgeth", value.sgxgeth.clone()),
             ("sp1", value.sp1.clone()),
             ("risc0", value.risc0.clone()),
+            ("tdx", value.tdx.clone()),
         ]
         .into_iter()
         .filter_map(|(name, value)| value.map(|v| (name.to_string(), v)))

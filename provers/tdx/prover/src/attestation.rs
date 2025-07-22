@@ -56,7 +56,7 @@ fn get_instance_info(extra_data: &[u8]) -> Result<InstanceInfo> {
     // The extra_data should be in the reportdata field (first 32 bytes after var_data hash)
     let report_data = &td_report.report_mac.reportdata;
     let var_data_hash = &report_data[..32];
-    let embedded_extra_data = &report_data[32..];
+    let _embedded_extra_data = &report_data[32..];
     
     // The var_data_hash should match the SHA256 of runtime_data
     let calculated_var_data_hash = {
