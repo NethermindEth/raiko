@@ -5,10 +5,10 @@ use crate::{interfaces::HostResult, ProverState};
 
 pub fn create_router() -> Router<ProverState> {
     Router::new()
-        .route("/admin/pause", post(pause))
-        .route("/admin/unpause", post(unpause))
-        .route("/admin/tdx/bootstrap", post(tdx_bootstrap))
-        .route("/admin/tdx/instance", post(tdx_set_instance_id))
+        .route("/pause", post(pause))
+        .route("/unpause", post(unpause))
+        .route("/tdx/bootstrap", post(tdx_bootstrap))
+        .route("/tdx/instance", post(tdx_set_instance_id))
 }
 
 async fn pause(State(state): State<ProverState>) -> HostResult<&'static str> {
@@ -97,12 +97,12 @@ mod tests {
         };
         let state = ProverState::init_with_opts(opts).unwrap();
         let app = Router::new()
-            .route("/admin/pause", post(pause))
+            .route("/pause", post(pause))
             .with_state(state.clone());
 
         let request = Request::builder()
             .method("POST")
-            .uri("/admin/pause")
+            .uri("/pause")
             .body(Body::empty())
             .unwrap();
 
@@ -125,12 +125,12 @@ mod tests {
         state.set_pause(true).await.unwrap();
 
         let app = Router::new()
-            .route("/admin/pause", post(pause))
+            .route("/pause", post(pause))
             .with_state(state.clone());
 
         let request = Request::builder()
             .method("POST")
-            .uri("/admin/pause")
+            .uri("/pause")
             .body(Body::empty())
             .unwrap();
 
@@ -155,12 +155,12 @@ mod tests {
         assert!(state.is_paused());
 
         let app = Router::new()
-            .route("/admin/unpause", post(unpause))
+            .route("/unpause", post(unpause))
             .with_state(state.clone());
 
         let request = Request::builder()
             .method("POST")
-            .uri("/admin/unpause")
+            .uri("/unpause")
             .body(Body::empty())
             .unwrap();
 
