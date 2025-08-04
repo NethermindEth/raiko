@@ -558,7 +558,16 @@ pub async fn handle_proof(
     };
     info!("handle_proof: input done");
     memory::reset_stats();
-    let output = raiko.get_output(&input)?;
+    let output = if proof_request.proof_type == raiko_lib::proof_type::ProofType::Tdx {
+        info!("handle_proof: generating minimal output for TDX proof");
+        let pi = raiko_lib::protocol_instance::ProtocolInstance::new(&input, &input.block.header, raiko_lib::proof_type::ProofType::Tdx)?;
+        raiko_lib::input::GuestOutput {
+            header: input.block.header.clone(),
+            hash: pi.instance_hash(),
+        }
+    } else {
+        raiko.get_output(&input)?
+    };
     info!("handle_proof: output done");
     memory::print_stats("Guest program peak memory used: ");
 
