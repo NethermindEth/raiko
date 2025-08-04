@@ -197,8 +197,9 @@ impl TdxProver {
         info!("Generated public key: {}", hex::encode(public_key));
         
         let bootstrap_data = public_key.to_vec();
-        let quote = generate_tdx_quote(&B256::from_slice(&bootstrap_data[..32]))?;
-        
+        let mut padded_data = [0u8; 32];
+        padded_data[..bootstrap_data.len().min(32)].copy_from_slice(&bootstrap_data[..bootstrap_data.len().min(32)]);
+        let quote = generate_tdx_quote(&B256::from_slice(&padded_data))?;
         info!("Bootstrap complete. Public key address: {}", hex::encode(public_key));
         info!("TDX quote generated (length: {} bytes)", quote.data.len());
         
