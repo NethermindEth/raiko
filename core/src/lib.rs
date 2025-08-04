@@ -432,7 +432,15 @@ mod tests {
             .generate_input(provider)
             .await
             .expect("input generation failed");
-        let output = raiko.get_output(&input).expect("output generation failed");
+        let output = if proof_request.proof_type == raiko_lib::proof_type::ProofType::Tdx {
+            let pi = raiko_lib::protocol_instance::ProtocolInstance::new(&input, &input.block.header, raiko_lib::proof_type::ProofType::Tdx).expect("PI generation failed");
+            raiko_lib::input::GuestOutput {
+                header: input.block.header.clone(),
+                hash: pi.instance_hash(),
+            }
+        } else {
+            raiko.get_output(&input).expect("output generation failed")
+        };
         raiko
             .prove(input, &output, None)
             .await
