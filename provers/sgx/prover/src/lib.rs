@@ -2,8 +2,8 @@
 
 use std::{
     collections::HashMap,
-    fs::File,
-    io::Read,
+    fs,
+    path::PathBuf,
     str::{self},
 };
 
@@ -31,14 +31,37 @@ use tracing::debug;
 mod sgx_register_utils;
 
 static SGX_GUEST_DATA: Lazy<Result<Value, String>> = Lazy::new(|| {
-    fn read_sgx_quote() -> Result<Vec<u8>, String> {
-        let mut quote_file = File::open("/dev/attestation/quote")
-            .map_err(|e| format!("Failed to open SGX quote device: {}", e))?;
+    fn read_bootstrap_quote() -> Result<Vec<u8>, String> {
+        // Get home directory and construct path to bootstrap.json
+        let home_dir =
+            std::env::var("HOME").map_err(|_| "HOME environment variable not set".to_string())?;
 
-        let mut quote = Vec::new();
-        quote_file
-            .read_to_end(&mut quote)
-            .map_err(|e| format!("Failed to read SGX quote: {}", e))?;
+        let bootstrap_path = PathBuf::from(home_dir)
+            .join(".config")
+            .join("raiko")
+            .join("config")
+            .join("bootstrap.json");
+
+        // Read and parse bootstrap.json
+        let bootstrap_content = fs::read_to_string(&bootstrap_path).map_err(|e| {
+            format!(
+                "Failed to read bootstrap.json from {}: {}",
+                bootstrap_path.display(),
+                e
+            )
+        })?;
+
+        let bootstrap_data: serde_json::Value = serde_json::from_str(&bootstrap_content)
+            .map_err(|e| format!("Failed to parse bootstrap.json: {}", e))?;
+
+        // Extract quote field
+        let quote_hex = bootstrap_data["quote"]
+            .as_str()
+            .ok_or_else(|| "Missing or invalid 'quote' field in bootstrap.json".to_string())?;
+
+        // Decode hex string to bytes
+        let quote = hex::decode(quote_hex)
+            .map_err(|e| format!("Failed to decode quote hex string: {}", e))?;
 
         if quote.len() < 432 {
             return Err("SGX quote too short".to_string());
@@ -47,7 +70,7 @@ static SGX_GUEST_DATA: Lazy<Result<Value, String>> = Lazy::new(|| {
         Ok(quote)
     }
 
-    match read_sgx_quote() {
+    match read_bootstrap_quote() {
         Ok(quote) => {
             // Extract MR_ENCLAVE (32 bytes at offset 112-144)
             let mr_enclave = hex::encode(&quote[112..144]);
