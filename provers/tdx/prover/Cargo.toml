@@ -30,8 +30,7 @@ tracing = { workspace = true }
 dirs = { workspace = true }
 
 # Azure TDX attestation
-az-tdx-vtpm = { version = "0.7.1" }
-sha2 = { version = "0.10" }
+sha2 = { workspace = true }
 rand = { workspace = true }
 
 [features]

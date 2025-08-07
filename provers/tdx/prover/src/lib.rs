@@ -18,7 +18,7 @@ use serde::{Deserialize, Serialize};
 use sha3::{Digest, Keccak256};
 use tracing::{info, warn};
 
-mod attestation;
+mod attestation_client;
 
 // Helper to convert anyhow errors to ProverError
 fn to_prover_error<T>(result: anyhow::Result<T>) -> Result<T, ProverError> {
@@ -35,6 +35,7 @@ pub struct TdxProver;
 pub struct TdxConfig {
     pub config_dir: PathBuf,
     pub instance_id: u32,
+    pub socket_path: String,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -54,24 +55,32 @@ impl Prover for TdxProver {
     async fn run(
         input: GuestInput,
         _output: &GuestOutput,
-        _config: &serde_json::Value,
+        config: &serde_json::Value,
         _store: Option<&mut dyn IdWrite>,
     ) -> ProverResult<Proof> {
         info!("Running TDX prover");
 
         let config_dir = get_config_dir().map_err(|e| ProverError::GuestError(e.to_string()))?;
 
+        let tdx_config = if let Some(tdx_section) = config.get("tdx") {
+            TdxConfig::deserialize(tdx_section)
+                .map_err(|e| ProverError::GuestError(format!("Failed to parse TDX config: {}", e)))?
+        } else {
+            return Err(ProverError::GuestError("TDX configuration not found in config".to_string()));
+        };
+
         let private_key = to_prover_error(load_private_key(&config_dir))?;
         let public_key = to_prover_error(get_public_key_from_private(&private_key))?;
         let new_instance = public_key;
 
-        let instance_id = to_prover_error(load_instance_id(&config_dir))?;
+        let instance_id = load_instance_id(&config_dir)
+            .unwrap_or(tdx_config.instance_id);
 
         let pi = to_prover_error(ProtocolInstance::new(&input, &input.block.header, ProofType::Tdx))?.sgx_instance(new_instance);
         let pi_hash = pi.instance_hash();
         let signature = to_prover_error(sign_message(&private_key, &pi_hash))?;
         let proof = to_prover_error(create_proof(instance_id, &public_key, &signature))?;
-        let quote = to_prover_error(generate_tdx_quote(&pi_hash))?;
+        let quote = to_prover_error(generate_tdx_quote(&pi_hash, &tdx_config.socket_path))?;
 
         let prover_data = TdxProverData {
             proof: hex::encode(&proof),
@@ -91,17 +100,25 @@ impl Prover for TdxProver {
     async fn aggregate(
         input: AggregationGuestInput,
         _output: &AggregationGuestOutput,
-        _config: &serde_json::Value,
+        config: &serde_json::Value,
         _store: Option<&mut dyn IdWrite>,
     ) -> ProverResult<Proof> {
         info!("Running TDX aggregation prover for {} proofs", input.proofs.len());
 
         let config_dir = get_config_dir().map_err(|e| ProverError::GuestError(e.to_string()))?;
 
+        let tdx_config = if let Some(tdx_section) = config.get("tdx") {
+            TdxConfig::deserialize(tdx_section)
+                .map_err(|e| ProverError::GuestError(format!("Failed to parse TDX config: {}", e)))?
+        } else {
+            return Err(ProverError::GuestError("TDX configuration not found in config".to_string()));
+        };
+
         let private_key = to_prover_error(load_private_key(&config_dir))?;
         let new_instance = to_prover_error(get_public_key_from_private(&private_key))?;
 
-        let instance_id = to_prover_error(load_instance_id(&config_dir))?;
+        let instance_id = load_instance_id(&config_dir)
+            .unwrap_or(tdx_config.instance_id);
 
         let raw_input = RawAggregationGuestInput {
             proofs: input
@@ -162,7 +179,7 @@ impl Prover for TdxProver {
 
         let proof = to_prover_error(create_aggregation_proof(instance_id, &old_instance, &new_instance, &signature))?;
 
-        let quote = to_prover_error(generate_tdx_quote(&aggregation_hash))?;
+        let quote = to_prover_error(generate_tdx_quote(&aggregation_hash, &tdx_config.socket_path))?;
 
         let prover_data = TdxProverData {
             proof: hex::encode(&proof),
@@ -185,7 +202,7 @@ impl Prover for TdxProver {
 }
 
 impl TdxProver {
-    pub async fn bootstrap(config_dir: &Path) -> Result<()> {
+    pub async fn bootstrap(config_dir: &Path, socket_path: &str) -> Result<()> {
         info!("Bootstrapping TDX prover");
         
         fs::create_dir_all(config_dir)?;
@@ -199,7 +216,7 @@ impl TdxProver {
         let bootstrap_data = public_key.to_vec();
         let mut padded_data = [0u8; 32];
         padded_data[..bootstrap_data.len().min(32)].copy_from_slice(&bootstrap_data[..bootstrap_data.len().min(32)]);
-        let quote = generate_tdx_quote(&B256::from_slice(&padded_data))?;
+        let quote = generate_tdx_quote(&B256::from_slice(&padded_data), socket_path)?;
         info!("Bootstrap complete. Public key address: {}", hex::encode(public_key));
         info!("TDX quote generated (length: {} bytes)", quote.data.len());
         
@@ -336,28 +353,17 @@ fn create_aggregation_proof(
     Ok(proof)
 }
 
-fn generate_tdx_quote(user_report_data: &B256) -> Result<TdxQuote> {
-    // Check if we're running in a TDX environment
-    if !attestation::is_tdx_cvm()? {
-        warn!("Not running in TDX CVM, returning placeholder quote");
-        return Ok(TdxQuote {
-            data: vec![0u8; 1024],
-        });
-    }
-
-    // Use the report data as user data, and generate a nonce
+fn generate_tdx_quote(user_report_data: &B256, socket_path: &str) -> Result<TdxQuote> {
     let user_data = user_report_data.as_slice();
     let nonce: [u8; 32] = rand::thread_rng().gen();
     let nonce = nonce.to_vec();
+
+    info!("Using external attestation service at: {}", socket_path);
     
-    // Issue the attestation document
-    let attestation_doc = attestation::issue(user_data, &nonce)?;
-    
-    // Parse the attestation document to extract the quote
-    let instance_info: attestation::InstanceInfo = serde_json::from_slice(&attestation_doc)?;
-    
+    let attestation_doc = attestation_client::issue_attestation(socket_path, user_data, &nonce)?;
+
     Ok(TdxQuote {
-        data: instance_info.attestation_report,
+        data: attestation_doc,
     })
 }
 
@@ -371,7 +377,7 @@ mod tests {
         let temp_dir = TempDir::new()?;
         let config_dir = temp_dir.path();
         
-        TdxProver::bootstrap(config_dir).await?;
+        TdxProver::bootstrap(config_dir, "/tmp/test.sock").await?;
         
         assert!(config_dir.join("secrets").join("priv.key").exists());
         

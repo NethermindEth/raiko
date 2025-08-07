@@ -13,6 +13,7 @@ RAIKO_DOCKER_VOLUME_PRIV_KEY_PATH="$RAIKO_DOCKER_VOLUME_SECRETS_PATH/priv.key"
 RAIKO_APP_DIR="/opt/raiko/bin"
 RAIKO_CONF_DIR="/etc/raiko"
 RAIKO_CONF_BASE_CONFIG="$RAIKO_CONF_DIR/config.sgx.json"
+RAIKO_CONF_TDX_CONFIG="$RAIKO_CONF_DIR/config.tdx.json"
 RAIKO_CONF_CHAIN_SPECS="$RAIKO_CONF_DIR/chain_spec_list.docker.json"
 RAIKO_GUEST_APP_FILENAME="sgx-guest"
 RAIKO_GUEST_SETUP_FILENAME="raiko-setup"
@@ -181,6 +182,20 @@ if [[ -n $ZK ]]; then
         #update raiko server config
         update_raiko_network $RAIKO_CONF_BASE_CONFIG
         update_raiko_sgx_instance_id $RAIKO_CONF_BASE_CONFIG
+        update_docker_chain_specs $RAIKO_CONF_CHAIN_SPECS
+
+        /opt/raiko/bin/raiko-host "$@"
+fi
+
+if [[ -n $TDX ]]; then
+    echo "running raiko in tdx mode"
+        if [ ! -f $RAIKO_CONF_TDX_CONFIG ]; then
+            echo "$RAIKO_CONF_TDX_CONFIG file not found."
+            exit 1
+        fi
+
+        #update raiko server config
+        update_raiko_network $RAIKO_CONF_TDX_CONFIG
         update_docker_chain_specs $RAIKO_CONF_CHAIN_SPECS
 
         /opt/raiko/bin/raiko-host "$@"
