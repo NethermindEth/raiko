@@ -274,3 +274,17 @@ if [[ -n $SGX_SERVER ]]; then
         wait
     fi
 fi
+
+if [[ -n $TDX ]]; then
+    echo "running raiko in tdx mode"
+        if [ ! -f $RAIKO_CONF_TDX_CONFIG ]; then
+            echo "$RAIKO_CONF_TDX_CONFIG file not found."
+            exit 1
+        fi
+
+        #update raiko server config
+        update_raiko_network $RAIKO_CONF_BASE_CONFIG
+        update_docker_chain_specs $RAIKO_CONF_CHAIN_SPECS
+
+        /opt/raiko/bin/raiko-host "$@"
+fi
