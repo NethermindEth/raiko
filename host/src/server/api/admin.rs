@@ -33,13 +33,16 @@ struct TdxBootstrapResponse {
 }
 
 #[cfg(feature = "tdx")]
-async fn tdx_bootstrap(_state: State<ProverState>) -> HostResult<Json<TdxBootstrapResponse>> {
+async fn tdx_bootstrap(State(state): State<ProverState>) -> HostResult<Json<TdxBootstrapResponse>> {
     use tdx_prover::{TdxProver, get_config_dir, load_private_key, get_public_key_from_private};
+
+    let file = std::fs::File::open(&state.opts.config_path)?;
+    let reader = std::io::BufReader::new(file);
+    let config: serde_json::Value = serde_json::from_reader(reader)?;
+    
+    TdxProver::bootstrap(&config).await?;
     
     let config_dir = get_config_dir()?;
-    
-    TdxProver::bootstrap(&config_dir).await?;
-    
     let private_key = load_private_key(&config_dir)?;
     let public_key = get_public_key_from_private(&private_key)?;
     
