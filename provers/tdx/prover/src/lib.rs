@@ -33,7 +33,6 @@ pub struct TdxProver;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct TdxConfig {
-    pub config_dir: PathBuf,
     pub instance_id: u32,
     pub socket_path: String,
 }
