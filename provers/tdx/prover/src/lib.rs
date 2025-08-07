@@ -202,13 +202,18 @@ impl Prover for TdxProver {
 }
 
 impl TdxProver {
-    pub async fn bootstrap(config_dir: &Path, socket_path: &str) -> Result<()> {
+    pub async fn bootstrap(config: &serde_json::Value) -> Result<()> {
         info!("Bootstrapping TDX prover");
         
-        fs::create_dir_all(config_dir)?;
+        let tdx_config = config.get("tdx")
+            .and_then(|tdx_section| TdxConfig::deserialize(tdx_section).ok())
+            .ok_or_else(|| anyhow!("TDX configuration not found in config"))?;
+        
+        let config_dir = get_config_dir()?;
+        fs::create_dir_all(&config_dir)?;
         
         let private_key = generate_private_key()?;
-        save_private_key(config_dir, &private_key)?;
+        save_private_key(&config_dir, &private_key)?;
         
         let public_key = get_public_key_from_private(&private_key)?;
         info!("Generated public key: {}", hex::encode(public_key));
@@ -216,7 +221,7 @@ impl TdxProver {
         let bootstrap_data = public_key.to_vec();
         let mut padded_data = [0u8; 32];
         padded_data[..bootstrap_data.len().min(32)].copy_from_slice(&bootstrap_data[..bootstrap_data.len().min(32)]);
-        let quote = generate_tdx_quote(&B256::from_slice(&padded_data), socket_path)?;
+        let quote = generate_tdx_quote(&B256::from_slice(&padded_data), &tdx_config.socket_path)?;
         info!("Bootstrap complete. Public key address: {}", hex::encode(public_key));
         info!("TDX quote generated (length: {} bytes)", quote.data.len());
         
@@ -374,11 +379,16 @@ mod tests {
 
     #[tokio::test]
     async fn test_bootstrap() -> Result<()> {
-        let temp_dir = TempDir::new()?;
-        let config_dir = temp_dir.path();
+        let config = serde_json::json!({
+            "tdx": {
+                "instance_id": 123,
+                "socket_path": "/tmp/test.sock"
+            }
+        });
         
-        TdxProver::bootstrap(config_dir, "/tmp/test.sock").await?;
+        TdxProver::bootstrap(&config).await?;
         
+        let config_dir = get_config_dir()?;
         assert!(config_dir.join("secrets").join("priv.key").exists());
         
         Ok(())
