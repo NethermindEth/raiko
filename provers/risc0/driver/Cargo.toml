@@ -65,6 +65,7 @@ enable = [
     "reqwest",
     "lazy_static",
 ]
-cuda = ["risc0-zkvm?/cuda"]
+# cuda = []
+cuda = []
 metal = ["risc0-zkvm?/metal"]
 bench = []
