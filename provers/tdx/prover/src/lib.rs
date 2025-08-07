@@ -69,8 +69,8 @@ impl Prover for TdxProver {
         };
 
         let private_key = to_prover_error(load_private_key(&config_dir))?;
-        let public_key = to_prover_error(get_public_key_from_private(&private_key))?;
-        let new_instance = public_key;
+        let address = to_prover_error(get_address_from_private_key(&private_key))?;
+        let new_instance = address;
 
         let instance_id = load_instance_id(&config_dir)
             .unwrap_or(tdx_config.instance_id);
@@ -78,13 +78,13 @@ impl Prover for TdxProver {
         let pi = to_prover_error(ProtocolInstance::new(&input, &input.block.header, ProofType::Tdx))?.sgx_instance(new_instance);
         let pi_hash = pi.instance_hash();
         let signature = to_prover_error(sign_message(&private_key, &pi_hash))?;
-        let proof = to_prover_error(create_proof(instance_id, &public_key, &signature))?;
+        let proof = to_prover_error(create_proof(instance_id, &address, &signature))?;
         let quote = to_prover_error(generate_tdx_quote(&pi_hash, &tdx_config.socket_path))?;
 
         let prover_data = TdxProverData {
             proof: hex::encode(&proof),
             quote: hex::encode(&quote.data),
-            public_key: hex::encode(public_key),
+            address: hex::encode(address),
         };
         
         Ok(Proof {
@@ -114,7 +114,7 @@ impl Prover for TdxProver {
         };
 
         let private_key = to_prover_error(load_private_key(&config_dir))?;
-        let new_instance = to_prover_error(get_public_key_from_private(&private_key))?;
+        let new_instance = to_prover_error(get_address_from_private_key(&private_key))?;
 
         let instance_id = load_instance_id(&config_dir)
             .unwrap_or(tdx_config.instance_id);
@@ -214,9 +214,10 @@ impl TdxProver {
         let private_key = generate_private_key()?;
         save_private_key(&config_dir, &private_key)?;
         
-        let public_key = get_public_key_from_private(&private_key)?;
+        let public_key = get_address_from_private_key(&private_key)?;
         info!("Generated public key: {}", hex::encode(public_key));
         
+        let address = public_key_to_address(&public_key);
         let bootstrap_data = public_key.to_vec();
         let mut padded_data = [0u8; 32];
         padded_data[..bootstrap_data.len().min(32)].copy_from_slice(&bootstrap_data[..bootstrap_data.len().min(32)]);
@@ -279,12 +280,12 @@ pub fn load_private_key(config_dir: &Path) -> Result<secp256k1::SecretKey> {
         .map_err(|e| anyhow!("Invalid private key: {}", e))
 }
 
-pub fn get_public_key_from_private(private_key: &secp256k1::SecretKey) -> Result<Address> {
+pub fn get_address_from_private_key(private_key: &secp256k1::SecretKey) -> Result<Address> {
     let secp = secp256k1::Secp256k1::new();
     let public_key = secp256k1::PublicKey::from_secret_key(&secp, private_key);
     
     // Convert public key to Ethereum address
-    let public_key_bytes = public_key.serialize_uncompressed();
+    let public_key_bytes = public_key.serialize_uncompressed()[1..];
     let hash = Keccak256::digest(&public_key_bytes[1..]); // Skip the 0x04 prefix
     
     Ok(Address::from_slice(&hash[12..]))
