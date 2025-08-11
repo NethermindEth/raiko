@@ -9830,8 +9830,6 @@ dependencies = [
  "secp256k1",
  "serde",
  "serde_json",
- "sha2",
- "sha3",
  "thiserror 1.0.69",
  "tracing",
 ]

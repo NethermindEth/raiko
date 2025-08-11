@@ -13,7 +13,6 @@ raiko-lib = { workspace = true, features = ["std"] }
 # Crypto
 secp256k1 = { workspace = true }
 hex = { workspace = true }
-sha3 = { workspace = true }
 
 # Serialization
 serde = { workspace = true }
@@ -29,8 +28,7 @@ tracing = { workspace = true }
 # Path and file handling
 dirs = { workspace = true }
 
-# Azure TDX attestation
-sha2 = { workspace = true }
+# TDX attestation
 rand = { workspace = true }
 
 [features]
