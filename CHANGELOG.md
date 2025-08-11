@@ -1,5 +1,33 @@
 # Changelog
 
+## [1.9.0-surge](https://github.com/NethermindEth/raiko/compare/v1.8.0-surge...v1.9.0-surge) (2025-08-11)
+
+
+### Features
+
+* max gas issuance type change ([#17](https://github.com/NethermindEth/raiko/issues/17)) ([590726c](https://github.com/NethermindEth/raiko/commit/590726c6142beea367b28f32c81b57e0f88f69ac))
+* **raiko:** add raiko image build ([771b399](https://github.com/NethermindEth/raiko/commit/771b399a924954687a089f7fbc2bb47c06ae4a2c))
+* **raiko:** Containerized deployment for sp1 ([d3627da](https://github.com/NethermindEth/raiko/commit/d3627daa215456a615ecfd37ba14889f3a01b571))
+* **raiko:** Containerized deployment for sp1 ([314f3d3](https://github.com/NethermindEth/raiko/commit/314f3d33a2efdb8606fbe3445e51cddfc34047a2))
+* **raiko:** fix existing pipeline runs on ([d213dc6](https://github.com/NethermindEth/raiko/commit/d213dc62d46ab7247ccd84a6dfd383b6fd249b96))
+* **raiko:** fix raiko gh CI workflows ([4a3f9b8](https://github.com/NethermindEth/raiko/commit/4a3f9b844a010f087f2a2060fefa77134354e679))
+* **raiko:** fix raiko gh CI workflows ([01844c4](https://github.com/NethermindEth/raiko/commit/01844c4167d33d0d50f4b01698ba1145fe38c266))
+* **surge:** Sp1 containerized changes ([7149515](https://github.com/NethermindEth/raiko/commit/7149515ffa15e4e85400c1a0da711d9862779d0a))
+* **taiko:** rm CI run on push ([75103cb](https://github.com/NethermindEth/raiko/commit/75103cb632327987eea31d42fb827674f91558e5))
+* **taiko:** rm CI run on push ([555a08f](https://github.com/NethermindEth/raiko/commit/555a08fbbed74729f38be0421b373b9217dfbd08))
+* **taiko:** update workflow_dispatch tags run on push ([46380ae](https://github.com/NethermindEth/raiko/commit/46380ae42046bbedfa2b6382517c51810fea960c))
+* **taiko:** update workflow_dispatch tags run on push ([a78c727](https://github.com/NethermindEth/raiko/commit/a78c7276129f817643d9181ddd6da8d53271dfde))
+* **taiko:** update workflow_dispatch tags run on push ([782efbb](https://github.com/NethermindEth/raiko/commit/782efbb330a37a2014e35219a391eb7aab1e97c6))
+* **taiko:** update workflow_dispatch tags run on push ([3dc4ca8](https://github.com/NethermindEth/raiko/commit/3dc4ca8caa9dda351bb459bdc4f8340246b1a88f))
+
+
+### Bug Fixes
+
+* chown for /opt/riscv Docker.zk ([daebd5d](https://github.com/NethermindEth/raiko/commit/daebd5d1f977155283b210f7ff08d6f416378162))
+* **raiko:** gh workflows ([9a837ab](https://github.com/NethermindEth/raiko/commit/9a837abd1a08d2947c43b43c1771f8c19f712f70))
+* **raiko:** typos CI changes ([a064b7d](https://github.com/NethermindEth/raiko/commit/a064b7da9612a8be10d18ad8f5ebb8dfd71cda4e))
+* **raiko:** typos CI changes ([740a1e9](https://github.com/NethermindEth/raiko/commit/740a1e91796cffe77b1564b0d3ae501e24c3d3af))
+
 ## [1.7.0](https://github.com/taikoxyz/raiko/compare/v1.6.1...v1.7.0) (2025-04-08)
 
 
