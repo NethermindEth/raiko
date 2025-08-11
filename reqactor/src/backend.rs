@@ -748,9 +748,11 @@ pub async fn do_prove_single(
                 .map_err(|e| format!("failed to generate input: {e:?}"))?
         };
 
+    let should_execute = request_entity.proof_type() != raiko_lib::proof_type::ProofType::Tdx;
+
     // 2. Generate the proof output
     let output = raiko
-        .get_output(&input)
+        .get_output(&input, should_execute)
         .map_err(|e| format!("failed to get output: {e:?}"))?;
 
     // 3. Generate the proof
