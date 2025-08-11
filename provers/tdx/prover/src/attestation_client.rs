@@ -36,13 +36,13 @@ struct IssueResponse {
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
+#[allow(dead_code)]
 struct ValidateResponse {
     user_data: String,
     valid: bool,
     error: String,
 }
 
-/// Issue an attestation through the external service
 pub fn issue_attestation(socket_path: &str, user_data: &[u8], nonce: &[u8]) -> Result<Vec<u8>> {
     let request = Request::Issue {
         data: IssueData {
@@ -78,7 +78,7 @@ pub fn issue_attestation(socket_path: &str, user_data: &[u8], nonce: &[u8]) -> R
         .context("Failed to decode attestation document from hex")
 }
 
-/// Validate an attestation document through the external service
+#[allow(dead_code)]
 pub fn validate_attestation(socket_path: &str, document: &[u8], nonce: &[u8]) -> Result<(Vec<u8>, bool)> {
     let request = Request::Validate {
         data: ValidateData {
