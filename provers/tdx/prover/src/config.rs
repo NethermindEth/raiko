@@ -6,7 +6,8 @@ use serde::Deserialize;
 use crate::TdxConfig;
 
 pub fn get_tdx_config(config: &serde_json::Value) -> Result<TdxConfig> {
-    let tdx_section = config.get("tdx")
+    let tdx_section = config
+        .get("tdx")
         .ok_or_else(|| anyhow!("TDX configuration not found in config"))?;
     TdxConfig::deserialize(tdx_section).map_err(|e| anyhow!("Failed to parse TDX config: {}", e))
 }
@@ -32,10 +33,10 @@ pub fn save_private_key(private_key: &secp256k1::SecretKey) -> Result<()> {
 
     let secrets_dir = config_dir.join("secrets");
     fs::create_dir_all(&secrets_dir)?;
-    
+
     let key_file = secrets_dir.join("priv.key");
     fs::write(&key_file, private_key.secret_bytes())?;
-    
+
     // Set file permissions to 0600 (read/write for owner only)
     #[cfg(unix)]
     {
@@ -44,7 +45,7 @@ pub fn save_private_key(private_key: &secp256k1::SecretKey) -> Result<()> {
         perms.set_mode(0o600);
         fs::set_permissions(&key_file, perms)?;
     }
-    
+
     Ok(())
 }
 
@@ -53,17 +54,22 @@ pub fn load_private_key() -> Result<secp256k1::SecretKey> {
     let key_file = config_dir.join("secrets").join("priv.key");
     let key_bytes = fs::read(&key_file)
         .with_context(|| format!("Failed to read private key from {}", key_file.display()))?;
-    
-    secp256k1::SecretKey::from_slice(&key_bytes)
-        .map_err(|e| anyhow!("Invalid private key: {}", e))
+
+    secp256k1::SecretKey::from_slice(&key_bytes).map_err(|e| anyhow!("Invalid private key: {}", e))
 }
 
 pub fn load_instance_id() -> Result<u32> {
     let config_dir = get_config_dir()?;
     let instance_file = config_dir.join("instance_id");
-    let instance_str = fs::read_to_string(&instance_file)
-        .with_context(|| format!("Failed to read instance ID from {}", instance_file.display()))?;
-    
-    instance_str.trim().parse::<u32>()
+    let instance_str = fs::read_to_string(&instance_file).with_context(|| {
+        format!(
+            "Failed to read instance ID from {}",
+            instance_file.display()
+        )
+    })?;
+
+    instance_str
+        .trim()
+        .parse::<u32>()
         .map_err(|e| anyhow!("Invalid instance ID: {}", e))
 }
