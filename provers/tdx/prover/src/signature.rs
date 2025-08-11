@@ -1,13 +1,12 @@
 use anyhow::Result;
-use raiko_lib::primitives::{Address, B256};
-use sha3::{Digest, Keccak256};
+use raiko_lib::primitives::{keccak256, Address, B256};
 
 pub fn get_address_from_private_key(private_key: &secp256k1::SecretKey) -> Result<Address> {
     let secp = secp256k1::Secp256k1::new();
     let public_key = secp256k1::PublicKey::from_secret_key(&secp, private_key);
 
     let public_key_bytes = &public_key.serialize_uncompressed()[1..];
-    let hash = Keccak256::digest(public_key_bytes);
+    let hash = keccak256(public_key_bytes);
 
     Ok(Address::from_slice(&hash[12..]))
 }
@@ -42,7 +41,7 @@ pub fn recover_signer_unchecked(sig: &[u8; 65], msg: &B256) -> Result<Address> {
 
     // Convert public key to Ethereum address
     let public_key_bytes = public_key.serialize_uncompressed();
-    let hash = Keccak256::digest(&public_key_bytes[1..]); // Skip the 0x04 prefix
+    let hash = keccak256(&public_key_bytes[1..]); // Skip the 0x04 prefix
 
     Ok(Address::from_slice(&hash[12..]))
 }
