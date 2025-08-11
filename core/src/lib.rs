@@ -73,36 +73,36 @@ impl Raiko {
             .map_err(Into::<RaikoError>::into)
     }
 
-    pub fn get_output(&self, input: &GuestInput) -> RaikoResult<GuestOutput> {
+    pub fn get_output(&self, input: &GuestInput, should_execute: bool) -> RaikoResult<GuestOutput> {
+        if should_execute {
+            self.execute_transactions(input)?;
+        }
+
+        Ok(GuestOutput {
+            header: input.block.header.clone(),
+            hash: ProtocolInstance::new(input, &header, self.request.proof_type)?.instance_hash(),
+        })
+    }
+
+    fn execute_transactions(&self, input: &GuestInput) -> RaikoResult<()> {
         let db = create_mem_db(&mut input.clone()).unwrap();
         let mut builder = RethBlockBuilder::new(input, db);
         builder.execute_transactions(false).expect("execute");
         let result = builder.finalize();
 
-        match result {
-            Ok(header) => {
-                info!("Verifying final state using provider data ...");
-                info!(
-                    "Final block hash derived successfully. {}",
-                    header.hash_slow()
-                );
-                debug!("Final block header derived successfully. {header:?}");
-                // Check if the header is the expected one
-                check_header(&input.block.header, &header)?;
+        let header = result.map_err(|e| {
+            warn!("Proving bad block construction!");
+            RaikoError::Guest(raiko_lib::prover::ProverError::GuestError(e.to_string()))
+        })?;
 
-                Ok(GuestOutput {
-                    header: header.clone(),
-                    hash: ProtocolInstance::new(input, &header, self.request.proof_type)?
-                        .instance_hash(),
-                })
-            }
-            Err(e) => {
-                warn!("Proving bad block construction!");
-                Err(RaikoError::Guest(
-                    raiko_lib::prover::ProverError::GuestError(e.to_string()),
-                ))
-            }
-        }
+        info!("Verifying final state using provider data ...");
+        info!(
+            "Final block hash derived successfully. {}",
+            header.hash_slow()
+        );
+        debug!("Final block header derived successfully. {header:?}");
+
+        check_header(&input.block.header, &header)?;
     }
 
     pub async fn prove(
