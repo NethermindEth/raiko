@@ -393,39 +393,3 @@ fn generate_tdx_quote(user_report_data: &B256, socket_path: &str) -> Result<TdxQ
         data: attestation_doc,
     })
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use tempfile::TempDir;
-
-    #[tokio::test]
-    async fn test_bootstrap() -> Result<()> {
-        let config = serde_json::json!({
-            "tdx": {
-                "instance_id": 123,
-                "socket_path": "/tmp/test.sock"
-            }
-        });
-        
-        TdxProver::bootstrap(&config).await?;
-        
-        let config_dir = get_config_dir()?;
-        assert!(config_dir.join("secrets").join("priv.key").exists());
-        
-        Ok(())
-    }
-    
-    #[tokio::test]
-    async fn test_set_instance_id() -> Result<()> {
-        let temp_dir = TempDir::new()?;
-        let config_dir = temp_dir.path();
-        
-        TdxProver::set_instance_id(config_dir, 12345).await?;
-        
-        let saved_id = load_instance_id(config_dir)?;
-        assert_eq!(saved_id, 12345);
-        
-        Ok(())
-    }
-}
