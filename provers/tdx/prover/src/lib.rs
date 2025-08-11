@@ -20,11 +20,6 @@ use tracing::{info, warn};
 
 mod attestation_client;
 
-// Helper to convert anyhow errors to ProverError
-fn to_prover_error<T>(result: anyhow::Result<T>) -> Result<T, ProverError> {
-    result.map_err(|e| ProverError::GuestError(e.to_string()))
-}
-
 pub const TDX_PROVER_CODE: u8 = ProofType::Tdx as u8;
 pub const TDX_PROOF_SIZE: usize = 89;
 pub const TDX_AGGREGATION_PROOF_SIZE: usize = 109;
@@ -39,7 +34,6 @@ pub struct TdxConfig {
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct TdxQuote {
-    // TODO: Implement actual TDX quote structure
     pub data: Vec<u8>,
 }
 
@@ -60,36 +54,20 @@ impl Prover for TdxProver {
         info!("Running TDX prover");
 
         let config_dir = get_config_dir().map_err(|e| ProverError::GuestError(e.to_string()))?;
-
-        let tdx_config = if let Some(tdx_section) = config.get("tdx") {
-            TdxConfig::deserialize(tdx_section)
-                .map_err(|e| ProverError::GuestError(format!("Failed to parse TDX config: {}", e)))?
-        } else {
-            return Err(ProverError::GuestError("TDX configuration not found in config".to_string()));
-        };
-
-        let private_key = to_prover_error(load_private_key(&config_dir))?;
-        let address = to_prover_error(get_address_from_private_key(&private_key))?;
-        let new_instance = address;
-
-        let instance_id = load_instance_id(&config_dir)
-            .unwrap_or(tdx_config.instance_id);
-
-        let pi = to_prover_error(ProtocolInstance::new(&input, &input.block.header, ProofType::Tdx))?.sgx_instance(new_instance);
-        let pi_hash = pi.instance_hash();
-        let signature = to_prover_error(sign_message(&private_key, &pi_hash))?;
-        let proof = to_prover_error(create_proof(instance_id, &address, &signature))?;
-        let quote = to_prover_error(generate_tdx_quote(&pi_hash, &tdx_config.socket_path))?;
+        let tdx_config = get_tdx_config(config).map_err(|e| ProverError::GuestError(e.to_string()))?;
+  
+        let prove_data = prove(&input, &tdx_config, &config_dir)
+            .map_err(|e| ProverError::GuestError(e.to_string()))?;
 
         let prover_data = TdxProverData {
-            proof: hex::encode(&proof),
-            quote: hex::encode(&quote.data),
-            address: hex::encode(address),
+            proof: hex::encode(&prove_data.proof),
+            quote: hex::encode(&prove_data.quote.data),
+            public_key: hex::encode(prove_data.address),
         };
         
         Ok(Proof {
             proof: Some(prover_data.proof),
-            input: Some(pi_hash),
+            input: Some(prove_data.instance_hash),
             quote: Some(prover_data.quote),
             uuid: None,
             kzg_proof: None,
@@ -105,90 +83,20 @@ impl Prover for TdxProver {
         info!("Running TDX aggregation prover for {} proofs", input.proofs.len());
 
         let config_dir = get_config_dir().map_err(|e| ProverError::GuestError(e.to_string()))?;
-
-        let tdx_config = if let Some(tdx_section) = config.get("tdx") {
-            TdxConfig::deserialize(tdx_section)
-                .map_err(|e| ProverError::GuestError(format!("Failed to parse TDX config: {}", e)))?
-        } else {
-            return Err(ProverError::GuestError("TDX configuration not found in config".to_string()));
-        };
-
-        let private_key = to_prover_error(load_private_key(&config_dir))?;
-        let new_instance = to_prover_error(get_address_from_private_key(&private_key))?;
-
-        let instance_id = load_instance_id(&config_dir)
-            .unwrap_or(tdx_config.instance_id);
-
-        let raw_input = RawAggregationGuestInput {
-            proofs: input
-                .proofs
-                .iter()
-                .map(|proof| {
-                    let proof_data: TdxProverData = serde_json::from_str(&proof.proof.as_ref().unwrap())
-                        .map_err(|e| anyhow!("Failed to parse TDX proof data: {}", e))?;
-                    
-                    Ok(raiko_lib::input::RawProof {
-                        input: proof.input.unwrap(),
-                        proof: hex::decode(&proof_data.proof[2..])?,
-                    })
-                })
-                .collect::<Result<Vec<_>>>().map_err(|e| ProverError::GuestError(e.to_string()))?,
-        };
-
-        let old_instance = if !raw_input.proofs.is_empty() {
-            Address::from_slice(&raw_input.proofs[0].proof[4..24])
-        } else {
-            new_instance
-        };
+        let tdx_config = get_tdx_config(config).map_err(|e| ProverError::GuestError(e.to_string()))?;
         
-        let mut cur_instance = old_instance;
-
-        for proof in raw_input.proofs.iter() {
-            let signature = &proof.proof[24..89];
-            let signature_array: [u8; 65] = signature.try_into().map_err(|e: core::array::TryFromSliceError| ProverError::GuestError(format!("Invalid signature length: {}", e)))?;
-            let recovered = to_prover_error(recover_signer_unchecked(&signature_array, &proof.input))?;
-            
-            if recovered != cur_instance {
-                return Err(ProverError::GuestError(format!("Proof chain verification failed: expected signer {}, got {}", cur_instance, recovered)));
-            }
-
-            cur_instance = Address::from_slice(&proof.proof[4..24]);
-        }
-
-        if cur_instance != new_instance {
-            return Err(ProverError::GuestError(format!("Proof chain does not end with current instance: expected {}, got {}", new_instance, cur_instance)));
-        }
-
-        let aggregation_hash: B256 = B256::from(keccak(aggregation_output_combine(
-            [
-                vec![
-                    B256::left_padding_from(old_instance.as_ref()),
-                    B256::left_padding_from(new_instance.as_ref()),
-                ],
-                raw_input
-                    .proofs
-                    .iter()
-                    .map(|proof| proof.input)
-                    .collect::<Vec<_>>(),
-            ]
-            .concat(),
-        )));
-
-        let signature = to_prover_error(sign_message(&private_key, &aggregation_hash))?;
-
-        let proof = to_prover_error(create_aggregation_proof(instance_id, &old_instance, &new_instance, &signature))?;
-
-        let quote = to_prover_error(generate_tdx_quote(&aggregation_hash, &tdx_config.socket_path))?;
+        let aggregation_data = prove_aggregation(&input, &tdx_config, &config_dir)
+            .map_err(|e| ProverError::GuestError(e.to_string()))?;
 
         let prover_data = TdxProverData {
-            proof: hex::encode(&proof),
-            quote: hex::encode(&quote.data),
-            public_key: hex::encode(new_instance),
+            proof: hex::encode(&aggregation_data.proof),
+            quote: hex::encode(&aggregation_data.quote.data),
+            public_key: hex::encode(aggregation_data.new_instance),
         };
 
         Ok(Proof {
             proof: Some(prover_data.proof),
-            input: Some(aggregation_hash),
+            input: Some(aggregation_data.aggregation_hash),
             quote: Some(prover_data.quote),
             uuid: None,
             kzg_proof: None,
@@ -216,8 +124,7 @@ impl TdxProver {
         
         let public_key = get_address_from_private_key(&private_key)?;
         info!("Generated public key: {}", hex::encode(public_key));
-        
-        let address = public_key_to_address(&public_key);
+
         let bootstrap_data = public_key.to_vec();
         let mut padded_data = [0u8; 32];
         padded_data[..bootstrap_data.len().min(32)].copy_from_slice(&bootstrap_data[..bootstrap_data.len().min(32)]);
@@ -239,7 +146,123 @@ impl TdxProver {
     }
 }
 
-// Helper functions
+pub fn get_tdx_config(config: &serde_json::Value) -> Result<TdxConfig> {
+    let tdx_section = config.get("tdx")
+        .ok_or_else(|| anyhow!("TDX configuration not found in config"))?;
+    TdxConfig::deserialize(tdx_section).map_err(|e| anyhow!("Failed to parse TDX config: {}", e))
+}
+
+struct ProveData {
+    proof: Vec<u8>,
+    quote: TdxQuote,
+    address: Address,
+    instance_hash: B256,
+}
+
+fn prove(
+    input: &GuestInput,
+    tdx_config: &TdxConfig,
+    config_dir: &Path,
+) -> Result<ProveData> {
+    let private_key = load_private_key(config_dir)?;
+    let address = get_address_from_private_key(&private_key)?;
+    let instance_id = load_instance_id(config_dir).unwrap_or(tdx_config.instance_id);
+    
+    let pi = ProtocolInstance::new(&input, &input.block.header, ProofType::Tdx)?
+        .sgx_instance(address);
+
+    let pi_hash = pi.instance_hash();
+    let signature = sign_message(&private_key, &pi_hash)?;
+    let proof = create_proof(instance_id, &address, &signature)?;
+    let quote = generate_tdx_quote(&pi_hash, &tdx_config.socket_path)?;
+    
+    Ok(ProveData {
+        proof,
+        quote,
+        address,
+        instance_hash: pi_hash,
+    })
+}
+
+struct ProveAggregationData {
+    aggregation_hash: B256,
+    proof: Vec<u8>,
+    quote: TdxQuote,
+    new_instance: Address,
+}
+
+fn prove_aggregation(
+    input: &AggregationGuestInput,
+    tdx_config: &TdxConfig,
+    config_dir: &Path,
+) -> Result<ProveAggregationData> {
+    let instance_id = load_instance_id(config_dir).unwrap_or(tdx_config.instance_id);
+    let private_key = load_private_key(&config_dir)?;
+    let new_instance = get_address_from_private_key(&private_key)?;
+
+    let raw_input = RawAggregationGuestInput {
+        proofs: input
+            .proofs
+            .iter()
+            .map(|proof| {
+                let proof_data: TdxProverData = serde_json::from_str(&proof.proof.as_ref().unwrap())
+                    .map_err(|e| anyhow!("Failed to parse TDX proof data: {}", e))?;
+                
+                Ok(raiko_lib::input::RawProof {
+                    input: proof.input.unwrap(),
+                    proof: hex::decode(&proof_data.proof[2..])?,
+                })
+            })
+            .collect::<Result<Vec<_>>>()?,
+    };
+
+    let old_instance = if !raw_input.proofs.is_empty() {
+        Address::from_slice(&raw_input.proofs[0].proof[4..24])
+    } else {
+        new_instance
+    };
+    
+    // Verify proof chain
+    let mut cur_instance = old_instance;
+    for proof in raw_input.proofs.iter() {
+        let signature = &proof.proof[24..89];
+        let signature_array: [u8; 65] = signature.try_into()
+            .map_err(|e: core::array::TryFromSliceError| anyhow!("Invalid signature length: {}", e))?;
+        let recovered = recover_signer_unchecked(&signature_array, &proof.input)?;
+        
+        if recovered != cur_instance {
+            return Err(anyhow!("Proof chain verification failed: expected signer {}, got {}", cur_instance, recovered));
+        }
+        
+        cur_instance = Address::from_slice(&proof.proof[4..24]);
+    }
+    
+    if cur_instance != new_instance {
+        return Err(anyhow!("Proof chain does not end with current instance: expected {}, got {}", new_instance, cur_instance));
+    }
+    
+    let aggregation_hash: B256 = B256::from(keccak(aggregation_output_combine(
+        [
+            vec![
+                B256::left_padding_from(old_instance.as_ref()),
+                B256::left_padding_from(new_instance.as_ref()),
+            ],
+            raw_input.proofs.iter().map(|proof| proof.input).collect::<Vec<_>>(),
+        ]
+        .concat(),
+    )));
+    
+    let signature = sign_message(&private_key, &aggregation_hash)?;
+    let proof = create_aggregation_proof(instance_id, &old_instance, &new_instance, &signature)?;
+    let quote = generate_tdx_quote(&aggregation_hash, &tdx_config.socket_path)?;
+    
+    Ok(ProveAggregationData {
+        aggregation_hash,
+        proof,
+        quote,
+        new_instance,
+    })
+}
 
 pub fn get_config_dir() -> Result<PathBuf> {
     let home_dir = dirs::home_dir().ok_or_else(|| anyhow!("Failed to get home directory"))?;
@@ -284,9 +307,8 @@ pub fn get_address_from_private_key(private_key: &secp256k1::SecretKey) -> Resul
     let secp = secp256k1::Secp256k1::new();
     let public_key = secp256k1::PublicKey::from_secret_key(&secp, private_key);
     
-    // Convert public key to Ethereum address
-    let public_key_bytes = public_key.serialize_uncompressed()[1..];
-    let hash = Keccak256::digest(&public_key_bytes[1..]); // Skip the 0x04 prefix
+    let public_key_bytes = &public_key.serialize_uncompressed()[1..];
+    let hash = Keccak256::digest(public_key_bytes);
     
     Ok(Address::from_slice(&hash[12..]))
 }
