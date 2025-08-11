@@ -1,0 +1,69 @@
+use std::{fs, path::PathBuf};
+
+use anyhow::{anyhow, Context, Result};
+use serde::Deserialize;
+
+use crate::TdxConfig;
+
+pub fn get_tdx_config(config: &serde_json::Value) -> Result<TdxConfig> {
+    let tdx_section = config.get("tdx")
+        .ok_or_else(|| anyhow!("TDX configuration not found in config"))?;
+    TdxConfig::deserialize(tdx_section).map_err(|e| anyhow!("Failed to parse TDX config: {}", e))
+}
+
+pub fn get_config_dir() -> Result<PathBuf> {
+    let home_dir = dirs::home_dir().ok_or_else(|| anyhow!("Failed to get home directory"))?;
+    let config_dir = home_dir.join(".config").join("raiko").join("tdx");
+    fs::create_dir_all(&config_dir)?;
+    Ok(config_dir)
+}
+
+pub fn generate_private_key() -> Result<secp256k1::SecretKey> {
+    let secp = secp256k1::Secp256k1::new();
+    let (secret_key, _) = secp.generate_keypair(&mut secp256k1::rand::thread_rng());
+
+    save_private_key(&secret_key)?;
+
+    Ok(secret_key)
+}
+
+pub fn save_private_key(private_key: &secp256k1::SecretKey) -> Result<()> {
+    let config_dir = get_config_dir()?;
+
+    let secrets_dir = config_dir.join("secrets");
+    fs::create_dir_all(&secrets_dir)?;
+    
+    let key_file = secrets_dir.join("priv.key");
+    fs::write(&key_file, private_key.secret_bytes())?;
+    
+    // Set file permissions to 0600 (read/write for owner only)
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mut perms = fs::metadata(&key_file)?.permissions();
+        perms.set_mode(0o600);
+        fs::set_permissions(&key_file, perms)?;
+    }
+    
+    Ok(())
+}
+
+pub fn load_private_key() -> Result<secp256k1::SecretKey> {
+    let config_dir = get_config_dir()?;
+    let key_file = config_dir.join("secrets").join("priv.key");
+    let key_bytes = fs::read(&key_file)
+        .with_context(|| format!("Failed to read private key from {}", key_file.display()))?;
+    
+    secp256k1::SecretKey::from_slice(&key_bytes)
+        .map_err(|e| anyhow!("Invalid private key: {}", e))
+}
+
+pub fn load_instance_id() -> Result<u32> {
+    let config_dir = get_config_dir()?;
+    let instance_file = config_dir.join("instance_id");
+    let instance_str = fs::read_to_string(&instance_file)
+        .with_context(|| format!("Failed to read instance ID from {}", instance_file.display()))?;
+    
+    instance_str.trim().parse::<u32>()
+        .map_err(|e| anyhow!("Invalid instance ID: {}", e))
+}
