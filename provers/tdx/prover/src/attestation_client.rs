@@ -6,12 +6,8 @@ use std::os::unix::net::UnixStream;
 #[derive(Debug, Serialize)]
 #[serde(tag = "type", rename_all = "lowercase")]
 enum Request {
-    Issue {
-        data: IssueData,
-    },
-    Validate {
-        data: ValidateData,
-    },
+    Issue { data: IssueData },
+    Validate { data: ValidateData },
 }
 
 #[derive(Debug, Serialize)]
@@ -51,20 +47,27 @@ pub fn issue_attestation(socket_path: &str, user_data: &[u8], nonce: &[u8]) -> R
         },
     };
 
-    let request_json = serde_json::to_string(&request)
-        .context("Failed to serialize issue request")?;
+    let request_json =
+        serde_json::to_string(&request).context("Failed to serialize issue request")?;
 
-    let mut stream = UnixStream::connect(socket_path)
-        .with_context(|| format!("Failed to connect to attestation service at {}", socket_path))?;
+    let mut stream = UnixStream::connect(socket_path).with_context(|| {
+        format!(
+            "Failed to connect to attestation service at {}",
+            socket_path
+        )
+    })?;
 
-    stream.write_all(request_json.as_bytes())
+    stream
+        .write_all(request_json.as_bytes())
         .context("Failed to write request to socket")?;
-    
-    stream.shutdown(std::net::Shutdown::Write)
+
+    stream
+        .shutdown(std::net::Shutdown::Write)
         .context("Failed to shutdown write side of socket")?;
 
     let mut response_buf = Vec::new();
-    stream.read_to_end(&mut response_buf)
+    stream
+        .read_to_end(&mut response_buf)
         .context("Failed to read response from socket")?;
 
     let response: IssueResponse = serde_json::from_slice(&response_buf)
@@ -74,12 +77,15 @@ pub fn issue_attestation(socket_path: &str, user_data: &[u8], nonce: &[u8]) -> R
         return Err(anyhow!("Attestation service error: {}", response.error));
     }
 
-    hex::decode(&response.document)
-        .context("Failed to decode attestation document from hex")
+    hex::decode(&response.document).context("Failed to decode attestation document from hex")
 }
 
 #[allow(dead_code)]
-pub fn validate_attestation(socket_path: &str, document: &[u8], nonce: &[u8]) -> Result<(Vec<u8>, bool)> {
+pub fn validate_attestation(
+    socket_path: &str,
+    document: &[u8],
+    nonce: &[u8],
+) -> Result<(Vec<u8>, bool)> {
     let request = Request::Validate {
         data: ValidateData {
             document: hex::encode(document),
@@ -87,20 +93,27 @@ pub fn validate_attestation(socket_path: &str, document: &[u8], nonce: &[u8]) ->
         },
     };
 
-    let request_json = serde_json::to_string(&request)
-        .context("Failed to serialize validate request")?;
+    let request_json =
+        serde_json::to_string(&request).context("Failed to serialize validate request")?;
 
-    let mut stream = UnixStream::connect(socket_path)
-        .with_context(|| format!("Failed to connect to attestation service at {}", socket_path))?;
+    let mut stream = UnixStream::connect(socket_path).with_context(|| {
+        format!(
+            "Failed to connect to attestation service at {}",
+            socket_path
+        )
+    })?;
 
-    stream.write_all(request_json.as_bytes())
+    stream
+        .write_all(request_json.as_bytes())
         .context("Failed to write request to socket")?;
-    
-    stream.shutdown(std::net::Shutdown::Write)
+
+    stream
+        .shutdown(std::net::Shutdown::Write)
         .context("Failed to shutdown write side of socket")?;
 
     let mut response_buf = Vec::new();
-    stream.read_to_end(&mut response_buf)
+    stream
+        .read_to_end(&mut response_buf)
         .context("Failed to read response from socket")?;
 
     let response: ValidateResponse = serde_json::from_slice(&response_buf)
@@ -110,8 +123,8 @@ pub fn validate_attestation(socket_path: &str, document: &[u8], nonce: &[u8]) ->
         return Err(anyhow!("Attestation service error: {}", response.error));
     }
 
-    let user_data = hex::decode(&response.user_data)
-        .context("Failed to decode user data from hex")?;
+    let user_data =
+        hex::decode(&response.user_data).context("Failed to decode user data from hex")?;
 
     Ok((user_data, response.valid))
 }
