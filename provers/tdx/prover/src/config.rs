@@ -73,3 +73,11 @@ pub fn load_instance_id() -> Result<u32> {
         .parse::<u32>()
         .map_err(|e| anyhow!("Invalid instance ID: {}", e))
 }
+
+pub fn set_instance_id(instance_id: u32) -> Result<()> {
+    let config_dir = get_config_dir()?;
+    let instance_file = config_dir.join("instance_id");
+    fs::write(&instance_file, instance_id.to_string())?;
+
+    Ok(())
+}

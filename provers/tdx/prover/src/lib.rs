@@ -1,14 +1,13 @@
 #![cfg(feature = "enable")]
 
-use std::{fs, path::Path};
-
 use anyhow::Result;
 use raiko_lib::{
-    input::{AggregationGuestInput, AggregationGuestOutput, GuestInput, GuestOutput},
+    input::{AggregationGuestInput, AggregationGuestOutput, GuestBatchInput, GuestInput, GuestBatchOutput, GuestOutput},
     proof_type::ProofType,
-    prover::{IdStore, IdWrite, Proof, ProofKey, Prover, ProverError, ProverResult},
+    prover::{IdStore, IdWrite, Proof, ProofKey, Prover, ProverConfig, ProverError, ProverResult},
 };
 use serde::{Deserialize, Serialize};
+use serde_with::serde_as;
 use tracing::info;
 
 mod attestation_client;
@@ -22,29 +21,21 @@ pub const TDX_AGGREGATION_PROOF_SIZE: usize = 109;
 
 pub struct TdxProver;
 
+#[serde_as]
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct TdxConfig {
     pub instance_id: u32,
     pub socket_path: String,
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct TdxQuote {
-    pub data: Vec<u8>,
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct TdxProverData {
-    pub proof: String,
-    pub quote: String,
-    pub public_key: String,
+    pub bootstrap: bool,
+    pub prove: bool,
 }
 
 impl Prover for TdxProver {
     async fn run(
+        &self,
         input: GuestInput,
         _output: &GuestOutput,
-        config: &serde_json::Value,
+        config: &ProverConfig,
         _store: Option<&mut dyn IdWrite>,
     ) -> ProverResult<Proof> {
         info!("Running TDX prover");
@@ -52,28 +43,77 @@ impl Prover for TdxProver {
         let tdx_config =
             config::get_tdx_config(config).map_err(|e| ProverError::GuestError(e.to_string()))?;
 
-        let prove_data = proof::prove(&input, &tdx_config)
-            .map_err(|e| ProverError::GuestError(e.to_string()))?;
+        let mut proof = None;
+        let mut quote = None;
+        let mut instance_hash = None;
 
-        let prover_data = TdxProverData {
-            proof: hex::encode(&prove_data.proof),
-            quote: hex::encode(&prove_data.quote.data),
-            public_key: hex::encode(prove_data.address),
-        };
+        if tdx_config.bootstrap {
+            let quote_data = TdxProver::bootstrap(&config).await.map_err(|e| ProverError::GuestError(e.to_string()))?;
+            quote = Some(hex::encode(&quote_data));
+        }
+
+        if tdx_config.prove {
+            let prove_data = proof::prove(&input, &tdx_config)
+                .map_err(|e| ProverError::GuestError(e.to_string()))?;
+
+            proof = Some(hex::encode(&prove_data.proof));
+            quote = Some(hex::encode(&prove_data.quote));
+            instance_hash = Some(prove_data.instance_hash);
+        }
 
         Ok(Proof {
-            proof: Some(prover_data.proof),
-            input: Some(prove_data.instance_hash),
-            quote: Some(prover_data.quote),
+            proof,
+            input: instance_hash,
+            quote,
+            uuid: None,
+            kzg_proof: None,
+        })
+    }
+
+    async fn batch_run(
+        &self,
+        input: GuestBatchInput,
+        _output: &GuestBatchOutput,
+        config: &ProverConfig,
+        _id_store: Option<&mut dyn IdWrite>,
+    ) -> ProverResult<Proof> {
+        info!("Running TDX prover");
+
+        let tdx_config =
+            config::get_tdx_config(config).map_err(|e| ProverError::GuestError(e.to_string()))?;
+
+
+        let mut proof = None;
+        let mut quote = None;
+        let mut instance_hash = None;
+
+        if tdx_config.bootstrap {
+            let quote_data = TdxProver::bootstrap(&config).await.map_err(|e| ProverError::GuestError(e.to_string()))?;
+            quote = Some(hex::encode(&quote_data));
+        }
+
+        if tdx_config.prove {
+            let prove_data = proof::prove_batch(&input, &tdx_config)
+                .map_err(|e| ProverError::GuestError(e.to_string()))?;
+            proof = Some(hex::encode(&prove_data.proof));
+            quote = Some(hex::encode(&prove_data.quote));
+            instance_hash = Some(prove_data.instance_hash);
+        }
+
+        Ok(Proof {
+            proof,
+            input: instance_hash,
+            quote,
             uuid: None,
             kzg_proof: None,
         })
     }
 
     async fn aggregate(
+        &self,
         input: AggregationGuestInput,
         _output: &AggregationGuestOutput,
-        config: &serde_json::Value,
+        config: &ProverConfig,
         _store: Option<&mut dyn IdWrite>,
     ) -> ProverResult<Proof> {
         info!(
@@ -84,31 +124,40 @@ impl Prover for TdxProver {
         let tdx_config =
             config::get_tdx_config(config).map_err(|e| ProverError::GuestError(e.to_string()))?;
 
-        let aggregation_data = proof::prove_aggregation(&input, &tdx_config)
-            .map_err(|e| ProverError::GuestError(e.to_string()))?;
+        let mut proof = None;
+        let mut quote = None;
+        let mut aggregation_hash = None;
 
-        let prover_data = TdxProverData {
-            proof: hex::encode(&aggregation_data.proof),
-            quote: hex::encode(&aggregation_data.quote.data),
-            public_key: hex::encode(aggregation_data.new_instance),
-        };
+        if tdx_config.bootstrap {
+            let quote_data = TdxProver::bootstrap(&config).await.map_err(|e| ProverError::GuestError(e.to_string()))?;
+            quote = Some(hex::encode(&quote_data));
+        }
+
+        if tdx_config.prove {
+            let aggregation_data = proof::prove_aggregation(&input, &tdx_config)
+                .map_err(|e| ProverError::GuestError(e.to_string()))?;
+
+            proof = Some(hex::encode(&aggregation_data.proof));
+            quote = Some(hex::encode(&aggregation_data.quote));
+            aggregation_hash = Some(aggregation_data.aggregation_hash);
+        }
 
         Ok(Proof {
-            proof: Some(prover_data.proof),
-            input: Some(aggregation_data.aggregation_hash),
-            quote: Some(prover_data.quote),
+            proof,
+            input: aggregation_hash,
+            quote,
             uuid: None,
             kzg_proof: None,
         })
     }
 
-    async fn cancel(_proof_key: ProofKey, _store: Box<&mut dyn IdStore>) -> ProverResult<()> {
+    async fn cancel(&self, _proof_key: ProofKey, _store: Box<&mut dyn IdStore>) -> ProverResult<()> {
         Ok(())
     }
 }
 
 impl TdxProver {
-    pub async fn bootstrap(config: &serde_json::Value) -> Result<()> {
+    pub async fn bootstrap(config: &serde_json::Value) -> Result<Vec<u8>> {
         info!("Bootstrapping TDX prover");
 
         let tdx_config = config::get_tdx_config(config)?;
@@ -123,18 +172,17 @@ impl TdxProver {
             "Bootstrap complete. Public key address: {}",
             hex::encode(public_key)
         );
-        info!("TDX quote generated (length: {} bytes)", quote.data.len());
+        info!("TDX quote generated (length: {} bytes)", quote.len());
 
-        Ok(())
+        Ok(quote)
     }
 
-    pub async fn set_instance_id(config_dir: &Path, instance_id: u32) -> Result<()> {
+    pub async fn set_instance_id(instance_id: u32) -> Result<()> {
         info!("Setting instance ID: {}", instance_id);
 
-        let instance_file = config_dir.join("instance_id");
-        fs::write(&instance_file, instance_id.to_string())?;
+        config::set_instance_id(instance_id)?;
 
-        info!("Instance ID saved to: {}", instance_file.display());
+        info!("Instance ID set to: {}", instance_id);
         Ok(())
     }
 }

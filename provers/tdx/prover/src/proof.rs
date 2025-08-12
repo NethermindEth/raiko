@@ -1,6 +1,6 @@
 use anyhow::{anyhow, Result};
 use raiko_lib::{
-    input::{AggregationGuestInput, GuestInput, RawAggregationGuestInput},
+    input::{AggregationGuestInput, GuestBatchInput, GuestInput, RawAggregationGuestInput},
     primitives::{keccak::keccak, Address, B256},
     proof_type::ProofType,
     protocol_instance::{aggregation_output_combine, ProtocolInstance},
@@ -12,7 +12,7 @@ use crate::{
     attestation_client,
     config::{load_instance_id, load_private_key},
     signature::{get_address_from_private_key, recover_signer_unchecked, sign_message},
-    TdxConfig, TdxProverData, TdxQuote, TDX_AGGREGATION_PROOF_SIZE, TDX_PROOF_SIZE,
+    TdxConfig, TDX_AGGREGATION_PROOF_SIZE, TDX_PROOF_SIZE,
 };
 
 pub fn create_proof(
@@ -45,7 +45,7 @@ pub fn create_aggregation_proof(
     Ok(proof)
 }
 
-pub fn generate_tdx_quote(user_report_data: &B256, socket_path: &str) -> Result<TdxQuote> {
+pub fn generate_tdx_quote(user_report_data: &B256, socket_path: &str) -> Result<Vec<u8>> {
     let user_data = user_report_data.as_slice();
     let nonce: [u8; 32] = rand::thread_rng().gen();
     let nonce = nonce.to_vec();
@@ -54,15 +54,13 @@ pub fn generate_tdx_quote(user_report_data: &B256, socket_path: &str) -> Result<
 
     let attestation_doc = attestation_client::issue_attestation(socket_path, user_data, &nonce)?;
 
-    Ok(TdxQuote {
-        data: attestation_doc,
-    })
+    Ok(attestation_doc)
 }
 
 pub fn generate_tdx_quote_from_public_key(
     public_key: &Address,
     socket_path: &str,
-) -> Result<TdxQuote> {
+) -> Result<Vec<u8>> {
     let bootstrap_data = public_key.to_vec();
     let mut padded_data = [0u8; 32];
     padded_data[..bootstrap_data.len().min(32)]
@@ -73,7 +71,7 @@ pub fn generate_tdx_quote_from_public_key(
 
 pub struct ProveData {
     pub proof: Vec<u8>,
-    pub quote: TdxQuote,
+    pub quote: Vec<u8>,
     pub address: Address,
     pub instance_hash: B256,
 }
@@ -99,10 +97,38 @@ pub fn prove(input: &GuestInput, tdx_config: &TdxConfig) -> Result<ProveData> {
     })
 }
 
+pub struct ProveBatchData {
+    pub proof: Vec<u8>,
+    pub quote: Vec<u8>,
+    pub address: Address,
+    pub instance_hash: B256,
+}
+
+pub fn prove_batch(input: &GuestBatchInput, tdx_config: &TdxConfig) -> Result<ProveBatchData> {
+    let private_key = load_private_key()?;
+    let address = get_address_from_private_key(&private_key)?;
+    let instance_id = load_instance_id().unwrap_or(tdx_config.instance_id);
+
+    let blocks = input.inputs.iter().map(|input| input.block.clone()).collect::<Vec<_>>();
+    let pi = ProtocolInstance::new_batch(&input, blocks, ProofType::Tdx)?.sgx_instance(address);
+
+    let pi_hash = pi.instance_hash();
+    let signature = sign_message(&private_key, &pi_hash)?;
+    let proof = create_proof(instance_id, &address, &signature)?;
+    let quote = generate_tdx_quote(&pi_hash, &tdx_config.socket_path)?;
+
+    Ok(ProveBatchData {
+        proof,
+        quote,
+        address,
+        instance_hash: pi_hash,
+    })
+}
+
 pub struct ProveAggregationData {
     pub aggregation_hash: B256,
     pub proof: Vec<u8>,
-    pub quote: TdxQuote,
+    pub quote: Vec<u8>,
     pub new_instance: Address,
 }
 
@@ -119,13 +145,9 @@ pub fn prove_aggregation(
             .proofs
             .iter()
             .map(|proof| {
-                let proof_data: TdxProverData =
-                    serde_json::from_str(&proof.proof.as_ref().unwrap())
-                        .map_err(|e| anyhow!("Failed to parse TDX proof data: {}", e))?;
-
                 Ok(raiko_lib::input::RawProof {
-                    input: proof.input.unwrap(),
-                    proof: hex::decode(&proof_data.proof[2..])?,
+                    input: proof.clone().input.unwrap(),
+                    proof: hex::decode(&proof.clone().proof.unwrap()[2..]).unwrap(),
                 })
             })
             .collect::<Result<Vec<_>>>()?,
