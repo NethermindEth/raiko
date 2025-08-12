@@ -3,6 +3,8 @@
     "l1_network": "holesky",
     "tdx": {
         "instance_id": 123456,
-        "socket_path": "/var/run/tdxd.sock"
+        "socket_path": "/var/run/tdxd.sock",
+        "bootstrap": false,
+        "prove": true
     }
 }
