@@ -149,6 +149,15 @@ pub async fn run_prover(
             #[cfg(not(feature = "sgx"))]
             Err(RaikoError::FeatureNotSupportedError(proof_type))
         }
+        ProofType::Tdx => {
+            #[cfg(feature = "tdx")]
+            return tdx_prover::TdxProver
+                .run(input.clone(), output, config, store)
+                .await
+                .map_err(|e| e.into());
+            #[cfg(not(feature = "tdx"))]
+            Err(RaikoError::FeatureNotSupportedError(proof_type))
+        }
     }
 }
 
@@ -194,7 +203,8 @@ pub async fn run_batch_prover(
         }
         ProofType::Tdx => {
             #[cfg(feature = "tdx")]
-            return tdx_prover::TdxProver::run(input.clone(), output, config, store)
+            return tdx_prover::TdxProver
+                .batch_run(input.clone(), output, config, store)
                 .await
                 .map_err(|e| e.into());
             #[cfg(not(feature = "tdx"))]
@@ -245,7 +255,8 @@ pub async fn aggregate_proofs(
         }
         ProofType::Tdx => {
             #[cfg(feature = "tdx")]
-            return tdx_prover::TdxProver::aggregate(input.clone(), output, config, store)
+            return tdx_prover::TdxProver
+                .aggregate(input.clone(), output, config, store)
                 .await
                 .map_err(|e| e.into());
             #[cfg(not(feature = "tdx"))]
@@ -295,7 +306,8 @@ pub async fn cancel_proof(
         }
         ProofType::Tdx => {
             #[cfg(feature = "tdx")]
-            return tdx_prover::TdxProver::cancel(proof_key, read)
+            return tdx_prover::TdxProver
+                .cancel(proof_key, read)
                 .await
                 .map_err(|e| e.into());
             #[cfg(not(feature = "tdx"))]
