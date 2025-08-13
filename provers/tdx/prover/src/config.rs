@@ -57,27 +57,3 @@ pub fn load_private_key() -> Result<secp256k1::SecretKey> {
 
     secp256k1::SecretKey::from_slice(&key_bytes).map_err(|e| anyhow!("Invalid private key: {}", e))
 }
-
-pub fn load_instance_id() -> Result<u32> {
-    let config_dir = get_config_dir()?;
-    let instance_file = config_dir.join("instance_id");
-    let instance_str = fs::read_to_string(&instance_file).with_context(|| {
-        format!(
-            "Failed to read instance ID from {}",
-            instance_file.display()
-        )
-    })?;
-
-    instance_str
-        .trim()
-        .parse::<u32>()
-        .map_err(|e| anyhow!("Invalid instance ID: {}", e))
-}
-
-pub fn set_instance_id(instance_id: u32) -> Result<()> {
-    let config_dir = get_config_dir()?;
-    let instance_file = config_dir.join("instance_id");
-    fs::write(&instance_file, instance_id.to_string())?;
-
-    Ok(())
-}

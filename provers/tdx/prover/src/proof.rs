@@ -10,7 +10,7 @@ use tracing::info;
 
 use crate::{
     attestation_client,
-    config::{load_instance_id, load_private_key},
+    config::load_private_key,
     signature::{get_address_from_private_key, recover_signer_unchecked, sign_message},
     TdxConfig, TDX_AGGREGATION_PROOF_SIZE, TDX_PROOF_SIZE,
 };
@@ -79,7 +79,7 @@ pub struct ProveData {
 pub fn prove(input: &GuestInput, tdx_config: &TdxConfig) -> Result<ProveData> {
     let private_key = load_private_key()?;
     let address = get_address_from_private_key(&private_key)?;
-    let instance_id = load_instance_id().unwrap_or(tdx_config.instance_id);
+    let instance_id = get_instance_id_from_params(input, tdx_config)?;
 
     let pi =
         ProtocolInstance::new(&input, &input.block.header, ProofType::Tdx)?.sgx_instance(address);
@@ -107,7 +107,7 @@ pub struct ProveBatchData {
 pub fn prove_batch(input: &GuestBatchInput, tdx_config: &TdxConfig) -> Result<ProveBatchData> {
     let private_key = load_private_key()?;
     let address = get_address_from_private_key(&private_key)?;
-    let instance_id = load_instance_id().unwrap_or(tdx_config.instance_id);
+    let instance_id = get_instance_id_from_params(&input.inputs[0], tdx_config)?;
 
     let blocks = input.inputs.iter().map(|input| input.block.clone()).collect::<Vec<_>>();
     let pi = ProtocolInstance::new_batch(&input, blocks, ProofType::Tdx)?.sgx_instance(address);
@@ -136,7 +136,6 @@ pub fn prove_aggregation(
     input: &AggregationGuestInput,
     tdx_config: &TdxConfig,
 ) -> Result<ProveAggregationData> {
-    let instance_id = load_instance_id().unwrap_or(tdx_config.instance_id);
     let private_key = load_private_key()?;
     let new_instance = get_address_from_private_key(&private_key)?;
 
@@ -151,6 +150,12 @@ pub fn prove_aggregation(
                 })
             })
             .collect::<Result<Vec<_>>>()?,
+    };
+
+    let instance_id = {
+        let mut instance_id_bytes = [0u8; 4];
+        instance_id_bytes[0..4].copy_from_slice(&raw_input.proofs[0].proof.clone()[0..4]);
+        u32::from_be_bytes(instance_id_bytes)
     };
 
     let old_instance = if !raw_input.proofs.is_empty() {
@@ -214,4 +219,16 @@ pub fn prove_aggregation(
         quote,
         new_instance,
     })
+}
+
+fn get_instance_id_from_params(input: &GuestInput, tdx_config: &TdxConfig) -> Result<u32> {
+    let spec_id = input
+        .chain_spec
+        .active_fork(input.block.number, input.block.timestamp)
+        .map_err(|e| anyhow!(e.to_string()))?;
+    tdx_config
+        .instance_ids
+        .get(&spec_id)
+        .cloned()
+        .ok_or_else(|| anyhow!("No instance id found for spec id: {:?}", spec_id))
 }

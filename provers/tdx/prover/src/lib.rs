@@ -1,7 +1,9 @@
 #![cfg(feature = "enable")]
 
+use std::collections::HashMap;
 use anyhow::Result;
 use raiko_lib::{
+    consts::SpecId,
     input::{AggregationGuestInput, AggregationGuestOutput, GuestBatchInput, GuestInput, GuestBatchOutput, GuestOutput},
     proof_type::ProofType,
     prover::{IdStore, IdWrite, Proof, ProofKey, Prover, ProverConfig, ProverError, ProverResult},
@@ -24,7 +26,7 @@ pub struct TdxProver;
 #[serde_as]
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct TdxConfig {
-    pub instance_id: u32,
+    pub instance_ids: HashMap<SpecId, u32>,
     pub socket_path: String,
     pub bootstrap: bool,
     pub prove: bool,
@@ -175,14 +177,5 @@ impl TdxProver {
         info!("TDX quote generated (length: {} bytes)", quote.len());
 
         Ok(quote)
-    }
-
-    pub async fn set_instance_id(instance_id: u32) -> Result<()> {
-        info!("Setting instance ID: {}", instance_id);
-
-        config::set_instance_id(instance_id)?;
-
-        info!("Instance ID set to: {}", instance_id);
-        Ok(())
     }
 }
