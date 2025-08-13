@@ -413,6 +413,9 @@ mod tests {
             "tdx".to_string(),
             json! {
                 {
+                    "instance_id": 121,
+                    "socket_path": "/var/run/tdxd.sock",
+                    "bootstrap": enable_aggregation,
                     "prove": true,
                 }
             },

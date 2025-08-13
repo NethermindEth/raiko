@@ -10,6 +10,10 @@
   "sgx": {
     "instance_id": 0
   },
+  "tdx": {
+    "instance_id": 0,
+    "socket_path": "/var/run/tdxd.sock"
+  },
   "risc0": {
     "bonsai": true,
     "snark": true,
