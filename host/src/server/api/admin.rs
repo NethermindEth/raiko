@@ -6,7 +6,6 @@ use axum::{extract::State, routing::post, Router};
 use raiko_ballot::Ballot;
 use raiko_lib::proof_type::ProofType;
 use std::collections::BTreeMap;
-use serde::{Deserialize, Serialize};
 
 use crate::interfaces::HostResult;
 use raiko_reqactor::Actor;
