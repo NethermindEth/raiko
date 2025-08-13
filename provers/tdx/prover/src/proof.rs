@@ -109,7 +109,11 @@ pub fn prove_batch(input: &GuestBatchInput, tdx_config: &TdxConfig) -> Result<Pr
     let address = get_address_from_private_key(&private_key)?;
     let instance_id = get_instance_id_from_params(&input.inputs[0], tdx_config)?;
 
-    let blocks = input.inputs.iter().map(|input| input.block.clone()).collect::<Vec<_>>();
+    let blocks = input
+        .inputs
+        .iter()
+        .map(|input| input.block.clone())
+        .collect::<Vec<_>>();
     let pi = ProtocolInstance::new_batch(&input, blocks, ProofType::Tdx)?.sgx_instance(address);
 
     let pi_hash = pi.instance_hash();

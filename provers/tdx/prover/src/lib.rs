@@ -1,15 +1,18 @@
 #![cfg(feature = "enable")]
 
-use std::collections::HashMap;
 use anyhow::Result;
 use raiko_lib::{
     consts::SpecId,
-    input::{AggregationGuestInput, AggregationGuestOutput, GuestBatchInput, GuestInput, GuestBatchOutput, GuestOutput},
+    input::{
+        AggregationGuestInput, AggregationGuestOutput, GuestBatchInput, GuestBatchOutput,
+        GuestInput, GuestOutput,
+    },
     proof_type::ProofType,
     prover::{IdStore, IdWrite, Proof, ProofKey, Prover, ProverConfig, ProverError, ProverResult},
 };
 use serde::{Deserialize, Serialize};
 use serde_with::serde_as;
+use std::collections::HashMap;
 use tracing::info;
 
 mod attestation_client;
@@ -50,7 +53,9 @@ impl Prover for TdxProver {
         let mut instance_hash = None;
 
         if tdx_config.bootstrap {
-            let quote_data = TdxProver::bootstrap(&config).await.map_err(|e| ProverError::GuestError(e.to_string()))?;
+            let quote_data = TdxProver::bootstrap(&config)
+                .await
+                .map_err(|e| ProverError::GuestError(e.to_string()))?;
             quote = Some(hex::encode(&quote_data));
         }
 
@@ -84,13 +89,14 @@ impl Prover for TdxProver {
         let tdx_config =
             config::get_tdx_config(config).map_err(|e| ProverError::GuestError(e.to_string()))?;
 
-
         let mut proof = None;
         let mut quote = None;
         let mut instance_hash = None;
 
         if tdx_config.bootstrap {
-            let quote_data = TdxProver::bootstrap(&config).await.map_err(|e| ProverError::GuestError(e.to_string()))?;
+            let quote_data = TdxProver::bootstrap(&config)
+                .await
+                .map_err(|e| ProverError::GuestError(e.to_string()))?;
             quote = Some(hex::encode(&quote_data));
         }
 
@@ -131,7 +137,9 @@ impl Prover for TdxProver {
         let mut aggregation_hash = None;
 
         if tdx_config.bootstrap {
-            let quote_data = TdxProver::bootstrap(&config).await.map_err(|e| ProverError::GuestError(e.to_string()))?;
+            let quote_data = TdxProver::bootstrap(&config)
+                .await
+                .map_err(|e| ProverError::GuestError(e.to_string()))?;
             quote = Some(hex::encode(&quote_data));
         }
 
@@ -153,7 +161,11 @@ impl Prover for TdxProver {
         })
     }
 
-    async fn cancel(&self, _proof_key: ProofKey, _store: Box<&mut dyn IdStore>) -> ProverResult<()> {
+    async fn cancel(
+        &self,
+        _proof_key: ProofKey,
+        _store: Box<&mut dyn IdStore>,
+    ) -> ProverResult<()> {
         Ok(())
     }
 }

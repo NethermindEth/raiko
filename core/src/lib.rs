@@ -108,7 +108,8 @@ impl Raiko {
 
         Ok(GuestOutput {
             header: input.block.header.clone(),
-            hash: ProtocolInstance::new(input, &input.block.header, self.request.proof_type)?.instance_hash(),
+            hash: ProtocolInstance::new(input, &input.block.header, self.request.proof_type)?
+                .instance_hash(),
         })
     }
 
@@ -438,7 +439,9 @@ mod tests {
             .await
             .expect("input generation failed");
         let should_execute = proof_request.proof_type != raiko_lib::proof_type::ProofType::Tdx;
-        raiko.get_output(&input, should_execute).expect("output generation failed");
+        raiko
+            .get_output(&input, should_execute)
+            .expect("output generation failed");
         raiko
             .prove(input, &output, None)
             .await
