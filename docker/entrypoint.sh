@@ -310,6 +310,7 @@ if [[ -n $TDX ]]; then
         #update raiko server config
         update_raiko_network $RAIKO_CONF_BASE_CONFIG
         update_docker_chain_specs $RAIKO_CONF_CHAIN_SPECS
+        update_raiko_tdx_instance_id $RAIKO_CONF_BASE_CONFIG
 
         /opt/raiko/bin/raiko-host "$@"
 fi
