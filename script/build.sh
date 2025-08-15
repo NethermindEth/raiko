@@ -174,22 +174,22 @@ fi
 if [ "$1" == "tdx" ]; then
     check_toolchain $TOOLCHAIN_TDX
     if [ -n "${CLIPPY}" ]; then
-        cargo ${TOOLCHAIN_TDX} clippy -p raiko-host -p tdx-prover -F "tdx enable" -F $TASKDB -- -D warnings
+        cargo ${TOOLCHAIN_TDX} clippy -p raiko-host -p tdx-prover -F "tdx enable" -- -D warnings
     elif [ -z "${RUN}" ]; then
         if [ -z "${TEST}" ]; then
             echo "Building TDX prover"
-            cargo ${TOOLCHAIN_TDX} build ${FLAGS} --features tdx -F $TASKDB
+            cargo ${TOOLCHAIN_TDX} build ${FLAGS} --features tdx
         else
             echo "Building TDX tests"
-            cargo ${TOOLCHAIN_TDX} test ${FLAGS} -p raiko-host -p tdx-prover --features "tdx enable" -F $TASKDB --no-run
+            cargo ${TOOLCHAIN_TDX} test ${FLAGS} -p raiko-host -p tdx-prover --features "tdx enable" --no-run
         fi
     else
         if [ -z "${TEST}" ]; then
             echo "Running TDX prover"
-            cargo ${TOOLCHAIN_TDX} run ${FLAGS} --features tdx -F $TASKDB
+            cargo ${TOOLCHAIN_TDX} run ${FLAGS} --features tdx
         else
             echo "Running TDX tests"
-            cargo ${TOOLCHAIN_TDX} test ${FLAGS} -p raiko-host -p tdx-prover --features "tdx enable" -F $TASKDB
+            cargo ${TOOLCHAIN_TDX} test ${FLAGS} -p raiko-host -p tdx-prover --features "tdx enable"
         fi
     fi
 fi
