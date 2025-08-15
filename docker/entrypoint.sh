@@ -157,6 +157,31 @@ function update_raiko_sgx_instance_id() {
     fi
 }
 
+function update_raiko_tdx_instance_id() {
+    CONFIG_FILE=$1
+    if [[ -n $TDX_INSTANCE_ID ]]; then
+        jq \
+            --arg update_value "$TDX_INSTANCE_ID" \
+            '.tdx.instance_ids.HEKLA = ($update_value | tonumber)' $CONFIG_FILE \
+            >/tmp/config_tmp.json && mv /tmp/config_tmp.json $CONFIG_FILE
+        echo "Update hekla tdx instance id to $TDX_INSTANCE_ID"
+    fi
+    if [[ -n $TDX_ONTAKE_INSTANCE_ID ]]; then
+        jq \
+            --arg update_value "$TDX_ONTAKE_INSTANCE_ID" \
+            '.tdx.instance_ids.ONTAKE = ($update_value | tonumber)' $CONFIG_FILE \
+            >/tmp/config_tmp.json && mv /tmp/config_tmp.json $CONFIG_FILE
+        echo "Update ontake tdx instance id to $TDX_ONTAKE_INSTANCE_ID"
+    fi
+    if [[ -n $TDX_PACAYA_INSTANCE_ID ]]; then
+        jq \
+            --arg update_value "$TDX_PACAYA_INSTANCE_ID" \
+            '.tdx.instance_ids.PACAYA = ($update_value | tonumber)' $CONFIG_FILE \
+            >/tmp/config_tmp.json && mv /tmp/config_tmp.json $CONFIG_FILE
+        echo "Update pacaya tdx instance id to $TDX_PACAYA_INSTANCE_ID"
+    fi
+}
+
 # merge devnet & product chain spec here
 function merge_json_arrays() {
     local input1="$1"
@@ -224,6 +249,7 @@ if [[ -n $SGX ]]; then
         #update raiko server config
         update_raiko_network $RAIKO_CONF_BASE_CONFIG
         update_raiko_sgx_instance_id $RAIKO_CONF_BASE_CONFIG
+        update_raiko_tdx_instance_id $RAIKO_CONF_BASE_CONFIG
 
         #merge chain spec to a all-in-one file
         merge_json_arrays $PRODUCT_CHAINSPEC_FILE $DEVNET_CHAINSPEC_FILE $RAIKO_CONF_CHAIN_SPECS
@@ -243,6 +269,7 @@ if [[ -n $ZK ]]; then
     #update raiko server config
     update_raiko_network $RAIKO_CONF_BASE_CONFIG
     update_raiko_sgx_instance_id $RAIKO_CONF_BASE_CONFIG
+    update_raiko_tdx_instance_id $RAIKO_CONF_BASE_CONFIG
 
     #update raiko server chainspec
     merge_json_arrays $PRODUCT_CHAINSPEC_FILE $DEVNET_CHAINSPEC_FILE $RAIKO_CONF_CHAIN_SPECS
@@ -271,4 +298,19 @@ if [[ -n $SGX_SERVER ]]; then
         /opt/raiko/bin/gaiko --verbosity $GAIKO_GUEST_APP_VERBOSE_LEVEL serve --sgx-instance-id $SGXGETH_PACAYA_INSTANCE_ID --port 8090 | sed 's/^/[gaiko] /' &
         wait
     fi
+fi
+
+if [[ -n $TDX ]]; then
+    echo "running raiko in tdx mode"
+        if [ ! -f $RAIKO_CONF_TDX_CONFIG ]; then
+            echo "$RAIKO_CONF_TDX_CONFIG file not found."
+            exit 1
+        fi
+
+        #update raiko server config
+        update_raiko_network $RAIKO_CONF_BASE_CONFIG
+        update_docker_chain_specs $RAIKO_CONF_CHAIN_SPECS
+        update_raiko_tdx_instance_id $RAIKO_CONF_BASE_CONFIG
+
+        /opt/raiko/bin/raiko-host "$@"
 fi

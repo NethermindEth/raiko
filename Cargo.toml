@@ -12,6 +12,8 @@ members = [
     "provers/sgx/prover",
     "provers/sgx/guest",
     "provers/sgx/setup",
+    "provers/tdx",
+    "provers/tdx/prover",
     "pipeline",
     "core",
     "taskdb",

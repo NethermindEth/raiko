@@ -1,0 +1,30 @@
+name: CI - TDX ALL
+
+on:
+  workflow_call:
+  push:
+    branches: ["main"]
+    paths:
+      - "provers/tdx/**"
+      - "!docs/**"
+  pull_request:
+    paths:
+      - "provers/tdx/**"
+      - "!docs/**"
+
+jobs:
+  build-test-tdx:
+    name: Build and test tdx
+    uses: ./.github/workflows/ci-build-test-reusable.yml
+    with:
+      version_name: "tdx"
+      version_toolchain: "stable"
+      taskdb: "false"
+
+  integration-test-tdx:
+    name: Run integration tests on tdx
+    uses: ./.github/workflows/ci-integration-reusable.yml
+    with:
+      version_name: "tdx"
+      version_toolchain: "nightly-2024-04-17"
+      taskdb: "false"
