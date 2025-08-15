@@ -53,7 +53,7 @@ impl Prover for TdxProver {
         let mut instance_hash = None;
 
         if tdx_config.bootstrap {
-            let quote_data = TdxProver::bootstrap(&config)
+            let quote_data = TdxProver::bootstrap(&tdx_config)
                 .await
                 .map_err(|e| ProverError::GuestError(e.to_string()))?;
             quote = Some(hex::encode(&quote_data));
@@ -94,7 +94,7 @@ impl Prover for TdxProver {
         let mut instance_hash = None;
 
         if tdx_config.bootstrap {
-            let quote_data = TdxProver::bootstrap(&config)
+            let quote_data = TdxProver::bootstrap(&tdx_config)
                 .await
                 .map_err(|e| ProverError::GuestError(e.to_string()))?;
             quote = Some(hex::encode(&quote_data));
@@ -137,7 +137,7 @@ impl Prover for TdxProver {
         let mut aggregation_hash = None;
 
         if tdx_config.bootstrap {
-            let quote_data = TdxProver::bootstrap(&config)
+            let quote_data = TdxProver::bootstrap(&tdx_config)
                 .await
                 .map_err(|e| ProverError::GuestError(e.to_string()))?;
             quote = Some(hex::encode(&quote_data));
@@ -171,10 +171,9 @@ impl Prover for TdxProver {
 }
 
 impl TdxProver {
-    pub async fn bootstrap(config: &serde_json::Value) -> Result<Vec<u8>> {
+    pub async fn bootstrap(tdx_config: &TdxConfig) -> Result<Vec<u8>> {
         info!("Bootstrapping TDX prover");
 
-        let tdx_config = config::get_tdx_config(config)?;
         let private_key = config::generate_private_key()?;
 
         let public_key = signature::get_address_from_private_key(&private_key)?;
