@@ -35,10 +35,6 @@ alloy-rpc-client = { workspace = true }
 # crypto
 kzg = { workspace = true }
 kzg_traits = { workspace = true }
-secp256k1 = { workspace = true }
-sha3 = { workspace = true }
-hex = { workspace = true }
-dirs = { workspace = true }
 
 # server
 axum = { workspace = true }
