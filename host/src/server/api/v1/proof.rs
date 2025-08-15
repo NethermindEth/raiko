@@ -68,6 +68,10 @@ async fn proof_handler(
                 #[cfg(not(feature = "sgx"))]
                 return Err(anyhow::anyhow!("SGX not supported").into());
             }
+            "tdx" => {
+                #[cfg(not(feature = "tdx"))]
+                return Err(anyhow::anyhow!("TDX not supported").into());
+            }
             _ => {
                 return Err(anyhow::anyhow!("Unknown proof type: {}", proof_type).into());
             }

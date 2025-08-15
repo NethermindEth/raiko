@@ -14,6 +14,8 @@ use serde::{Deserialize, Serialize};
 use serde_with::serde_as;
 use std::collections::HashMap;
 use tracing::info;
+use once_cell::sync::Lazy;
+use serde_json::json;
 
 mod attestation_client;
 mod config;
@@ -168,6 +170,13 @@ impl Prover for TdxProver {
     ) -> ProverResult<()> {
         Ok(())
     }
+
+    async fn get_guest_data() -> ProverResult<serde_json::Value> {
+        match TDX_GUEST_DATA.as_ref() {
+            Ok(value) => Ok(value.clone()),
+            Err(e) => Err(ProverError::GuestError(e.clone())),
+        }
+    }
 }
 
 impl TdxProver {
@@ -187,6 +196,21 @@ impl TdxProver {
         );
         info!("TDX quote generated (length: {} bytes)", quote.len());
 
+        let metadata = attestation_client::metadata(&tdx_config.socket_path)?;
+
+        config::write_bootstrap(&quote, &public_key, metadata)?;
+
         Ok(quote)
     }
 }
+
+pub static TDX_GUEST_DATA: Lazy<Result<serde_json::Value, String>> = Lazy::new(|| {
+    let bootstrap_data = config::read_bootstrap()
+        .map_err(|e| format!("Failed to read bootstrap data for guest data: {}", e))?;
+
+    Ok(json!({
+        "public_key": bootstrap_data.public_key,
+        "quote": bootstrap_data.quote,
+        "metadata": bootstrap_data.metadata,
+    }))
+});

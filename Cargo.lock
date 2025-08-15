@@ -10528,6 +10528,7 @@ dependencies = [
  "anyhow",
  "dirs",
  "hex",
+ "once_cell",
  "raiko-lib",
  "rand 0.8.5",
  "secp256k1",

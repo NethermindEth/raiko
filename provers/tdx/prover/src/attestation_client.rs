@@ -7,6 +7,7 @@ use std::os::unix::net::UnixStream;
 #[serde(tag = "type", rename_all = "lowercase")]
 enum Request {
     Issue { data: IssueData },
+    Metadata { data: MetadataData },
 }
 
 #[derive(Debug, Serialize)]
@@ -16,9 +17,22 @@ struct IssueData {
     nonce: String,
 }
 
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct MetadataData {}
+
 #[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
 struct IssueResponse {
     document: String,
+    error: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct MetadataResponse {
+    issuer_type: String,
+    metadata: serde_json::Value,
     error: String,
 }
 
@@ -61,4 +75,46 @@ pub fn issue_attestation(socket_path: &str, user_data: &[u8], nonce: &[u8]) -> R
     }
 
     hex::decode(&response.document).context("Failed to decode attestation document from hex")
+}
+
+pub fn metadata(socket_path: &str) -> Result<serde_json::Value> {
+    let request = Request::Metadata { data: MetadataData {} };
+
+    let request_json =
+        serde_json::to_string(&request).context("Failed to serialize metadata request")?;
+
+    let mut stream = UnixStream::connect(socket_path).with_context(|| {
+        format!(
+            "Failed to connect to attestation service at {}",
+            socket_path
+        )
+    })?;
+
+    stream
+        .write_all(request_json.as_bytes())
+        .context("Failed to write request to socket")?;
+
+    stream
+        .shutdown(std::net::Shutdown::Write)
+        .context("Failed to shutdown write side of socket")?;
+
+    let mut response_buf = Vec::new();
+    stream
+        .read_to_end(&mut response_buf)
+        .context("Failed to read response from socket")?;
+
+    let mut response: MetadataResponse = serde_json::from_slice(&response_buf)
+        .context("Failed to parse attestation service response")?;
+
+    if !response.error.is_empty() {
+        return Err(anyhow!("Attestation service error: {}", response.error));
+    }
+
+    if !response.metadata.is_object() {
+        return Err(anyhow!("Metadata must be a JSON object"));
+    }
+
+    response.metadata["issuer_type"] = response.issuer_type.into();
+
+    Ok(response.metadata)
 }

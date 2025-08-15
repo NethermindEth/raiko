@@ -9,6 +9,7 @@ path = "src/lib.rs"
 
 [dependencies]
 raiko-lib = { workspace = true, features = ["std"] }
+once_cell = { workspace = true }
 
 # Crypto
 secp256k1 = { workspace = true }

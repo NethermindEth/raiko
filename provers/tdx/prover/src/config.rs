@@ -1,7 +1,8 @@
 use std::{fs, path::PathBuf};
 
 use anyhow::{anyhow, Context, Result};
-use serde::Deserialize;
+use raiko_lib::primitives::Address;
+use serde::{Serialize, Deserialize};
 
 use crate::TdxConfig;
 
@@ -56,4 +57,32 @@ pub fn load_private_key() -> Result<secp256k1::SecretKey> {
         .with_context(|| format!("Failed to read private key from {}", key_file.display()))?;
 
     secp256k1::SecretKey::from_slice(&key_bytes).map_err(|e| anyhow!("Invalid private key: {}", e))
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct BootstrapData {
+    pub public_key: String,
+    pub quote: String,
+    pub metadata: serde_json::Value,
+}
+
+pub fn read_bootstrap() -> Result<BootstrapData> {
+    let config_dir = get_config_dir()?;
+    let bootstrap_file = config_dir.join("bootstrap.json");
+    let bootstrap_data: BootstrapData = serde_json::from_str(&fs::read_to_string(&bootstrap_file)?)?;
+
+    Ok(bootstrap_data)
+}
+
+pub fn write_bootstrap(quote: &Vec<u8>, public_key: &Address, metadata: serde_json::Value) -> Result<()> {
+    let config_dir = get_config_dir()?;
+    let bootstrap_file = config_dir.join("bootstrap.json");
+    let bootstrap_data = BootstrapData {
+        public_key: public_key.to_string(),
+        quote: hex::encode(quote),
+        metadata,
+    };
+    fs::write(&bootstrap_file, serde_json::to_string_pretty(&bootstrap_data)?)?;
+    Ok(())
 }

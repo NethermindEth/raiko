@@ -95,7 +95,10 @@ async fn proof_handler(State(actor): State<Actor>, Json(req): Json<Value>) -> Ho
             }
             "tdx" => {
                 #[cfg(not(feature = "tdx"))]
-                return Ok(TaskStatus::AnyhowError("TDX not supported".to_string()).into());
+                return Ok(Status::new_from_task_status(
+                    ProofType::from_str(proof_type)?,
+                    TaskStatus::AnyhowError("TDX not supported".to_string()),
+                ));
             }
             _ => {
                 return Ok(Status::new_from_task_status(

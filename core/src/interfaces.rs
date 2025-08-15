@@ -105,6 +105,11 @@ pub async fn get_guest_data() -> RaikoResult<serde_json::Value> {
         guest_data_array.push(sgx_prover::SgxProver::get_guest_data().await?);
     }
 
+    #[cfg(feature = "tdx")]
+    {
+        guest_data_array.push(tdx_prover::TdxProver::get_guest_data().await?);
+    }
+
     Ok(serde_json::to_value(guest_data_array)?)
 }
 
