@@ -74,6 +74,7 @@ impl Raiko {
                 prover: self.request.prover,
             },
             blob_proof_type: self.request.blob_proof_type.clone(),
+            proof_type: self.request.proof_type,
         }
     }
 
@@ -144,7 +145,7 @@ impl Raiko {
         Ok(())
     }
 
-    pub fn get_batch_output(&self, batch_input: &GuestBatchInput) -> RaikoResult<GuestBatchOutput> {
+    pub fn get_batch_output(&self, batch_input: &GuestBatchInput, should_execute: bool) -> RaikoResult<GuestBatchOutput> {
         info!(
             "Generating {} output for batch id: {}",
             self.request.proof_type, batch_input.taiko.batch_id
@@ -154,7 +155,7 @@ impl Raiko {
             Vec::new(),
             |mut acc, input_and_txs| -> RaikoResult<Vec<Block>> {
                 let (input, pool_txs) = input_and_txs;
-                let output = self.single_output_for_batch(pool_txs, input)?;
+                let output = self.single_output_for_batch(pool_txs, input, should_execute)?;
                 acc.push(output);
                 Ok(acc)
             },
@@ -182,7 +183,20 @@ impl Raiko {
         &self,
         origin_pool_txs: Vec<reth_primitives::TransactionSigned>,
         input: &GuestInput,
+        should_execute: bool,
     ) -> RaikoResult<Block> {
+        if should_execute {
+            self.execute_transaction_batch(origin_pool_txs, input)?;
+        }
+
+        Ok(input.block.clone())
+    }
+
+    fn execute_transaction_batch(
+        &self,
+        origin_pool_txs: Vec<reth_primitives::TransactionSigned>,
+        input: &GuestInput,
+    ) -> RaikoResult<()> {
         let db = create_mem_db(&mut input.clone()).unwrap();
         let mut builder = RethBlockBuilder::new(input, db);
 
@@ -210,7 +224,7 @@ impl Raiko {
                 // Check if the header is the expected one
                 check_header(&input.block.header, &header)?;
 
-                Ok(block.clone())
+                Ok(())
             }
             Err(e) => {
                 warn!("Proving bad block construction!");

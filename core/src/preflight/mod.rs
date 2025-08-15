@@ -50,6 +50,7 @@ pub struct BatchPreflightData {
     pub taiko_chain_spec: ChainSpec,
     pub prover_data: TaikoProverData,
     pub blob_proof_type: BlobProofType,
+    pub proof_type: ProofType,
 }
 
 impl PreflightData {
@@ -129,6 +130,8 @@ pub async fn preflight<BDP: BlockDataProvider>(
     #[cfg(not(feature = "statedb_lru"))]
     let initial_db_with_headers = None;
 
+    // for TDX proofs, we avoid rebuilding the state trie and re-executing the
+    // block as the node execution is trusted
     if proof_type == ProofType::Tdx {
         info!("preflight: skipping re-execution since TDX proof");
         return Ok(input);
@@ -244,6 +247,7 @@ pub async fn batch_preflight<BDP: BlockDataProvider>(
         prover_data,
         blob_proof_type,
         l1_inclusion_block_number,
+        proof_type,
     }: BatchPreflightData,
 ) -> RaikoResult<GuestBatchInput> {
     let measurement = Measurement::start("Fetching block data...", false);
@@ -335,6 +339,14 @@ pub async fn batch_preflight<BDP: BlockDataProvider>(
                     taiko: taiko_input.clone(),
                     ..Default::default()
                 };
+
+                // for TDX proofs, we avoid rebuilding the state trie and re-executing the
+                // block as the node execution is trusted
+                if proof_type == ProofType::Tdx {
+                    info!("batch_preflight: skipping re-execution since TDX proof");
+                    chunk_guest_input.push(input);
+                    continue;
+                }
 
                 let provider_target_blocks = vec![parent_block_number, parent_block_number + 1];
                 let provider =

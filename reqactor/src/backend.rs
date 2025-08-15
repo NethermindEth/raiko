@@ -748,6 +748,7 @@ pub async fn do_prove_single(
                 .map_err(|e| format!("failed to generate input: {e:?}"))?
         };
 
+    // TDX block execution trust is relayed to the node
     let should_execute = *request_entity.proof_type() != raiko_lib::proof_type::ProofType::Tdx;
 
     // 2. Generate the proof output
@@ -896,6 +897,7 @@ async fn do_prove_batch(
 ) -> Result<Proof, String> {
     tracing::info!("Generating proof for {request_key}");
 
+    let proof_type = request_key.proof_type().clone();
     let raiko = new_raiko_for_batch_request(chain_specs, request_entity, gpu_number).await?;
     let input = if let Some(batch_guest_input) = raiko.request.prover_args.get("batch_guest_input")
     {
@@ -922,8 +924,11 @@ async fn do_prove_batch(
             .map_err(|err| format!("failed to generate batch guest input: {err:?}"))?
     };
 
+    // TDX block execution trust is relayed to the node
+    let should_execute = proof_type != raiko_lib::proof_type::ProofType::Tdx;
+
     let output = raiko
-        .get_batch_output(&input)
+        .get_batch_output(&input, should_execute)
         .map_err(|e| format!("failed to get guest batch output: {e:?}"))?;
     debug!("batch guest output: {output:?}");
     let proof = raiko
