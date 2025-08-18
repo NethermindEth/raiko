@@ -12,10 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 use reth_evm::execute::ProviderError;
-use reth_primitives::revm_primitives::{
-    self,
-    db::{Database, DatabaseCommit},
-    Account, AccountInfo, Bytecode,
+use reth_revm::Database;
+use revm::{
+    state::{Account, AccountInfo, Bytecode},
+    DatabaseCommit,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::{hash_map::Entry, HashMap};
@@ -204,7 +204,7 @@ impl Database for MemDb {
 }
 
 impl DatabaseCommit for MemDb {
-    fn commit(&mut self, changes: revm_primitives::HashMap<Address, Account>) {
+    fn commit(&mut self, changes: revm::primitives::HashMap<Address, Account>) {
         for (address, new_account) in changes {
             // if nothing was touched, there is nothing to do
             if !new_account.is_touched() {

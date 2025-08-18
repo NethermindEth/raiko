@@ -12,8 +12,7 @@ use serde_json::Value;
 use std::path::PathBuf;
 use std::{collections::HashMap, env::var};
 
-// re-export from reth_primitives
-pub use reth_primitives::revm_primitives::SpecId;
+pub use taiko_reth::evm::spec::TaikoSpecId;
 
 #[cfg(not(feature = "std"))]
 use crate::no_std::*;
@@ -41,8 +40,7 @@ pub struct SupportedChainSpecs(HashMap<String, ChainSpec>);
 
 impl Default for SupportedChainSpecs {
     fn default() -> Self {
-        let deserialized: Vec<ChainSpec> =
-            serde_json::from_str(DEFAULT_CHAIN_SPECS).unwrap_or_default();
+        let deserialized: Vec<ChainSpec> = serde_json::from_str(DEFAULT_CHAIN_SPECS).unwrap();
         let chain_spec_list = deserialized
             .clone()
             .into_iter()
@@ -134,14 +132,14 @@ impl Default for Eip1559Constants {
 pub struct ChainSpec {
     pub name: String,
     pub chain_id: ChainId,
-    pub max_spec_id: SpecId,
-    pub hard_forks: BTreeMap<SpecId, ForkCondition>,
+    pub max_spec_id: TaikoSpecId,
+    pub hard_forks: BTreeMap<TaikoSpecId, ForkCondition>,
     pub eip_1559_constants: Eip1559Constants,
     pub l1_contract: Option<Address>,
     pub l2_contract: Option<Address>,
     pub rpc: String,
     pub beacon_rpc: Option<String>,
-    pub verifier_address_forks: BTreeMap<SpecId, BTreeMap<ProofType, Option<Address>>>,
+    pub verifier_address_forks: BTreeMap<TaikoSpecId, BTreeMap<ProofType, Option<Address>>>,
     pub genesis_time: u64,
     pub seconds_per_slot: u64,
     pub is_taiko: bool,
@@ -152,7 +150,7 @@ impl ChainSpec {
     pub fn new_single(
         name: String,
         chain_id: ChainId,
-        spec_id: SpecId,
+        spec_id: TaikoSpecId,
         eip_1559_constants: Eip1559Constants,
         is_taiko: bool,
     ) -> Self {
@@ -180,16 +178,16 @@ impl ChainSpec {
 
     /// Returns true if the ONTAKE fork is active for a given block number and timestamp.
     pub fn is_ontake_active(&self, block_no: BlockNumber, timestamp: u64) -> bool {
-        if let Some(fork_condition) = self.hard_forks.get(&SpecId::ONTAKE) {
+        if let Some(fork_condition) = self.hard_forks.get(&TaikoSpecId::ONTAKE) {
             fork_condition.active(block_no, timestamp)
         } else {
             false
         }
     }
 
-    /// Returns the [SpecId] for a given block number and timestamp or an error if not
+    /// Returns the [TaikoSpecId] for a given block number and timestamp or an error if not
     /// supported.
-    pub fn active_fork(&self, block_no: BlockNumber, timestamp: u64) -> Result<SpecId> {
+    pub fn active_fork(&self, block_no: BlockNumber, timestamp: u64) -> Result<TaikoSpecId> {
         match self.spec_id(block_no, timestamp) {
             Some(spec_id) => {
                 if spec_id > self.max_spec_id {
@@ -206,7 +204,7 @@ impl ChainSpec {
         &self.eip_1559_constants
     }
 
-    pub fn spec_id(&self, block_no: BlockNumber, timestamp: u64) -> Option<SpecId> {
+    pub fn spec_id(&self, block_no: BlockNumber, timestamp: u64) -> Option<TaikoSpecId> {
         for (spec_id, fork) in self.hard_forks.iter().rev() {
             if fork.active(block_no, timestamp) {
                 return Some(*spec_id);
@@ -276,7 +274,8 @@ impl std::fmt::Display for Network {
 
 #[cfg(test)]
 mod tests {
-    use reth_primitives::address;
+    use alloy_primitives::address;
+    use revm::primitives::hardfork::SpecId;
 
     use super::*;
 
@@ -285,8 +284,11 @@ mod tests {
         let surge_dev_mainnet_spec = SupportedChainSpecs::default()
             .get_chain_spec(&Network::SurgeDev.to_string())
             .unwrap();
-        assert!(surge_dev_mainnet_spec.spec_id(2, 0) > Some(SpecId::MERGE));
-        assert_eq!(surge_dev_mainnet_spec.spec_id(2, 0), Some(SpecId::ONTAKE));
+        assert!(surge_dev_mainnet_spec.spec_id(2, 0).map(Into::into) > Some(SpecId::MERGE));
+        assert_eq!(
+            surge_dev_mainnet_spec.spec_id(2, 0),
+            Some(TaikoSpecId::ONTAKE)
+        );
     }
 
     #[test]
@@ -295,12 +297,8 @@ mod tests {
             .get_chain_spec(&Network::SurgeDev.to_string())
             .unwrap();
         assert_eq!(
-            surge_dev_mainnet_spec.active_fork(0, 0).unwrap(),
-            SpecId::HEKLA
-        );
-        assert_eq!(
             surge_dev_mainnet_spec.active_fork(1, 0).unwrap(),
-            SpecId::ONTAKE
+            TaikoSpecId::ONTAKE
         );
     }
 
@@ -335,12 +333,10 @@ mod tests {
         let spec = ChainSpec {
             name: "test".to_string(),
             chain_id: 1,
-            max_spec_id: SpecId::CANCUN,
+            max_spec_id: TaikoSpecId::PACAYA,
             hard_forks: BTreeMap::from([
-                (SpecId::FRONTIER, ForkCondition::Block(0)),
-                (SpecId::MERGE, ForkCondition::Block(15537394)),
-                (SpecId::SHANGHAI, ForkCondition::Block(17034870)),
-                (SpecId::CANCUN, ForkCondition::Timestamp(1710338135)),
+                (TaikoSpecId::ONTAKE, ForkCondition::Block(0)),
+                (TaikoSpecId::PACAYA, ForkCondition::Block(0)),
             ]),
             eip_1559_constants: Eip1559Constants {
                 base_fee_change_denominator: uint!(8_U256),
@@ -353,7 +349,7 @@ mod tests {
             rpc: "".to_string(),
             beacon_rpc: None,
             verifier_address_forks: BTreeMap::from([(
-                SpecId::FRONTIER,
+                TaikoSpecId::PACAYA,
                 BTreeMap::from([
                     (ProofType::Sgx, Some(Address::default())),
                     (ProofType::Sp1, None),

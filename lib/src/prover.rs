@@ -1,4 +1,4 @@
-use reth_primitives::{ChainId, B256};
+use alloy_primitives::{ChainId, B256};
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
