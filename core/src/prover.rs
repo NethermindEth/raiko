@@ -153,7 +153,7 @@ async fn test_native_prover() {
     let input: GuestInput = serde_json::from_str(&json).unwrap();
     let output = GuestOutput {
         header: reth_primitives::Header::default(),
-        hash: reth_primitives::B256::default(),
+        hash: alloy_primitives::B256::default(),
     };
 
     let param = json!({

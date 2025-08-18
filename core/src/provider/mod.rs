@@ -1,7 +1,7 @@
 use alloy_primitives::{Address, B256, U256};
 use alloy_rpc_types::Block;
 use raiko_lib::consts::SupportedChainSpecs;
-use reth_primitives::revm_primitives::AccountInfo;
+use reth_revm::state::AccountInfo;
 use std::collections::HashMap;
 
 use crate::{
@@ -15,7 +15,7 @@ pub mod db;
 pub mod rpc;
 
 #[allow(async_fn_in_trait)]
-pub trait BlockDataProvider {
+pub trait BlockDataProvider: Clone + std::fmt::Debug {
     async fn get_blocks(&self, blocks_to_fetch: &[(u64, bool)]) -> RaikoResult<Vec<Block>>;
 
     async fn get_accounts(

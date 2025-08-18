@@ -19,8 +19,6 @@ reth-evm-ethereum = { workspace = true }
 reth-evm = { workspace = true }
 reth-revm = { workspace = true }
 reth-provider = { workspace = true }
-reth-taiko-evm = { workspace = true }
-reth-taiko-consensus = { workspace = true }
 
 # alloy
 alloy-rlp = { workspace = true }
@@ -56,7 +54,7 @@ kzg_traits = { workspace = true }
 tokio = { workspace = true }
 reqwest = { workspace = true }
 reqwest_alloy = { workspace = true }
-futures =  { workspace = true }
+futures = { workspace = true }
 
 # docs
 utoipa = { workspace = true }
