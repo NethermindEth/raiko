@@ -6,13 +6,15 @@ edition = "2021"
 [dependencies]
 # reth
 reth-primitives = { workspace = true }
+reth-primitives-traits = { workspace = true }
 reth-evm-ethereum = { workspace = true }
 reth-evm = { workspace = true }
 reth-chainspec = { workspace = true }
-reth-taiko-consensus = { workspace = true }
-reth-taiko-evm = { workspace = true }
-reth-taiko-forks = { workspace = true }
-reth-taiko-chainspec = { workspace = true }
+reth-revm = { workspace = true }
+taiko-reth = { workspace = true }
+
+# revm
+revm = { workspace = true }
 
 
 # alloy
@@ -39,6 +41,7 @@ libflate = { workspace = true }
 once_cell = { workspace = true }
 url = { workspace = true }
 hex = { workspace = true }
+bls12_381 = { workspace = true }
 kzg = { workspace = true }
 kzg_traits = { workspace = true }
 sha2 = { workspace = true }
@@ -66,6 +69,11 @@ reth-consensus = { workspace = true }
 
 [dev-dependencies]
 hex-literal = { workspace = true }
+
+[build-dependencies]
+kzg_traits = { workspace = true }
+kzg = { workspace = true, features = ["std"] }
+bincode = { workspace = true }
 
 [features]
 default = ["std"]
