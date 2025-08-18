@@ -15,34 +15,108 @@ use crate::{
     TdxConfig, TDX_AGGREGATION_PROOF_SIZE, TDX_PROOF_SIZE,
 };
 
-pub fn create_proof(
-    instance_id: u32,
-    public_key: &Address,
-    signature: &[u8; 65],
-) -> Result<Vec<u8>> {
-    let mut proof = Vec::with_capacity(TDX_PROOF_SIZE);
-
-    proof.extend_from_slice(&instance_id.to_be_bytes());
-    proof.extend_from_slice(public_key.as_slice());
-    proof.extend_from_slice(signature);
-
-    Ok(proof)
+pub struct TdxProof {
+    data: [u8; TDX_PROOF_SIZE],
 }
 
-pub fn create_aggregation_proof(
-    instance_id: u32,
-    old_instance: &Address,
-    new_instance: &Address,
-    signature: &[u8; 65],
-) -> Result<Vec<u8>> {
-    let mut proof = Vec::with_capacity(TDX_AGGREGATION_PROOF_SIZE);
+impl TdxProof {
+    pub fn new(instance_id: u32, public_key: &Address, signature: &[u8; 65]) -> Self {
+        let mut data = [0u8; TDX_PROOF_SIZE];
+        data[0..4].copy_from_slice(&instance_id.to_be_bytes());
+        data[4..24].copy_from_slice(public_key.as_slice());
+        data[24..89].copy_from_slice(signature);
+        Self { data }
+    }
 
-    proof.extend_from_slice(&instance_id.to_be_bytes());
-    proof.extend_from_slice(old_instance.as_slice());
-    proof.extend_from_slice(new_instance.as_slice());
-    proof.extend_from_slice(signature);
+    pub fn from_bytes(bytes: &[u8]) -> Result<Self> {
+        if bytes.len() != TDX_PROOF_SIZE {
+            return Err(anyhow!(
+                "Invalid proof size: expected {}, got {}",
+                TDX_PROOF_SIZE,
+                bytes.len()
+            ));
+        }
+        let mut data = [0u8; TDX_PROOF_SIZE];
+        data.copy_from_slice(bytes);
+        Ok(Self { data })
+    }
 
-    Ok(proof)
+    pub fn instance_id(&self) -> u32 {
+        u32::from_be_bytes(self.data[0..4].try_into().unwrap())
+    }
+
+    pub fn public_key(&self) -> Address {
+        Address::from_slice(&self.data[4..24])
+    }
+
+    pub fn signature(&self) -> [u8; 65] {
+        self.data[24..89].try_into().unwrap()
+    }
+
+    pub fn as_bytes(&self) -> &[u8] {
+        &self.data
+    }
+
+    pub fn to_vec(self) -> Vec<u8> {
+        self.data.to_vec()
+    }
+}
+
+pub struct TdxAggregationProof {
+    data: [u8; TDX_AGGREGATION_PROOF_SIZE],
+}
+
+impl TdxAggregationProof {
+    pub fn new(
+        instance_id: u32,
+        old_instance: &Address,
+        new_instance: &Address,
+        signature: &[u8; 65],
+    ) -> Self {
+        let mut data = [0u8; TDX_AGGREGATION_PROOF_SIZE];
+        data[0..4].copy_from_slice(&instance_id.to_be_bytes());
+        data[4..24].copy_from_slice(old_instance.as_slice());
+        data[24..44].copy_from_slice(new_instance.as_slice());
+        data[44..109].copy_from_slice(signature);
+        Self { data }
+    }
+
+    pub fn from_bytes(bytes: &[u8]) -> Result<Self> {
+        if bytes.len() != TDX_AGGREGATION_PROOF_SIZE {
+            return Err(anyhow!(
+                "Invalid aggregation proof size: expected {}, got {}",
+                TDX_AGGREGATION_PROOF_SIZE,
+                bytes.len()
+            ));
+        }
+        let mut data = [0u8; TDX_AGGREGATION_PROOF_SIZE];
+        data.copy_from_slice(bytes);
+        Ok(Self { data })
+    }
+
+    pub fn instance_id(&self) -> u32 {
+        u32::from_be_bytes(self.data[0..4].try_into().unwrap())
+    }
+
+    pub fn old_instance(&self) -> Address {
+        Address::from_slice(&self.data[4..24])
+    }
+
+    pub fn new_instance(&self) -> Address {
+        Address::from_slice(&self.data[24..44])
+    }
+
+    pub fn signature(&self) -> [u8; 65] {
+        self.data[44..109].try_into().unwrap()
+    }
+
+    pub fn as_bytes(&self) -> &[u8] {
+        &self.data
+    }
+
+    pub fn to_vec(self) -> Vec<u8> {
+        self.data.to_vec()
+    }
 }
 
 pub fn generate_tdx_quote(user_report_data: &B256, socket_path: &str) -> Result<Vec<u8>> {
@@ -86,7 +160,7 @@ pub fn prove(input: &GuestInput, tdx_config: &TdxConfig) -> Result<ProveData> {
 
     let pi_hash = pi.instance_hash();
     let signature = sign_message(&private_key, &pi_hash)?;
-    let proof = create_proof(instance_id, &address, &signature)?;
+    let proof = TdxProof::new(instance_id, &address, &signature).to_vec();
     let quote = generate_tdx_quote(&pi_hash, &tdx_config.socket_path)?;
 
     Ok(ProveData {
@@ -118,7 +192,7 @@ pub fn prove_batch(input: &GuestBatchInput, tdx_config: &TdxConfig) -> Result<Pr
 
     let pi_hash = pi.instance_hash();
     let signature = sign_message(&private_key, &pi_hash)?;
-    let proof = create_proof(instance_id, &address, &signature)?;
+    let proof = TdxProof::new(instance_id, &address, &signature).to_vec();
     let quote = generate_tdx_quote(&pi_hash, &tdx_config.socket_path)?;
 
     Ok(ProveBatchData {
@@ -156,28 +230,15 @@ pub fn prove_aggregation(
             .collect::<Result<Vec<_>>>()?,
     };
 
-    let instance_id = {
-        let mut instance_id_bytes = [0u8; 4];
-        instance_id_bytes[0..4].copy_from_slice(&raw_input.proofs[0].proof.clone()[0..4]);
-        u32::from_be_bytes(instance_id_bytes)
-    };
-
-    let old_instance = if !raw_input.proofs.is_empty() {
-        Address::from_slice(&raw_input.proofs[0].proof[4..24])
-    } else {
-        new_instance
-    };
+    let first_proof = TdxProof::from_bytes(&raw_input.proofs[0].proof)?;
+    let instance_id = first_proof.instance_id();
+    let old_instance = first_proof.public_key();
 
     let mut cur_instance = old_instance;
     for proof in raw_input.proofs.iter() {
-        let signature = &proof.proof[24..89];
-        let signature_array: [u8; 65] =
-            signature
-                .try_into()
-                .map_err(|e: core::array::TryFromSliceError| {
-                    anyhow!("Invalid signature length: {}", e)
-                })?;
-        let recovered = recover_signer_unchecked(&signature_array, &proof.input)?;
+        let tdx_proof = TdxProof::from_bytes(&proof.proof)?;
+        let signature = tdx_proof.signature();
+        let recovered = recover_signer_unchecked(&signature, &proof.input)?;
 
         if recovered != cur_instance {
             return Err(anyhow!(
@@ -187,7 +248,7 @@ pub fn prove_aggregation(
             ));
         }
 
-        cur_instance = Address::from_slice(&proof.proof[4..24]);
+        cur_instance = tdx_proof.public_key();
     }
 
     if cur_instance != new_instance {
@@ -214,7 +275,7 @@ pub fn prove_aggregation(
     )));
 
     let signature = sign_message(&private_key, &aggregation_hash)?;
-    let proof = create_aggregation_proof(instance_id, &old_instance, &new_instance, &signature)?;
+    let proof = TdxAggregationProof::new(instance_id, &old_instance, &new_instance, &signature).to_vec();
     let quote = generate_tdx_quote(&aggregation_hash, &tdx_config.socket_path)?;
 
     Ok(ProveAggregationData {
