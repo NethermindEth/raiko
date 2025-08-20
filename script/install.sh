@@ -8,32 +8,32 @@ if [ -n "$CI" ]; then
 	source ./script/ci-env-check.sh
 fi
 
-# toolchain necessary to compile c-kzg in SP1/risc0
-if [ -z "$1" ] || [ "$1" == "sp1" ] || [ "$1" == "risc0" ]; then
-	# Check if the RISC-V GCC prebuilt binary archive already exists
-	if [ -f /tmp/riscv32-unknown-elf.gcc-13.2.0.tar.gz ]; then
-		echo "riscv-gcc-prebuilt existed, please check the file manually"
-	else
-		# Download the file using wget
-		wget -O /tmp/riscv32-unknown-elf.gcc-13.2.0.tar.gz https://github.com/stnolting/riscv-gcc-prebuilt/releases/download/rv32i-131023/riscv32-unknown-elf.gcc-13.2.0.tar.gz
-		# Check if wget succeeded
-		if [ $? -ne 0 ]; then
-			echo "Failed to download riscv-gcc-prebuilt"
-			exit 1
-		fi
-		# Create the directory if it doesn't exist
-		if [ ! -d /opt/riscv ]; then
-			mkdir /opt/riscv
-		fi
-		# Extract the downloaded archive
-		tar -xzf /tmp/riscv32-unknown-elf.gcc-13.2.0.tar.gz -C /opt/riscv/
-		# Check if tar succeeded
-		if [ $? -ne 0 ]; then
-			echo "Failed to extract riscv-gcc-prebuilt"
-			exit 1
-		fi
-	fi
-fi
+# # toolchain necessary to compile c-kzg in SP1/risc0
+# if [ -z "$1" ] || [ "$1" == "sp1" ] || [ "$1" == "risc0" ]; then
+# 	# Check if the RISC-V GCC prebuilt binary archive already exists
+# 	if [ -f /tmp/riscv32-unknown-elf.gcc-13.2.0.tar.gz ]; then
+# 		echo "riscv-gcc-prebuilt existed, please check the file manually"
+# 	else
+# 		# Download the file using wget
+# 		wget -O /tmp/riscv32-unknown-elf.gcc-13.2.0.tar.gz https://github.com/stnolting/riscv-gcc-prebuilt/releases/download/rv32i-131023/riscv32-unknown-elf.gcc-13.2.0.tar.gz
+# 		# Check if wget succeeded
+# 		if [ $? -ne 0 ]; then
+# 			echo "Failed to download riscv-gcc-prebuilt"
+# 			exit 1
+# 		fi
+# 		# Create the directory if it doesn't exist
+# 		if [ ! -d /opt/riscv ]; then
+# 			mkdir /opt/riscv
+# 		fi
+# 		# Extract the downloaded archive
+# 		tar -xzf /tmp/riscv32-unknown-elf.gcc-13.2.0.tar.gz -C /opt/riscv/
+# 		# Check if tar succeeded
+# 		if [ $? -ne 0 ]; then
+# 			echo "Failed to extract riscv-gcc-prebuilt"
+# 			exit 1
+# 		fi
+# 	fi
+# fi
 
 # SGX
 if [ -z "$1" ] || [ "$1" == "sgx" ]; then
@@ -79,10 +79,7 @@ if [ -z "$1" ] || [ "$1" == "risc0" ]; then
 		echo "env_rzup is not working, please re-install rzup."
 		exit 1
 	fi
-	$env_rzup install rust 1.85.0
-	$env_rzup install cpp 2024.1.5
-	$env_rzup install r0vm 2.0.2
-	$env_rzup install cargo-risczero 2.0.2
+	$env_rzup install 
 fi
 # SP1
 if [ -z "$1" ] || [ "$1" == "sp1" ]; then
