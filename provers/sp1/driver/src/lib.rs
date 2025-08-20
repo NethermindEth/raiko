@@ -1,5 +1,6 @@
 #![cfg(feature = "enable")]
 
+use alloy_primitives::{hex, B256};
 use raiko_lib::{
     input::{
         AggregationGuestInput, AggregationGuestOutput, GuestBatchInput, GuestBatchOutput,
@@ -9,7 +10,6 @@ use raiko_lib::{
     prover::{IdStore, IdWrite, Proof, ProofKey, Prover, ProverConfig, ProverError, ProverResult},
     Measurement,
 };
-use reth_primitives::B256;
 use serde::{Deserialize, Serialize};
 use serde_with::serde_as;
 use sp1_prover::{components::CpuProverComponents, Groth16Bn254Proof};
@@ -132,10 +132,10 @@ impl Prover for Sp1Prover {
             vk,
             network_client,
         } = {
-            let gpu_number: u32 = config
+            let gpu_number: u64 = config
                 .get("gpu_number")
                 .and_then(|v| v.as_i64())
-                .map(|v| v as u32)
+                .map(|v| v as u64)
                 .unwrap();
             info!("GPU Number: {}", gpu_number);
 
@@ -145,7 +145,9 @@ impl Prover for Sp1Prover {
                 ProverMode::Local => Box::new(
                     ProverClient::builder()
                         .cuda()
-                        .with_gpu_number(gpu_number)
+                        .local()
+                        .visible_device(gpu_number)
+                        .port(3000 + gpu_number)
                         .build(),
                 ),
                 ProverMode::Network => Box::new(ProverClient::builder().network().build()),
@@ -243,11 +245,7 @@ impl Prover for Sp1Prover {
         let proof_string = (!proof_bytes.is_empty()).then_some(
             // 0x + 64 bytes of the vkey + the proof
             // vkey itself contains 0x prefix
-            format!(
-                "{}{}",
-                vk.bytes32(),
-                reth_primitives::hex::encode(proof_bytes)
-            ),
+            format!("{}{}", vk.bytes32(), hex::encode(proof_bytes)),
         );
 
         info!(
@@ -346,10 +344,10 @@ impl Prover for Sp1Prover {
             vk,
             network_client,
         } = {
-            let gpu_number: u32 = config
+            let gpu_number = config
                 .get("gpu_number")
                 .and_then(|v| v.as_i64())
-                .map(|v| v as u32)
+                .map(|v| v as u64)
                 .unwrap();
 
             info!("GPU Number: {}", gpu_number);
@@ -363,7 +361,9 @@ impl Prover for Sp1Prover {
                         ProverMode::Local => Box::new(
                             ProverClient::builder()
                                 .cuda()
-                                .with_gpu_number(gpu_number)
+                                .local()
+                                .visible_device(gpu_number)
+                                .port(3000 + gpu_number)
                                 .build(),
                         ),
                         ProverMode::Network => Box::new(ProverClient::builder().network().build()),
@@ -389,7 +389,7 @@ impl Prover for Sp1Prover {
 
         info!(
             "sp1 aggregate: {:?} based {:?} blocks with vk {:?}",
-            reth_primitives::hex::encode_prefixed(stark_vk.hash_bytes()),
+            hex::encode_prefixed(stark_vk.hash_bytes()),
             input.proofs.len(),
             vk.bytes32()
         );
@@ -438,8 +438,8 @@ impl Prover for Sp1Prover {
             format!(
                 "{}{}{}",
                 vk.bytes32(),
-                reth_primitives::hex::encode(stark_vk.hash_bytes()),
-                reth_primitives::hex::encode(proof_bytes)
+                hex::encode(stark_vk.hash_bytes()),
+                hex::encode(proof_bytes)
             ),
         );
 
@@ -477,10 +477,10 @@ impl Prover for Sp1Prover {
             vk,
             network_client,
         } = {
-            let gpu_number: u32 = config
+            let gpu_number: u64 = config
                 .get("gpu_number")
                 .and_then(|v| v.as_i64())
-                .map(|v| v as u32)
+                .map(|v| v as u64)
                 .unwrap();
             info!("GPU Number: {}", gpu_number);
 
@@ -490,7 +490,9 @@ impl Prover for Sp1Prover {
                 ProverMode::Local => Box::new(
                     ProverClient::builder()
                         .cuda()
-                        .with_gpu_number(gpu_number)
+                        .local()
+                        .visible_device(gpu_number)
+                        .port(3000 + gpu_number)
                         .build(),
                 ),
                 ProverMode::Network => Box::new(ProverClient::builder().network().build()),
@@ -536,6 +538,7 @@ impl Prover for Sp1Prover {
                     proof: SP1Proof::Groth16(Groth16Bn254Proof::default()),
                     public_values: sp1_primitives::io::SP1PublicValues::new(),
                     sp1_version: "0".to_owned(),
+                    tee_proof: None,
                 }
             } else {
                 info!("Execute locally with recursion mode: {:?}", param.recursion);
@@ -605,11 +608,7 @@ impl Prover for Sp1Prover {
         let proof_string = (!proof_bytes.is_empty()).then_some(
             // 0x + 64 bytes of the vkey + the proof
             // vkey itself contains 0x prefix
-            format!(
-                "{}{}",
-                vk.bytes32(),
-                reth_primitives::hex::encode(proof_bytes)
-            ),
+            format!("{}{}", vk.bytes32(), hex::encode(proof_bytes)),
         );
 
         info!(

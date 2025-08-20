@@ -18,7 +18,6 @@ use raiko_reqpool::{
     GuestInputRequestEntity, RequestEntity, RequestKey, SingleProofRequestEntity, Status,
     StatusWithContext,
 };
-use reth_primitives::B256;
 use std::time::Duration;
 use std::{collections::VecDeque, sync::Arc};
 use tokio::sync::{
@@ -772,7 +771,7 @@ async fn do_prove_aggregation(
     let proofs = request_entity.proofs().clone();
 
     let input = AggregationGuestInput { proofs };
-    let output = AggregationGuestOutput { hash: B256::ZERO };
+    let output = AggregationGuestOutput::default();
     let mut config = serde_json::to_value(request_entity.prover_args())
         .map_err(|err| format!("failed to serialize prover args: {err:?}"))?;
 

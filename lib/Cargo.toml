@@ -72,7 +72,7 @@ hex-literal = { workspace = true }
 
 [build-dependencies]
 kzg_traits = { workspace = true }
-kzg = { workspace = true, features = ["std"] }
+kzg = { workspace = true }
 bincode = { workspace = true }
 
 [features]

@@ -48,9 +48,6 @@ raiko-ballot = { path = "./ballot" }
 
 # reth
 reth-chainspec = { git = "https://github.com/paradigmxyz/reth.git", tag = "v1.6.0", default-features = false }
-reth-taiko-evm = { git = "https://github.com/paradigmxyz/reth.git", tag = "v1.6.0", default-features = false, features = [
-    "std",
-] }
 reth-primitives = { git = "https://github.com/paradigmxyz/reth.git", tag = "v1.6.0", default-features = false, features = [
     "alloy-compat",
     "c-kzg",

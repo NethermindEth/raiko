@@ -1,14 +1,29 @@
 // build.rs
-use std::{env, fs, io::Write, path::PathBuf};
+use std::{
+    env,
+    fs::{self, File},
+    io::{Read, Write},
+    path::PathBuf,
+};
 
-use kzg::{eip_4844::load_trusted_setup_filename_rust, kzg_proofs::KZGSettings};
+use kzg::kzg_proofs::KZGSettings;
+use kzg_traits::eip_4844::{load_trusted_setup_rust, load_trusted_setup_string};
 
 /// Entry point: orchestrates reading, parsing, validating, and codegen.
 fn main() {
     let setup_path = choose_setup_path();
 
-    let settings = load_trusted_setup_filename_rust(setup_path.to_str().unwrap())
-        .expect("failed to load trusted setup from file");
+    let mut file = File::open(&setup_path).expect("Unable to open file");
+    let mut contents = String::new();
+    file.read_to_string(&mut contents)
+        .expect("Unable to read file");
+
+    let (g1_monomial_bytes, g1_lagrange_bytes, g2_monomial_bytes) =
+        load_trusted_setup_string(&contents).expect("Failed to load trusted setup from string");
+
+    let settings =
+        load_trusted_setup_rust(&g1_monomial_bytes, &g1_lagrange_bytes, &g2_monomial_bytes)
+            .expect("Failed to load trusted setup into KZGSettings");
 
     let out_file = open_generated_file("trusted_setup_gen.rs");
     write_generated_code(out_file, &settings);
