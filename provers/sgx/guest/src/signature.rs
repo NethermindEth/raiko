@@ -22,7 +22,7 @@ pub fn generate_key() -> Keypair {
 pub fn recover_signer_unchecked(sig: &[u8; 65], msg: &[u8; 32]) -> Result<Address, Error> {
     let sig = RecoverableSignature::from_compact(
         &sig[0..64],
-        RecoveryId::from_i32(sig[64] as i32 - 27)?,
+        RecoveryId::try_from(sig[64] as i32 - 27)?,
     )?;
 
     let public = SECP256K1.recover_ecdsa(&Message::from_digest_slice(&msg[..32])?, &sig)?;
@@ -36,7 +36,7 @@ pub fn sign_message(secret_key: &SecretKey, message: B256) -> Result<[u8; 65], E
     let sec = SecretKey::from_slice(secret.as_ref())?;
     let s = SECP256K1.sign_ecdsa_recoverable(&Message::from_digest_slice(&message[..])?, &sec);
     let (rec_id, data) = s.serialize_compact();
-    let signature = Signature::from_bytes_and_parity(&data, (rec_id.to_i32() != 0) as u64).unwrap();
+    let signature = Signature::from_bytes_and_parity(&data, Into::<i32>::into(rec_id) != 0i32);
     Ok(signature.as_bytes())
 }
 

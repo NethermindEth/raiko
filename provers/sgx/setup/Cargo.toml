@@ -33,6 +33,7 @@ bytemuck = { workspace = true }
 clap = { workspace = true }
 structopt = { workspace = true }
 flate2 = { workspace = true }
+log = { workspace = true }
 serde = { workspace = true }
 serde_with = { workspace = true }
 serde_json = { workspace = true }

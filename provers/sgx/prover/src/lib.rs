@@ -6,7 +6,7 @@ use std::{
 };
 
 use raiko_lib::{
-    consts::SpecId,
+    consts::TaikoSpecId,
     input::{
         AggregationGuestInput, AggregationGuestOutput, GuestBatchInput, GuestBatchOutput,
         GuestInput, GuestOutput,
@@ -29,7 +29,7 @@ mod sgx_register_utils;
 #[serde_as]
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct SgxParam {
-    pub instance_ids: HashMap<SpecId, u64>,
+    pub instance_ids: HashMap<TaikoSpecId, u64>,
     pub setup: bool,
     pub bootstrap: bool,
     pub prove: bool,
