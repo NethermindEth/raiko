@@ -161,6 +161,21 @@ If your CPU doesn't support SGX, you can still run the SGX code through gramine 
 MOCK=1 TARGET=sgx make run
 ```
 
+### TDX
+
+To install, build, and run in one step:
+
+```shell
+export TARGET=tdx
+make install && make build && make run
+```
+
+To build and run test related TDX provers:
+
+```shell
+TARGET=tdx make test
+```
+
 ## Misc docs
 
 - [Docker & Remote Attestation Support](docs/README_Docker_and_RA.md)

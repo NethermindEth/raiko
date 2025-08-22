@@ -10,6 +10,14 @@
       "PACAYA": 123456
     }
   },
+  "tdx": {
+    "instance_ids": {
+      "HEKLA": 123456,
+      "ONTAKE": 123456,
+      "PACAYA": 123456
+    },
+    "socket_path": "/var/run/tdxd.sock"
+  },
   "risc0": {
     "bonsai": true,
     "snark": true,
