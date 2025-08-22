@@ -224,7 +224,7 @@ pub fn prove_aggregation(
             .map(|proof| {
                 Ok(raiko_lib::input::RawProof {
                     input: proof.clone().input.unwrap(),
-                    proof: hex::decode(&proof.clone().proof.unwrap()[2..]).unwrap(),
+                    proof: hex::decode(&proof.clone().proof.unwrap().trim_start_matches("0x")).unwrap(),
                 })
             })
             .collect::<Result<Vec<_>>>()?,
