@@ -1,7 +1,9 @@
 use alloy_consensus::Transaction;
-use alloy_primitives::{hex, Log as LogStruct, B256};
+use alloy_primitives::{hex, Address, Log as LogStruct, B256, U256};
 use alloy_provider::{Provider, ReqwestProvider};
-use alloy_rpc_types::{Filter, Header, Log, Transaction as AlloyRpcTransaction};
+use alloy_rpc_types::{
+    EIP1186AccountProofResponse, Filter, Header, Log, Transaction as AlloyRpcTransaction,
+};
 use alloy_sol_types::{SolCall, SolEvent};
 use anyhow::{anyhow, bail, ensure, Result};
 use kzg::kzg_types::ZFr;
@@ -21,7 +23,10 @@ use raiko_lib::{
         TaikoGuestInput, TaikoProverData,
     },
     primitives::eip4844::{self, commitment_to_version_hash, KZG_SETTINGS},
+    primitives::keccak::keccak,
+    primitives::mpt::{proofs_to_tries, MptNode, StateAccount, StorageEntry},
 };
+use std::collections::HashMap;
 
 use reth_primitives::{Block as RethBlock, TransactionSigned};
 use reth_revm::primitives::SpecId;
@@ -292,6 +297,7 @@ pub async fn prepare_taiko_chain_batch_input(
     batch_blocks: &[RethBlock],
     prover_data: TaikoProverData,
     blob_proof_type: &BlobProofType,
+    l1sload_calls: &[(Address, U256, u64)], // L1SLOAD calls: (contract, storage_key, block_number)
 ) -> RaikoResult<TaikoGuestBatchInput> {
     // Get the L1 block in which the L2 block was included so we can fetch the DA data.
     // Also get the L1 state block header so that we can prove the L1 state root.
@@ -374,6 +380,10 @@ pub async fn prepare_taiko_chain_batch_input(
             (Vec::new(), blob_tx_buffers)
         };
 
+        // Collect L1 storage proofs and convert to tries if L1SLOAD calls exist
+        let (l1_storage_proofs, l1_state_tries, l1_state_roots) =
+            collect_l1_storage_proofs_and_tries(l1_chain_spec, l1sload_calls).await?;
+
         return Ok(TaikoGuestBatchInput {
             batch_id: batch_id,
             batch_proposed: BlockProposedFork::Pacaya(batch_proposed),
@@ -394,6 +404,9 @@ pub async fn prepare_taiko_chain_batch_input(
                 .map(|(_, _, proof)| proof.clone())
                 .collect(),
             blob_proof_type: blob_proof_type.clone(),
+            l1_storage_proofs: Some(l1_storage_proofs.clone()),
+            l1_state_tries: Some(l1_state_tries.clone()),
+            l1_state_roots: Some(l1_state_roots.clone()),
         });
     } else {
         Err(RaikoError::Preflight(
@@ -446,6 +459,108 @@ pub async fn get_tx_blob(
     info!("get_tx_data: blob_proof done");
 
     Ok((blob, Some(commitment.to_vec()), blob_proof))
+}
+
+/// Collect L1 storage proofs and convert them to MPT tries
+pub async fn collect_l1_storage_proofs_and_tries(
+    l1_chain_spec: &ChainSpec,
+    l1sload_calls: &[(Address, U256, u64)], // (contract, storage_key, block_number)
+) -> RaikoResult<(
+    HashMap<u64, HashMap<Address, EIP1186AccountProofResponse>>,
+    HashMap<u64, (MptNode, HashMap<Address, StorageEntry>)>,
+    HashMap<u64, B256>,
+)> {
+    if l1sload_calls.is_empty() {
+        return Ok((HashMap::new(), HashMap::new(), HashMap::new()));
+    }
+
+    let mut storage_proofs: HashMap<u64, HashMap<Address, EIP1186AccountProofResponse>> =
+        HashMap::new();
+    let mut state_tries: HashMap<u64, (MptNode, HashMap<Address, StorageEntry>)> = HashMap::new();
+    let mut l1_state_roots: HashMap<u64, B256> = HashMap::new();
+
+    // Group calls by block number
+    let mut calls_by_block: HashMap<u64, Vec<(Address, U256)>> = HashMap::new();
+    for (contract, storage_key, block_number) in l1sload_calls {
+        calls_by_block
+            .entry(*block_number)
+            .or_insert_with(Vec::new)
+            .push((*contract, *storage_key));
+    }
+
+    // Create L1 provider
+    let provider_l1 = RpcBlockDataProvider::new(&l1_chain_spec.rpc, 0).await?;
+
+    for (block_number, calls) in calls_by_block {
+        // Get L1 block header to get state root
+        let l1_block = provider_l1.get_blocks(&[(block_number, false)]).await?;
+        let l1_block = l1_block
+            .first()
+            .ok_or_else(|| RaikoError::Preflight(format!("L1 block {} not found", block_number)))?;
+        let l1_state_root = l1_block.header.state_root;
+        l1_state_roots.insert(block_number, l1_state_root);
+
+        // Collect storage proofs for this block
+        let mut block_proofs = HashMap::new();
+        for (contract, storage_key) in calls {
+            let contract_proofs = provider_l1
+                .get_l1_storage_proofs(block_number, HashMap::from([(contract, vec![storage_key])]))
+                .await?;
+
+            // Find the proof for this specific contract
+            if let Some(proof) = contract_proofs.get(&contract) {
+                block_proofs.insert(contract, proof.clone());
+            }
+        }
+
+        if !block_proofs.is_empty() {
+            storage_proofs.insert(block_number, block_proofs.clone());
+
+            // Convert proofs to tries using existing infrastructure
+            // The post_proofs should be the same as block_proofs since we're reading from L1 state
+            // that doesn't change during L2 execution?
+            let post_proofs = block_proofs.clone();
+
+            let (state_trie, storage_tries) =
+                proofs_to_tries(l1_state_root, block_proofs, post_proofs)?;
+
+            // Validate L1 state trie hash matches expected L1 state root (same pattern as L2 validation)
+            let computed_state_root = state_trie.hash();
+            if computed_state_root != l1_state_root {
+                return Err(RaikoError::Preflight(format!(
+                    "Invalid L1 state trie for block {}: expected {}, got {}",
+                    block_number, l1_state_root, computed_state_root
+                )));
+            }
+
+            // Validate L1 storage tries against account storage roots
+            for (address, storage_entry) in &storage_tries {
+                let (storage_trie, _slots) = storage_entry;
+                let account_key = keccak(address);
+                let account = state_trie
+                    .get_rlp::<StateAccount>(&account_key)
+                    .map_err(|e| RaikoError::Preflight(format!("RLP error: {}", e)))?
+                    .ok_or_else(|| {
+                        RaikoError::Preflight(format!(
+                            "Failed to get account {:?} from L1 state trie for block {}",
+                            address, block_number
+                        ))
+                    })?;
+
+                let computed_storage_root = storage_trie.hash();
+                if computed_storage_root != account.storage_root {
+                    return Err(RaikoError::Preflight(format!(
+                        "Invalid L1 storage trie for address {:?} in block {}: expected {}, got {}",
+                        address, block_number, account.storage_root, computed_storage_root
+                    )));
+                }
+            }
+
+            state_tries.insert(block_number, (state_trie, storage_tries));
+        }
+    }
+
+    Ok((storage_proofs, state_tries, l1_state_roots))
 }
 
 /// get tx data(blob data) vec from blob hashes

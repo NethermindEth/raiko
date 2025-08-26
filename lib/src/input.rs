@@ -1,6 +1,7 @@
 use core::{fmt::Debug, str::FromStr};
 
 use alloy_consensus::serde_bincode_compat;
+use alloy_rpc_types::EIP1186AccountProofResponse;
 use anyhow::{anyhow, Error, Result};
 use ontake::BlockProposedV2;
 use pacaya::{BatchInfo, BatchProposed};
@@ -65,6 +66,15 @@ pub struct TaikoGuestBatchInput {
     pub blob_commitments: Option<Vec<Vec<u8>>>,
     pub blob_proofs: Option<Vec<Vec<u8>>>,
     pub blob_proof_type: BlobProofType,
+    /// L1 storage proofs for L1SLOAD precompile calls
+    #[serde(default)]
+    pub l1_storage_proofs: Option<HashMap<u64, HashMap<Address, EIP1186AccountProofResponse>>>,
+    /// L1 state tries for each block number (converted from proofs for verification)
+    #[serde(default)]
+    pub l1_state_tries: Option<HashMap<u64, (MptNode, HashMap<Address, StorageEntry>)>>,
+    /// Expected L1 state roots for validation
+    #[serde(default)]
+    pub l1_state_roots: Option<HashMap<u64, B256>>,
 }
 
 /// External block input.

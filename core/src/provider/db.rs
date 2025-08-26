@@ -29,6 +29,8 @@ pub struct ProviderDb<'a, BDP: BlockDataProvider> {
     pub pending_accounts: HashSet<Address>,
     pub pending_slots: HashSet<(Address, U256)>,
     pub pending_block_hashes: HashSet<u64>,
+
+    pub l1sload_calls: HashSet<(Address, U256, u64)>, // (contract, storage_key, block_number)
 }
 
 impl<'a, BDP: BlockDataProvider> ProviderDb<'a, BDP> {
@@ -52,6 +54,7 @@ impl<'a, BDP: BlockDataProvider> ProviderDb<'a, BDP> {
             pending_accounts: HashSet::new(),
             pending_slots: HashSet::new(),
             pending_block_hashes: HashSet::new(),
+            l1sload_calls: HashSet::new(),
         };
         if chain_spec.is_taiko() {
             // Get the 256 history block hashes from the provider at first time for anchor
@@ -163,6 +166,18 @@ impl<'a, BDP: BlockDataProvider> ProviderDb<'a, BDP> {
         self.pending_accounts.is_empty()
             && self.pending_slots.is_empty()
             && self.pending_block_hashes.is_empty()
+    }
+
+    /// Track L1SLOAD precompile call
+    /// TODO: Ensure that the precompile is detected within Reth
+    pub fn track_l1sload_call(&mut self, contract: Address, storage_key: U256, block_number: u64) {
+        self.l1sload_calls
+            .insert((contract, storage_key, block_number));
+    }
+
+    /// Get L1SLOAD calls for external processing
+    pub fn get_l1sload_calls(&self) -> &HashSet<(Address, U256, u64)> {
+        &self.l1sload_calls
     }
 }
 
