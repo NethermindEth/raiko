@@ -20,6 +20,14 @@ pub fn get_config_dir() -> Result<PathBuf> {
     Ok(config_dir)
 }
 
+pub fn bootstrap_exists() -> Result<bool> {
+    let config_dir = get_config_dir()?;
+    let bootstrap_file = config_dir.join("bootstrap.json");
+    let key_file = config_dir.join("secrets").join("priv.key");
+    
+    Ok(bootstrap_file.exists() && key_file.exists())
+}
+
 pub fn generate_private_key() -> Result<secp256k1::SecretKey> {
     let secp = secp256k1::Secp256k1::new();
     let (secret_key, _) = secp.generate_keypair(&mut secp256k1::rand::thread_rng());

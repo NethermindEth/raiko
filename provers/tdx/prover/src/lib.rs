@@ -183,6 +183,12 @@ impl TdxProver {
     pub async fn bootstrap(tdx_config: &TdxConfig) -> Result<Vec<u8>> {
         info!("Bootstrapping TDX prover");
 
+        if config::bootstrap_exists()? {
+            info!("Already bootstrapped, loading existing configuration");
+            let bootstrap_data = config::read_bootstrap()?;
+            return Ok(hex::decode(bootstrap_data.quote)?);
+        }
+
         let private_key = config::generate_private_key()?;
 
         let public_key = signature::get_address_from_private_key(&private_key)?;
