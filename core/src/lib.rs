@@ -102,8 +102,8 @@ impl Raiko {
             .map_err(Into::<RaikoError>::into)
     }
 
-    pub fn get_output(&self, input: &GuestInput, should_execute: bool) -> RaikoResult<GuestOutput> {
-        if should_execute {
+    pub fn get_output(&self, input: &GuestInput) -> RaikoResult<GuestOutput> {
+        if self.should_execute_transactions() {
             self.execute_transactions(input)?;
         }
 
@@ -145,7 +145,7 @@ impl Raiko {
         Ok(())
     }
 
-    pub fn get_batch_output(&self, batch_input: &GuestBatchInput, should_execute: bool) -> RaikoResult<GuestBatchOutput> {
+    pub fn get_batch_output(&self, batch_input: &GuestBatchInput) -> RaikoResult<GuestBatchOutput> {
         info!(
             "Generating {} output for batch id: {}",
             self.request.proof_type, batch_input.taiko.batch_id
@@ -155,7 +155,7 @@ impl Raiko {
             Vec::new(),
             |mut acc, input_and_txs| -> RaikoResult<Vec<Block>> {
                 let (input, pool_txs) = input_and_txs;
-                let output = self.single_output_for_batch(pool_txs, input, should_execute)?;
+                let output = self.single_output_for_batch(pool_txs, input)?;
                 acc.push(output);
                 Ok(acc)
             },
@@ -183,9 +183,8 @@ impl Raiko {
         &self,
         origin_pool_txs: Vec<reth_primitives::TransactionSigned>,
         input: &GuestInput,
-        should_execute: bool,
     ) -> RaikoResult<Block> {
-        if should_execute {
+        if self.should_execute_transactions() {
             self.execute_transaction_batch(origin_pool_txs, input)?;
         }
 
@@ -233,6 +232,10 @@ impl Raiko {
                 ))
             }
         }
+    }
+
+    fn should_execute_transactions(&self) -> bool {
+        self.request.proof_type != raiko_lib::proof_type::ProofType::Tdx
     }
 
     pub async fn prove(
@@ -452,9 +455,8 @@ mod tests {
             .generate_input(provider)
             .await
             .expect("input generation failed");
-        let should_execute = proof_request.proof_type != raiko_lib::proof_type::ProofType::Tdx;
         raiko
-            .get_output(&input, should_execute)
+            .get_output(&input)
             .expect("output generation failed");
         raiko
             .prove(input, &output, None)
