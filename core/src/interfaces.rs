@@ -105,6 +105,11 @@ pub async fn get_guest_data() -> RaikoResult<serde_json::Value> {
         guest_data_array.push(sgx_prover::SgxProver::get_guest_data().await?);
     }
 
+    #[cfg(feature = "tdx")]
+    {
+        guest_data_array.push(tdx_prover::TdxProver::get_guest_data().await?);
+    }
+
     Ok(serde_json::to_value(guest_data_array)?)
 }
 
@@ -147,6 +152,15 @@ pub async fn run_prover(
                 .await
                 .map_err(|e| e.into());
             #[cfg(not(feature = "sgx"))]
+            Err(RaikoError::FeatureNotSupportedError(proof_type))
+        }
+        ProofType::Tdx => {
+            #[cfg(feature = "tdx")]
+            return tdx_prover::TdxProver
+                .run(input.clone(), output, config, store)
+                .await
+                .map_err(|e| e.into());
+            #[cfg(not(feature = "tdx"))]
             Err(RaikoError::FeatureNotSupportedError(proof_type))
         }
     }
@@ -192,6 +206,15 @@ pub async fn run_batch_prover(
             #[cfg(not(feature = "sgx"))]
             Err(RaikoError::FeatureNotSupportedError(proof_type))
         }
+        ProofType::Tdx => {
+            #[cfg(feature = "tdx")]
+            return tdx_prover::TdxProver
+                .batch_run(input.clone(), output, config, store)
+                .await
+                .map_err(|e| e.into());
+            #[cfg(not(feature = "tdx"))]
+            Err(RaikoError::FeatureNotSupportedError(proof_type))
+        }
     }
 }
 
@@ -235,6 +258,15 @@ pub async fn aggregate_proofs(
             #[cfg(not(feature = "sgx"))]
             Err(RaikoError::FeatureNotSupportedError(proof_type))
         }
+        ProofType::Tdx => {
+            #[cfg(feature = "tdx")]
+            return tdx_prover::TdxProver
+                .aggregate(input.clone(), output, config, store)
+                .await
+                .map_err(|e| e.into());
+            #[cfg(not(feature = "tdx"))]
+            Err(RaikoError::FeatureNotSupportedError(proof_type))
+        }
     }?;
 
     Ok(proof)
@@ -275,6 +307,15 @@ pub async fn cancel_proof(
                 .await
                 .map_err(|e| e.into());
             #[cfg(not(feature = "sgx"))]
+            Err(RaikoError::FeatureNotSupportedError(proof_type))
+        }
+        ProofType::Tdx => {
+            #[cfg(feature = "tdx")]
+            return tdx_prover::TdxProver
+                .cancel(proof_key, read)
+                .await
+                .map_err(|e| e.into());
+            #[cfg(not(feature = "tdx"))]
             Err(RaikoError::FeatureNotSupportedError(proof_type))
         }
     }?;
@@ -453,6 +494,8 @@ pub struct ProverSpecificOpts {
     pub sp1: Option<Value>,
     /// RISC0 prover specific options.
     pub risc0: Option<Value>,
+    /// TDX prover specific options.
+    pub tdx: Option<Value>,
 }
 
 impl<S: ::std::hash::BuildHasher + ::std::default::Default> From<ProverSpecificOpts>
@@ -465,6 +508,7 @@ impl<S: ::std::hash::BuildHasher + ::std::default::Default> From<ProverSpecificO
             ("sgxgeth", value.sgxgeth.clone()),
             ("sp1", value.sp1.clone()),
             ("risc0", value.risc0.clone()),
+            ("tdx", value.tdx.clone()),
         ]
         .into_iter()
         .filter_map(|(name, value)| value.map(|v| (name.to_string(), v)))
