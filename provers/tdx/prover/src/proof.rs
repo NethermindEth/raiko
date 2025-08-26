@@ -119,7 +119,7 @@ impl TdxAggregationProof {
     }
 }
 
-pub fn generate_tdx_quote(user_report_data: &B256, socket_path: &str) -> Result<Vec<u8>> {
+pub fn generate_tdx_quote(user_report_data: &B256, socket_path: &str) -> Result<(Vec<u8>, Vec<u8>)> {
     let user_data = user_report_data.as_slice();
     let nonce: [u8; 32] = rand::thread_rng().gen();
     let nonce = nonce.to_vec();
@@ -128,13 +128,13 @@ pub fn generate_tdx_quote(user_report_data: &B256, socket_path: &str) -> Result<
 
     let attestation_doc = attestation_client::issue_attestation(socket_path, user_data, &nonce)?;
 
-    Ok(attestation_doc)
+    Ok((attestation_doc, nonce))
 }
 
 pub fn generate_tdx_quote_from_public_key(
     public_key: &Address,
     socket_path: &str,
-) -> Result<Vec<u8>> {
+) -> Result<(Vec<u8>, Vec<u8>)> {
     let bootstrap_data = public_key.to_vec();
     let mut padded_data = [0u8; 32];
     padded_data[..bootstrap_data.len().min(32)]
@@ -146,6 +146,7 @@ pub fn generate_tdx_quote_from_public_key(
 pub struct ProveData {
     pub proof: Vec<u8>,
     pub quote: Vec<u8>,
+    pub nonce: Vec<u8>,
     pub address: Address,
     pub instance_hash: B256,
 }
@@ -161,11 +162,12 @@ pub fn prove(input: &GuestInput, tdx_config: &TdxConfig) -> Result<ProveData> {
     let pi_hash = pi.instance_hash();
     let signature = sign_message(&private_key, &pi_hash)?;
     let proof = TdxProof::new(instance_id, &address, &signature).to_vec();
-    let quote = generate_tdx_quote(&pi_hash, &tdx_config.socket_path)?;
+    let (quote, nonce) = generate_tdx_quote(&pi_hash, &tdx_config.socket_path)?;
 
     Ok(ProveData {
         proof,
         quote,
+        nonce,
         address,
         instance_hash: pi_hash,
     })
@@ -174,6 +176,7 @@ pub fn prove(input: &GuestInput, tdx_config: &TdxConfig) -> Result<ProveData> {
 pub struct ProveBatchData {
     pub proof: Vec<u8>,
     pub quote: Vec<u8>,
+    pub nonce: Vec<u8>,
     pub address: Address,
     pub instance_hash: B256,
 }
@@ -193,7 +196,7 @@ pub fn prove_batch(input: &GuestBatchInput, tdx_config: &TdxConfig) -> Result<Pr
     let pi_hash = pi.instance_hash();
     let signature = sign_message(&private_key, &pi_hash)?;
     let proof = TdxProof::new(instance_id, &address, &signature).to_vec();
-    let quote = generate_tdx_quote(&pi_hash, &tdx_config.socket_path)?;
+    let (quote, nonce) = generate_tdx_quote(&pi_hash, &tdx_config.socket_path)?;
 
     Ok(ProveBatchData {
         proof,
@@ -207,6 +210,7 @@ pub struct ProveAggregationData {
     pub aggregation_hash: B256,
     pub proof: Vec<u8>,
     pub quote: Vec<u8>,
+    pub nonce: Vec<u8>,
     pub new_instance: Address,
 }
 
@@ -276,12 +280,13 @@ pub fn prove_aggregation(
 
     let signature = sign_message(&private_key, &aggregation_hash)?;
     let proof = TdxAggregationProof::new(instance_id, &old_instance, &new_instance, &signature).to_vec();
-    let quote = generate_tdx_quote(&aggregation_hash, &tdx_config.socket_path)?;
+    let (quote, nonce) = generate_tdx_quote(&aggregation_hash, &tdx_config.socket_path)?;
 
     Ok(ProveAggregationData {
         aggregation_hash,
         proof,
         quote,
+        nonce,
         new_instance,
     })
 }

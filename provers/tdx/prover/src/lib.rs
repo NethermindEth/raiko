@@ -194,7 +194,7 @@ impl TdxProver {
         let public_key = signature::get_address_from_private_key(&private_key)?;
         info!("Generated public key: {}", hex::encode(public_key));
 
-        let quote =
+        let (quote, nonce) =
             proof::generate_tdx_quote_from_public_key(&public_key, &tdx_config.socket_path)?;
         info!(
             "Bootstrap complete. Public key address: {}",
@@ -204,7 +204,7 @@ impl TdxProver {
 
         let metadata = attestation_client::metadata(&tdx_config.socket_path)?;
 
-        config::write_bootstrap(&quote, &public_key, metadata)?;
+        config::write_bootstrap(&quote, &public_key, &nonce, metadata)?;
 
         Ok(quote)
     }
@@ -217,6 +217,7 @@ pub static TDX_GUEST_DATA: Lazy<Result<serde_json::Value, String>> = Lazy::new(|
     Ok(json!({
         "public_key": bootstrap_data.public_key,
         "quote": bootstrap_data.quote,
+        "nonce": bootstrap_data.nonce,
         "metadata": bootstrap_data.metadata,
     }))
 });

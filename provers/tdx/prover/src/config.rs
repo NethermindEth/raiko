@@ -72,6 +72,7 @@ pub fn load_private_key() -> Result<secp256k1::SecretKey> {
 pub struct BootstrapData {
     pub public_key: String,
     pub quote: String,
+    pub nonce: String,
     pub metadata: serde_json::Value,
 }
 
@@ -83,12 +84,13 @@ pub fn read_bootstrap() -> Result<BootstrapData> {
     Ok(bootstrap_data)
 }
 
-pub fn write_bootstrap(quote: &Vec<u8>, public_key: &Address, metadata: serde_json::Value) -> Result<()> {
+pub fn write_bootstrap(quote: &Vec<u8>, public_key: &Address, nonce: &Vec<u8>, metadata: serde_json::Value) -> Result<()> {
     let config_dir = get_config_dir()?;
     let bootstrap_file = config_dir.join("bootstrap.json");
     let bootstrap_data = BootstrapData {
         public_key: public_key.to_string(),
         quote: hex::encode(quote),
+        nonce: hex::encode(nonce),
         metadata,
     };
     fs::write(&bootstrap_file, serde_json::to_string_pretty(&bootstrap_data)?)?;
