@@ -28,9 +28,29 @@ GAIKO_GUEST_APP_VERBOSE_LEVEL=${GAIKO_GUEST_APP_VERBOSE_LEVEL:-3}
 
 function sign_gramine_manifest() {
     cd "$RAIKO_APP_DIR"
-    gramine-sgx-sign --manifest "$RAIKO_INPUT_MANIFEST_FILENAME" --output "$RAIKO_OUTPUT_MANIFEST_FILENAME"
-    mkdir -p "$RAIKO_DOCKER_VOLUME_CONFIG_PATH"
-    cp "$RAIKO_OUTPUT_MANIFEST_FILENAME" "$RAIKO_SIGNED_MANIFEST_FILENAME" "$RAIKO_DOCKER_VOLUME_CONFIG_PATH"
+    echo "Signing SGX manifest for current hardware..."
+    
+    # Check if manifest template exists
+    if [[ ! -f "sgx-guest.manifest" ]]; then
+        echo "sgx-guest.manifest not found. Cannot sign SGX enclave."
+        return 1
+    fi
+    
+    # Sign the manifest for current hardware
+    gramine-sgx-sign --manifest "sgx-guest.manifest" --output "sgx-guest.manifest.sgx"
+    
+    if [[ $? -eq 0 ]]; then
+        echo "SGX manifest signed successfully for current hardware"
+        # Display enclave info for verification
+        gramine-sgx-sigstruct-view "sgx-guest.sig"
+        
+        # Copy signed files to volume for persistence
+        mkdir -p "$RAIKO_DOCKER_VOLUME_CONFIG_PATH"
+        cp "sgx-guest.manifest.sgx" "sgx-guest.sig" "$RAIKO_DOCKER_VOLUME_CONFIG_PATH"
+    else
+        echo "Failed to sign SGX manifest"
+        return 1
+    fi
     cd -
 }
 
@@ -197,6 +217,11 @@ fi
 
 echo $#
 if [[ -n $SGX ]]; then
+    echo "Running in SGX mode - signing enclave for current hardware"
+    
+    # Sign SGX manifest at runtime for current hardware
+    sign_gramine_manifest
+    
     if [[ $# -eq 1 && $1 == "--init" ]]; then
         echo "start bootstrap"
         bootstrap
