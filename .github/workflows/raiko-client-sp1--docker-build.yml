@@ -16,8 +16,8 @@ on:
 env:
   DOCKER_REGISTRY: nethermind.jfrog.io
   DOCKER_USERNAME: modular
-  DOCKER_REPOSITORY_DEV: modular-oci-local-dev/raiko-client-sp1
-  DOCKER_REPOSITORY_STAGING: modular-oci-local-staging/raiko-client-sp1
+  DOCKER_REPOSITORY_STAGING: modular-oci-local-staging/raiko
+  DOCKER_REPOSITORY_PROD: modular-oci-local-prod/raiko
   DOCKER_PUBLIC_REGISTRY: docker.io
   DOCKER_PUBLIC_REPOSITORY: nethermind
   DOCKER_PUBLIC_IMAGE_NAME: raiko-client-sp1
@@ -53,11 +53,10 @@ jobs:
         id: meta-dev
         uses: docker/metadata-action@v5
         with:
-          images: ${{ env.DOCKER_REGISTRY }}/${{ env.DOCKER_REPOSITORY_DEV }}
+          images: ${{ env.DOCKER_REGISTRY }}/${{ env.DOCKER_REPOSITORY_STAGING }}
           tags: |
             type=raw,value=latest
             type=ref,event=tag
-            type=sha,prefix={{branch}}-
 
       - name: Build and push with tags
         id: build
@@ -73,7 +72,7 @@ jobs:
       - name: Set digest output
         id: digest
         run: |
-          echo "amd64=${{ env.DOCKER_REGISTRY }}/${{ env.DOCKER_REPOSITORY_DEV }}@${{ steps.build.outputs.digest }}" >> $GITHUB_OUTPUT
+          echo "amd64=${{ env.DOCKER_REGISTRY }}/${{ env.DOCKER_REPOSITORY_STAGING }}@${{ steps.build.outputs.digest }}" >> $GITHUB_OUTPUT
 
   merge:
     name: Create manifest and promote to staging
@@ -93,7 +92,7 @@ jobs:
         id: meta
         uses: docker/metadata-action@v5
         with:
-          images: ${{ env.DOCKER_REGISTRY }}/${{ env.DOCKER_REPOSITORY_DEV }}
+          images: ${{ env.DOCKER_REGISTRY }}/${{ env.DOCKER_REPOSITORY_STAGING }}
           tags: |
             type=raw,value=latest
             type=ref,event=tag
@@ -122,10 +121,10 @@ jobs:
             echo "Current tag: $tag"
             tag=$(echo "$tag" | xargs)
             tag_suffix="${tag##*:}"
-            source_image="${DOCKER_REGISTRY}/${DOCKER_REPOSITORY_DEV}:${tag_suffix}"
-            staging_image="${DOCKER_REGISTRY}/${DOCKER_REPOSITORY_STAGING}:${tag_suffix}"
-            echo "Promoting ${source_image} to ${staging_image}"
-            oras cp -r "${source_image}" "${staging_image}"
+            source_image="${DOCKER_REGISTRY}/${DOCKER_REPOSITORY_STAGING}:${tag_suffix}"
+            prod_image="${DOCKER_REGISTRY}/${DOCKER_REPOSITORY_PROD}:${tag_suffix}"
+            echo "Promoting ${source_image} to ${prod_image}"
+            oras cp -r "${source_image}" "${prod_image}"
           done
 
       - name: Login to Docker Hub
@@ -141,8 +140,8 @@ jobs:
             echo "Current tag: $tag"
             tag=$(echo "$tag" | xargs)
             tag_suffix="${tag##*:}"
-            source_image="${DOCKER_REGISTRY}/${DOCKER_REPOSITORY_DEV}:${tag_suffix}"
-            public_image="${DOCKER_PUBLIC_REGISTRY}/${DOCKER_PUBLIC_REPOSITORY}/${DOCKER_PUBLIC_IMAGE_NAME}:${tag_suffix}"
+            source_image="${DOCKER_REGISTRY}/${DOCKER_REPOSITORY_STAGING}:${tag_suffix}"
+            public_image="${DOCKER_PUBLIC_REGISTRY}/${DOCKER_PUBLIC_REPOSITORY}/${DOCKER_PUBLIC_IMAGE_NAME}:${tag_suffix}-sp1"
             echo "Promoting ${source_image} to ${public_image}"
             oras cp -r "${source_image}" "${public_image}"
           done
@@ -157,8 +156,8 @@ jobs:
           echo "### Notes" >> $GITHUB_STEP_SUMMARY
           echo "- The images have been pushed to ${DOCKER_REPOSITORY_STAGING} repo" >> $GITHUB_STEP_SUMMARY
           echo "- The images have been promoted to public Docker Hub" >> $GITHUB_STEP_SUMMARY
-          echo "- **Dev Repository**: ${{ env.DOCKER_REGISTRY }}/${{ env.DOCKER_REPOSITORY_DEV }}" >> $GITHUB_STEP_SUMMARY
-          echo "- **Staging Repository**: ${{ env.DOCKER_REGISTRY }}/${{ env.DOCKER_REPOSITORY_STAGING }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **STAGING Repository**: ${{ env.DOCKER_REGISTRY }}/${{ env.DOCKER_REPOSITORY_STAGING }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **PROD Repository**: ${{ env.DOCKER_REGISTRY }}/${{ env.DOCKER_REPOSITORY_PROD }}" >> $GITHUB_STEP_SUMMARY
           echo "- **Public Repository**: ${{ env.DOCKER_PUBLIC_REGISTRY }}/${{ env.DOCKER_PUBLIC_REPOSITORY }}/${DOCKER_PUBLIC_IMAGE_NAME }}" >> $GITHUB_STEP_SUMMARY
           echo "- **Platforms**: linux/amd64" >> $GITHUB_STEP_SUMMARY
           echo "- **Commit**: ${{ github.sha }}" >> $GITHUB_STEP_SUMMARY
