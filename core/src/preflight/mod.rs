@@ -18,8 +18,8 @@ use reth_primitives::TransactionSigned;
 use tracing::{debug, info};
 
 use util::{
-    execute_txs, get_batch_blocks_and_parent_data, get_block_and_parent_data,
-    prepare_taiko_chain_batch_input, prepare_taiko_chain_input,
+    collect_l1_storage_proofs_and_headers, execute_txs, get_batch_blocks_and_parent_data,
+    get_block_and_parent_data, prepare_taiko_chain_batch_input, prepare_taiko_chain_input,
 };
 
 pub use util::parse_l1_batch_proposal_tx_for_pacaya_fork;
@@ -110,12 +110,24 @@ pub async fn preflight<BDP: BlockDataProvider>(
 
     info!("preflight: parent header done");
 
+    // Collect L1 storage proofs and headers if running on L2.
+    let (l1_storage_proofs, l1_headers) = if taiko_chain_spec.is_taiko() {
+        let l1_provider = RpcBlockDataProvider::new(&l1_chain_spec.rpc, 0).await?;
+        collect_l1_storage_proofs_and_headers(&block, &l1_provider).await?
+    } else {
+        (Vec::new(), Vec::new())
+    };
+
+    info!("preflight: L1 data collection done");
+
     // Create the guest input
     let input = GuestInput {
         block: block.clone(),
         parent_header,
         chain_spec: taiko_chain_spec.clone(),
         taiko: taiko_guest_input,
+        l1_storage_proofs,
+        l1_headers,
         ..Default::default()
     };
 
@@ -250,13 +262,6 @@ pub async fn batch_preflight<BDP: BlockDataProvider>(
         .map(|(block, _)| block.clone())
         .collect::<Vec<_>>();
 
-    // Collect L1SLOAD calls from individual block processing
-    let l1sload_calls =
-        collect_l1sload_calls_from_blocks(&provider, &block_parent_pairs, &taiko_chain_spec)
-            .await?;
-
-    info!("L1SLOAD calls detected: {} calls", l1sload_calls.len());
-
     let taiko_guest_batch_input = if taiko_chain_spec.is_taiko() {
         prepare_taiko_chain_batch_input(
             &l1_chain_spec,
@@ -266,7 +271,6 @@ pub async fn batch_preflight<BDP: BlockDataProvider>(
             &all_prove_blocks,
             prover_data,
             &blob_proof_type,
-            &l1sload_calls,
         )
         .await?
     } else {
@@ -448,37 +452,6 @@ pub async fn batch_preflight<BDP: BlockDataProvider>(
         inputs: final_result,
         taiko: taiko_guest_batch_input,
     })
-}
-
-/// Collect L1SLOAD calls from individual block processing
-/// This function processes blocks sequentially to detect L1SLOAD calls before creating the batch input
-async fn collect_l1sload_calls_from_blocks<BDP: BlockDataProvider>(
-    provider: &BDP,
-    block_parent_pairs: &[(reth_primitives::Block, alloy_rpc_types::Block)],
-    taiko_chain_spec: &ChainSpec,
-) -> RaikoResult<Vec<(Address, U256, u64)>> {
-    let mut l1sload_calls = Vec::new();
-
-    for (prove_block, parent_block) in block_parent_pairs {
-        let parent_block_number = parent_block.header.number;
-
-        // TODO: Run transactions to detect L1SLOAD calls
-        let provider_db = ProviderDb::new(
-            provider,
-            taiko_chain_spec.clone(),
-            parent_block_number,
-            None, // No initial DB for this detection phase
-        )
-        .await?;
-
-        // Get the L1SLOAD calls from this block
-        let block_l1sload_calls = provider_db.get_l1sload_calls();
-        for (contract, storage_key, block_number) in block_l1sload_calls {
-            l1sload_calls.push((*contract, *storage_key, *block_number));
-        }
-    }
-
-    Ok(l1sload_calls)
 }
 
 #[cfg(test)]

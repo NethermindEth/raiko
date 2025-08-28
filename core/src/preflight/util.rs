@@ -40,6 +40,7 @@ use crate::{
     provider::{db::ProviderDb, rpc::RpcBlockDataProvider, BlockDataProvider},
     require,
 };
+use raiko_lib::input::{L1BlockHeader, L1StorageProof};
 
 /// Optimize data gathering by executing the transactions multiple times so data can be requested in batches
 pub async fn execute_txs<'a, BDP>(
@@ -297,7 +298,6 @@ pub async fn prepare_taiko_chain_batch_input(
     batch_blocks: &[RethBlock],
     prover_data: TaikoProverData,
     blob_proof_type: &BlobProofType,
-    l1sload_calls: &[(Address, U256, u64)], // L1SLOAD calls: (contract, storage_key, block_number)
 ) -> RaikoResult<TaikoGuestBatchInput> {
     // Get the L1 block in which the L2 block was included so we can fetch the DA data.
     // Also get the L1 state block header so that we can prove the L1 state root.
@@ -380,10 +380,6 @@ pub async fn prepare_taiko_chain_batch_input(
             (Vec::new(), blob_tx_buffers)
         };
 
-        // Collect L1 storage proofs and convert to tries if L1SLOAD calls exist
-        let (l1_storage_proofs, l1_state_tries, l1_state_roots) =
-            collect_l1_storage_proofs_and_tries(l1_chain_spec, l1sload_calls).await?;
-
         return Ok(TaikoGuestBatchInput {
             batch_id: batch_id,
             batch_proposed: BlockProposedFork::Pacaya(batch_proposed),
@@ -404,9 +400,6 @@ pub async fn prepare_taiko_chain_batch_input(
                 .map(|(_, _, proof)| proof.clone())
                 .collect(),
             blob_proof_type: blob_proof_type.clone(),
-            l1_storage_proofs: Some(l1_storage_proofs.clone()),
-            l1_state_tries: Some(l1_state_tries.clone()),
-            l1_state_roots: Some(l1_state_roots.clone()),
         });
     } else {
         Err(RaikoError::Preflight(
@@ -461,106 +454,97 @@ pub async fn get_tx_blob(
     Ok((blob, Some(commitment.to_vec()), blob_proof))
 }
 
-/// Collect L1 storage proofs and convert them to MPT tries
-pub async fn collect_l1_storage_proofs_and_tries(
-    l1_chain_spec: &ChainSpec,
-    l1sload_calls: &[(Address, U256, u64)], // (contract, storage_key, block_number)
-) -> RaikoResult<(
-    HashMap<u64, HashMap<Address, EIP1186AccountProofResponse>>,
-    HashMap<u64, (MptNode, HashMap<Address, StorageEntry>)>,
-    HashMap<u64, B256>,
-)> {
-    if l1sload_calls.is_empty() {
-        return Ok((HashMap::new(), HashMap::new(), HashMap::new()));
-    }
+/// Collect L1 storage proofs and headers from block transactions
+pub async fn collect_l1_storage_proofs_and_headers(
+    block: &reth_primitives::Block,
+    l1_provider: &RpcBlockDataProvider,
+) -> RaikoResult<(Vec<L1StorageProof>, Vec<L1BlockHeader>)> {
+    let mut proofs = Vec::new();
+    let mut l1_headers = Vec::new();
+    let mut seen_proofs = std::collections::HashSet::new();
+    let mut seen_blocks = std::collections::HashMap::new(); // block_num -> index in l1_headers
 
-    let mut storage_proofs: HashMap<u64, HashMap<Address, EIP1186AccountProofResponse>> =
-        HashMap::new();
-    let mut state_tries: HashMap<u64, (MptNode, HashMap<Address, StorageEntry>)> = HashMap::new();
-    let mut l1_state_roots: HashMap<u64, B256> = HashMap::new();
+    // L1SLOAD precompile address from RIP-7728 (0x0000000000000000000000000000000000010001)
+    let l1sload_address = Address::from_slice(&[
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0x01, 0, 0x01,
+    ]);
 
-    // Group calls by block number
-    let mut calls_by_block: HashMap<u64, Vec<(Address, U256)>> = HashMap::new();
-    for (contract, storage_key, block_number) in l1sload_calls {
-        calls_by_block
-            .entry(*block_number)
-            .or_insert_with(Vec::new)
-            .push((*contract, *storage_key));
-    }
+    for tx in &block.body.transactions {
+        if let Some(to_address) = tx.to() {
+            if to_address == l1sload_address && tx.input().len() == 84 {
+                // Decode L1SLOAD input format:
+                // [0:20] = contract address
+                // [20:52] = storage key
+                // [52:84] = block number (as B256)
 
-    // Create L1 provider
-    let provider_l1 = RpcBlockDataProvider::new(&l1_chain_spec.rpc, 0).await?;
+                let input = tx.input();
+                let contract_address = Address::from_slice(&input[0..20]);
+                let storage_key = B256::from_slice(&input[20..52]);
+                let block_number = B256::from_slice(&input[52..84]);
 
-    for (block_number, calls) in calls_by_block {
-        // Get L1 block header to get state root
-        let l1_block = provider_l1.get_blocks(&[(block_number, false)]).await?;
-        let l1_block = l1_block
-            .first()
-            .ok_or_else(|| RaikoError::Preflight(format!("L1 block {} not found", block_number)))?;
-        let l1_state_root = l1_block.header.state_root;
-        l1_state_roots.insert(block_number, l1_state_root);
+                // Convert B256 block number to u64 for RPC calls
+                // Assuming block number is in the last 8 bytes of B256
+                let block_num =
+                    u64::from_be_bytes(block_number[24..32].try_into().map_err(|_| {
+                        RaikoError::Preflight("Invalid block number in L1SLOAD".to_owned())
+                    })?);
 
-        // Collect storage proofs for this block
-        let mut block_proofs = HashMap::new();
-        for (contract, storage_key) in calls {
-            let contract_proofs = provider_l1
-                .get_l1_storage_proofs(block_number, HashMap::from([(contract, vec![storage_key])]))
-                .await?;
-
-            // Find the proof for this specific contract
-            if let Some(proof) = contract_proofs.get(&contract) {
-                block_proofs.insert(contract, proof.clone());
-            }
-        }
-
-        if !block_proofs.is_empty() {
-            storage_proofs.insert(block_number, block_proofs.clone());
-
-            // Convert proofs to tries using existing infrastructure
-            // The post_proofs should be the same as block_proofs since we're reading from L1 state
-            // that doesn't change during L2 execution?
-            let post_proofs = block_proofs.clone();
-
-            let (state_trie, storage_tries) =
-                proofs_to_tries(l1_state_root, block_proofs, post_proofs)?;
-
-            // Validate L1 state trie hash matches expected L1 state root (same pattern as L2 validation)
-            let computed_state_root = state_trie.hash();
-            if computed_state_root != l1_state_root {
-                return Err(RaikoError::Preflight(format!(
-                    "Invalid L1 state trie for block {}: expected {}, got {}",
-                    block_number, l1_state_root, computed_state_root
-                )));
-            }
-
-            // Validate L1 storage tries against account storage roots
-            for (address, storage_entry) in &storage_tries {
-                let (storage_trie, _slots) = storage_entry;
-                let account_key = keccak(address);
-                let account = state_trie
-                    .get_rlp::<StateAccount>(&account_key)
-                    .map_err(|e| RaikoError::Preflight(format!("RLP error: {}", e)))?
-                    .ok_or_else(|| {
-                        RaikoError::Preflight(format!(
-                            "Failed to get account {:?} from L1 state trie for block {}",
-                            address, block_number
-                        ))
+                // Collect L1 header if not seen
+                if !seen_blocks.contains_key(&block_num) {
+                    let l1_blocks = l1_provider.get_blocks(&[(block_num, false)]).await?;
+                    let l1_block = l1_blocks.first().ok_or_else(|| {
+                        RaikoError::Preflight(format!("L1 block {} not found", block_num))
                     })?;
 
-                let computed_storage_root = storage_trie.hash();
-                if computed_storage_root != account.storage_root {
-                    return Err(RaikoError::Preflight(format!(
-                        "Invalid L1 storage trie for address {:?} in block {}: expected {}, got {}",
-                        address, block_number, account.storage_root, computed_storage_root
-                    )));
+                    l1_headers.push(L1BlockHeader {
+                        number: block_num,
+                        hash: l1_block.header.hash,
+                        state_root: l1_block.header.state_root,
+                    });
+                    seen_blocks.insert(block_num, l1_headers.len() - 1);
+                }
+
+                // Collect storage proof if not seen
+                let cache_key = (contract_address, storage_key, block_number);
+                if seen_proofs.insert(cache_key) {
+                    let storage_key_u256 = U256::from_be_bytes(storage_key.into());
+                    let proof_response = l1_provider
+                        .get_l1_storage_proofs(
+                            block_num,
+                            HashMap::from([(contract_address, vec![storage_key_u256])]),
+                        )
+                        .await?;
+
+                    // Find the proof for this specific contract
+                    if let Some(proof) = proof_response.get(&contract_address) {
+                        // Ensure we have storage proof
+                        if proof.storage_proof.is_empty() {
+                            return Err(RaikoError::Preflight(
+                                "No storage proof returned for L1SLOAD".to_owned(),
+                            ));
+                        }
+
+                        proofs.push(L1StorageProof {
+                            contract_address,
+                            storage_key,
+                            block_number,
+                            value: B256::from(proof.storage_proof[0].value),
+                            account_proof: proof.account_proof.iter().map(|p| p.clone()).collect(),
+                            storage_proof: proof.storage_proof[0]
+                                .proof
+                                .iter()
+                                .map(|p| p.clone())
+                                .collect(),
+                        });
+                    }
                 }
             }
-
-            state_tries.insert(block_number, (state_trie, storage_tries));
         }
     }
 
-    Ok((storage_proofs, state_tries, l1_state_roots))
+    // TODO: Handle indirect L1SLOAD calls from smart contracts (requires tracer)
+
+    Ok((proofs, l1_headers))
 }
 
 /// get tx data(blob data) vec from blob hashes

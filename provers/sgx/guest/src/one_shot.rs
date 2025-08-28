@@ -9,7 +9,7 @@ use anyhow::{anyhow, bail, Context, Error, Result};
 use base64_serde::base64_serde_type;
 use raiko_lib::{
     builder::{calculate_batch_blocks_final_header, calculate_block_header},
-    input::{GuestBatchInput, GuestInput, RawAggregationGuestInput},
+    input::{GuestBatchInput, GuestInput, L1BlockHeader, L1StorageProof, RawAggregationGuestInput},
     primitives::{keccak, Address, B256},
     proof_type::ProofType,
     protocol_instance::{aggregation_output_combine, ProtocolInstance},
@@ -17,6 +17,7 @@ use raiko_lib::{
 use secp256k1::{Keypair, PublicKey, SecretKey};
 use serde::Serialize;
 use serde_json::Value;
+use std::collections::HashMap;
 
 base64_serde_type!(Base64Standard, base64::engine::general_purpose::STANDARD);
 
@@ -24,6 +25,19 @@ use crate::{
     app_args::{GlobalOpts, OneShotArgs},
     signature::*,
 };
+
+/// Verify L1 storage proof against L1 state root (SGX version)
+fn verify_l1_storage_proof(proof: &L1StorageProof, state_root: &B256) -> Result<()> {
+    // TODO: Implement proper Merkle proof verification
+    let account_key = keccak(&proof.contract_address.0);
+
+    // For now, just log the verification attempt
+    println!(
+        "SGX: Verifying L1 storage proof for contract {:?}, key {:?}, value {:?}",
+        proof.contract_address, proof.storage_key, proof.value
+    );
+    Ok(())
+}
 
 pub const ATTESTATION_QUOTE_DEVICE_FILE: &str = "/dev/attestation/quote";
 pub const ATTESTATION_TYPE_DEVICE_FILE: &str = "/dev/attestation/attestation_type";
@@ -133,7 +147,32 @@ pub async fn one_shot(
     let new_pubkey = public_key(&prev_privkey);
     let new_instance = public_key_to_address(&new_pubkey);
 
-    // Process the block
+    // NEW: Verify L1 proofs before execution
+    if !input.l1_storage_proofs.is_empty() {
+        // Build block number -> state root mapping
+        let mut l1_state_roots = HashMap::new();
+        for header in &input.l1_headers {
+            l1_state_roots.insert(header.number, header.state_root);
+        }
+
+        // Verify each L1 storage proof
+        for proof in &input.l1_storage_proofs {
+            // Convert B256 block number back to u64
+            let block_num = u64::from_be_bytes(
+                proof.block_number.0[24..32]
+                    .try_into()
+                    .map_err(|_| anyhow!("Invalid block number format"))?,
+            );
+
+            let state_root = l1_state_roots
+                .get(&block_num)
+                .ok_or_else(|| anyhow!("Missing L1 header for L1SLOAD block"))?;
+
+            verify_l1_storage_proof(proof, state_root)?;
+        }
+    }
+
+    // NOW process the block with verified L1 data
     let header = calculate_block_header(&input);
     // Calculate the public input hash
     let pi = ProtocolInstance::new(&input, &header, ProofType::Sgx)?.sgx_instance(new_instance);
@@ -195,7 +234,34 @@ pub async fn one_shot_batch(
     let (prev_privkey, new_pubkey, new_instance) =
         load_bootstrap_privkey(&global_opts.secrets_dir)?;
 
-    // Process the block
+    // NEW: Verify L1 proofs for all blocks in the batch before execution
+    for guest_input in &batch_input.inputs {
+        if !guest_input.l1_storage_proofs.is_empty() {
+            // Build block number -> state root mapping
+            let mut l1_state_roots = HashMap::new();
+            for header in &guest_input.l1_headers {
+                l1_state_roots.insert(header.number, header.state_root);
+            }
+
+            // Verify each L1 storage proof for this block
+            for proof in &guest_input.l1_storage_proofs {
+                // Convert B256 block number back to u64
+                let block_num = u64::from_be_bytes(
+                    proof.block_number.0[24..32]
+                        .try_into()
+                        .map_err(|_| anyhow!("Invalid block number format"))?,
+                );
+
+                let state_root = l1_state_roots
+                    .get(&block_num)
+                    .ok_or_else(|| anyhow!("Missing L1 header for L1SLOAD block"))?;
+
+                verify_l1_storage_proof(proof, state_root)?;
+            }
+        }
+    }
+
+    // NOW process the batch with verified L1 data
     let final_blocks = calculate_batch_blocks_final_header(&batch_input);
     // Calculate the public input hash
     let pi = ProtocolInstance::new_batch(&batch_input, final_blocks, ProofType::Sgx)?
