@@ -265,14 +265,6 @@ if [[ -n $ZK ]]; then
         exit 1
     fi
 
-    #update raiko server config
-    update_raiko_network $RAIKO_CONF_BASE_CONFIG
-    update_raiko_sgx_instance_id $RAIKO_CONF_BASE_CONFIG
-
-    #update raiko server chainspec
-    merge_json_arrays $PRODUCT_CHAINSPEC_FILE $DEVNET_CHAINSPEC_FILE $RAIKO_CONF_CHAIN_SPECS
-    update_docker_chain_specs $RAIKO_CONF_CHAIN_SPECS
-
     /opt/raiko/bin/raiko-host  --config-path=$RAIKO_CONF_BASE_CONFIG --chain-spec-path=$RAIKO_CONF_CHAIN_SPECS "$@"
 fi
 
