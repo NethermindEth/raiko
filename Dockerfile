@@ -88,8 +88,7 @@ COPY --from=builder /opt/raiko/docker/enclave-key.pem /root/.config/gramine/encl
 ARG EDMM=0
 ENV EDMM=${EDMM}
 WORKDIR /opt/raiko/bin
-RUN gramine-manifest -Dlog_level=error -Ddirect_mode=0 -Darch_libdir=/lib/x86_64-linux-gnu/ ../provers/sgx/config/sgx-guest.local.manifest.template sgx-guest.manifest && \
-    gramine-sgx-sign --manifest sgx-guest.manifest --output sgx-guest.manifest.sgx && \
-    gramine-sgx-sigstruct-view "sgx-guest.sig"
+# Generate manifest template (will be signed at runtime)
+RUN gramine-manifest -Dlog_level=error -Ddirect_mode=0 -Darch_libdir=/lib/x86_64-linux-gnu/ ../provers/sgx/config/sgx-guest.local.manifest.template sgx-guest.manifest
 
 ENTRYPOINT [ "/opt/raiko/bin/entrypoint.sh" ]
