@@ -8,7 +8,7 @@ use crate::utils::{generate_transactions, generate_transactions_for_batch_blocks
 use crate::{
     consts::{ChainSpec, MAX_BLOCK_HASH_AGE},
     guest_mem_forget,
-    input::{GuestBatchInput, GuestInput},
+    input::{GuestBatchInput, GuestInput, L1StorageProof},
     mem_db::{AccountState, DbAccount, MemDb},
     CycleTracker,
 };
@@ -94,10 +94,32 @@ pub static SURGE_DEV: LazyLock<Arc<TaikoChainSpec>> = LazyLock::new(|| {
     .into()
 });
 
+/// Populate L1SLOAD cache with storage values before EVM execution
+/// This must be called before any EVM execution to ensure L1SLOAD precompile has access to L1 data
+fn populate_l1sload_cache(l1_storage_proofs: &[L1StorageProof]) {
+    // TODO: Use/import set_l1_storage_value from REVM precompile
+    for proof in l1_storage_proofs {
+        // set_l1_storage_value(
+        //     proof.contract_address,
+        //     proof.storage_key,
+        //     proof.block_number,
+        //     proof.value,
+        // );
+        info!(
+            "L1SLOAD cache: contract={:?}, key={:?}, block={:?}, value={:?}",
+            proof.contract_address, proof.storage_key, proof.block_number, proof.value
+        );
+    }
+}
+
 pub fn calculate_block_header(input: &GuestInput) -> Header {
     let cycle_tracker = CycleTracker::start("initialize_database");
     let db = create_mem_db(&mut input.clone()).unwrap();
     cycle_tracker.end();
+
+    if !input.l1_storage_proofs.is_empty() {
+        populate_l1sload_cache(&input.l1_storage_proofs);
+    }
 
     let mut builder = RethBlockBuilder::new(input, db);
     let pool_tx = generate_transactions(
@@ -124,6 +146,10 @@ pub fn calculate_batch_blocks_final_header(input: &GuestBatchInput) -> Vec<Block
     let pool_txs_list = generate_transactions_for_batch_blocks(&input.taiko);
     let mut final_blocks = Vec::new();
     for (i, pool_txs) in pool_txs_list.iter().enumerate() {
+        if !input.inputs[i].l1_storage_proofs.is_empty() {
+            populate_l1sload_cache(&input.inputs[i].l1_storage_proofs);
+        }
+
         let mut builder = RethBlockBuilder::new(
             &input.inputs[i],
             create_mem_db(&mut input.inputs[i].clone()).unwrap(),
