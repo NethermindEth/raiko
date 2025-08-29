@@ -1,6 +1,6 @@
 services:
   raiko-zk:
-    image: nethermind.jfrog.io/core-oci-local-staging/raiko-zk:v2
+    image: nethermind.jfrog.io/core-oci-local-staging/raiko-zk:latest
     container_name: raiko-zk
     network_mode: host
     env_file:
@@ -8,14 +8,17 @@ services:
     environment:
       ZK: "true"
       SP1_PLONK_CIRCUIT_PATH: "${HOME}/.sp1/circuits/plonk"
+      RAIKO_CONF_DIR: "/raiko/config"
+      BASE_CONFIG_FILE: "config.json"
+      BASE_CHAINSPEC_FILE: "chain_spec_list_devnet.json"
     runtime: nvidia
     privileged: true
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
-      - ../host/config:/etc/config
+      - ../host/config:/raiko/config
       - /tmp:/tmp
     depends_on:
-      - redis
+      - redis-zk
   redis-zk:
     image: redis
     container_name: redis-zk

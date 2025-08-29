@@ -48,8 +48,8 @@ jobs:
           username: ${{ secrets.ARTIFACTORY_CORE_USERNAME }}
           password: ${{ secrets.ARTIFACTORY_CORE_TOKEN_DEVELOPER }}
 
-      - name: Docker meta for dev
-        id: meta-dev
+      - name: Docker meta for staging
+        id: meta-staging
         uses: docker/metadata-action@v5
         with:
           images: ${{ env.DOCKER_REGISTRY }}/${{ env.DOCKER_REPOSITORY_STAGING }}
@@ -65,8 +65,8 @@ jobs:
           file: ./Dockerfile.zk
           platforms: ${{ matrix.platform }}
           push: true
-          tags: ${{ steps.meta-dev.outputs.tags }}
-          labels: ${{ steps.meta-dev.outputs.labels }}
+          tags: ${{ steps.meta-staging.outputs.tags }}
+          labels: ${{ steps.meta-staging.outputs.labels }}
 
       - name: Set digest output
         id: digest
@@ -74,34 +74,10 @@ jobs:
           echo "amd64=${{ env.DOCKER_REGISTRY }}/${{ env.DOCKER_REPOSITORY_STAGING }}@${{ steps.build.outputs.digest }}" >> $GITHUB_OUTPUT
 
   merge:
-    name: Create manifest and promote to staging
+    name: Create manifest and promote to Production
     runs-on: [self-hosted, linux, x64]  # Custom runner
     needs: build
     steps:
-      - uses: docker/login-action@v3
-        with:
-          registry: ${{ env.DOCKER_REGISTRY }}
-          username: ${{ secrets.ARTIFACTORY_CORE_USERNAME }}
-          password: ${{ secrets.ARTIFACTORY_CORE_TOKEN_DEVELOPER }}
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Docker meta
-        id: meta
-        uses: docker/metadata-action@v5
-        with:
-          images: ${{ env.DOCKER_REGISTRY }}/${{ env.DOCKER_REPOSITORY_STAGING }}
-          tags: |
-            type=raw,value=latest
-            type=ref,event=tag
-
-      - name: Create manifest list and push
-        run: |
-          docker buildx imagetools create \
-            $(jq -cr '.tags | map("-t " + .) | join(" ")' <<< "$DOCKER_METADATA_OUTPUT_JSON") \
-            ${{ needs.build.outputs.digest-amd64 }}
-
       - name: Setup ORAS
         uses: oras-project/setup-oras@v1
 
@@ -111,17 +87,15 @@ jobs:
       - name: Login to registry with ORAS
         run: |
           oras login ${{ env.DOCKER_REGISTRY }} \
-            -u ${{ env.ARTIFACTORY_CORE_USERNAME }} \
+            -u ${{ secrets.ARTIFACTORY_CORE_USERNAME }} \
             -p ${{ secrets.ARTIFACTORY_CORE_TOKEN_DEVELOPER }}
 
-      - name: Promote to Staging
+      - name: Promote to PROD
         run: |
-          echo "${{ steps.meta.outputs.tags }}" | while IFS= read -r tag; do
+          for tag in $TAGS; do
             echo "Current tag: $tag"
-            tag=$(echo "$tag" | xargs)
-            tag_suffix="${tag##*:}"
-            source_image="${DOCKER_REGISTRY}/${DOCKER_REPOSITORY_STAGING}:${tag_suffix}"
-            prod_image="${DOCKER_REGISTRY}/${DOCKER_REPOSITORY_PROD}:${tag_suffix}"
+            source_image="${DOCKER_REGISTRY}/${DOCKER_REPOSITORY_STAGING}:${tag}"
+            prod_image="${DOCKER_REGISTRY}/${DOCKER_REPOSITORY_PROD}:${tag}"
             echo "Promoting ${source_image} to ${prod_image}"
             oras cp -r "${source_image}" "${prod_image}"
           done
@@ -130,8 +104,8 @@ jobs:
         run: |
           echo "## SP1 Docker build completed ✅" >> $GITHUB_STEP_SUMMARY
           echo "### Tags" >> $GITHUB_STEP_SUMMARY
-          echo "${{ steps.meta.outputs.tags }}" | while IFS= read -r TAG; do
-            echo "- $TAG" >> $GITHUB_STEP_SUMMARY
+          for tag in $TAGS; do
+            echo "- $tag" >> $GITHUB_STEP_SUMMARY
           done
           echo "### Notes" >> $GITHUB_STEP_SUMMARY
           echo "- The images have been pushed to ${DOCKER_REPOSITORY_STAGING} repo" >> $GITHUB_STEP_SUMMARY
