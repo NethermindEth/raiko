@@ -48,8 +48,8 @@ jobs:
           username: ${{ secrets.ARTIFACTORY_CORE_USERNAME }}
           password: ${{ secrets.ARTIFACTORY_CORE_TOKEN_DEVELOPER }}
 
-      - name: Docker meta for dev
-        id: meta-dev
+      - name: Docker meta for staging
+        id: meta-staging
         uses: docker/metadata-action@v5
         with:
           images: ${{ env.DOCKER_REGISTRY }}/${{ env.DOCKER_REPOSITORY_STAGING }}
@@ -65,8 +65,8 @@ jobs:
           file: ./Dockerfile.zk
           platforms: ${{ matrix.platform }}
           push: true
-          tags: ${{ steps.meta-dev.outputs.tags }}
-          labels: ${{ steps.meta-dev.outputs.labels }}
+          tags: ${{ steps.meta-staging.outputs.tags }}
+          labels: ${{ steps.meta-staging.outputs.labels }}
 
       - name: Set digest output
         id: digest
