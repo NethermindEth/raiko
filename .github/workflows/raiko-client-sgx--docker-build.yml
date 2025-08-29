@@ -5,7 +5,7 @@ on:
   push:
     branches: [main]
     tags:
-      - "v*-sgx"
+      - "v*-surge"
     paths:
       - "**"
       - "!docs/**"
@@ -15,6 +15,8 @@ on:
       - "!docker/**"
       - "!.github/**"
       - "host/config/chain_spec_list_default.json"
+      - "!provers/sp1/**"
+      - "!provers/risc0/**"
 
 env:
   DOCKER_REGISTRY: nethermind.jfrog.io
