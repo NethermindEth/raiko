@@ -5,7 +5,7 @@ on:
   push:
     branches: [main]
     tags:
-      - "v*-sp1"
+      - "v*-surge"
     paths:
       - "**"
       - "!docs/**"
@@ -15,6 +15,8 @@ on:
       - "!docker/**"
       - "!.github/**"
       - "host/config/chain_spec_list_default.json"
+      - "!provers/sgx/**"
+      - "!provers/risc0/**"
 
 env:
   DOCKER_REGISTRY: nethermind.jfrog.io
@@ -48,14 +50,24 @@ jobs:
           username: ${{ secrets.ARTIFACTORY_CORE_USERNAME }}
           password: ${{ secrets.ARTIFACTORY_CORE_TOKEN_DEVELOPER }}
 
+      - name: Determine build tags
+        id: build-tags
+        run: |
+          if [[ "${{ github.ref }}" == refs/tags/* ]]; then
+            VERSION=${GITHUB_REF#refs/tags/}
+            # Remove -surge suffix if present
+            BASE_VERSION=${VERSION%-surge}
+            echo "tag_list=type=raw,value=latest,type=raw,value=$BASE_VERSION" >> $GITHUB_OUTPUT
+          else
+            echo "tag_list=type=raw,value=latest" >> $GITHUB_OUTPUT
+          fi
+
       - name: Docker meta for staging
         id: meta-staging
         uses: docker/metadata-action@v5
         with:
           images: ${{ env.DOCKER_REGISTRY }}/${{ env.DOCKER_REPOSITORY_STAGING }}
-          tags: |
-            type=raw,value=latest
-            type=ref,event=tag
+          tags: ${{ steps.build-tags.outputs.tag_list }}
 
       - name: Build and push with tags
         id: build
@@ -89,6 +101,17 @@ jobs:
           oras login ${{ env.DOCKER_REGISTRY }} \
             -u ${{ secrets.ARTIFACTORY_CORE_USERNAME }} \
             -p ${{ secrets.ARTIFACTORY_CORE_TOKEN_DEVELOPER }}
+
+      - name: Determine tags to promote
+        id: promote-tags
+        run: |
+          if [[ "${{ github.ref }}" == refs/tags/* ]]; then
+            VERSION=${GITHUB_REF#refs/tags/}
+            BASE_VERSION=${VERSION%-surge}
+            echo "TAGS=latest $BASE_VERSION" >> $GITHUB_ENV
+          else
+            echo "TAGS=latest" >> $GITHUB_ENV
+          fi
 
       - name: Promote to PROD
         run: |
