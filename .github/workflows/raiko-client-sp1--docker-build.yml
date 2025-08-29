@@ -102,7 +102,7 @@ jobs:
 
       - name: Summary
         run: |
-          echo "## SGX Docker build completed ✅" >> $GITHUB_STEP_SUMMARY
+          echo "## SP1 Docker build completed ✅" >> $GITHUB_STEP_SUMMARY
           echo "### Tags" >> $GITHUB_STEP_SUMMARY
           for tag in $TAGS; do
             echo "- $tag" >> $GITHUB_STEP_SUMMARY
