@@ -1,6 +1,6 @@
 #![cfg(feature = "enable")]
 
-use alloy_primitives::{hex, B256};
+use once_cell::sync::Lazy;
 use raiko_lib::{
     input::{
         AggregationGuestInput, AggregationGuestOutput, GuestBatchInput, GuestBatchOutput,
@@ -11,10 +11,11 @@ use raiko_lib::{
     Measurement,
 };
 use serde::{Deserialize, Serialize};
+use serde_json::json;
 use serde_with::serde_as;
 use sp1_prover::{components::CpuProverComponents, Groth16Bn254Proof};
 use sp1_sdk::{
-    network::FulfillmentStrategy, NetworkProver, Prover as SP1ProverTrait, SP1Proof, SP1ProofMode,
+    network::FulfillmentStrategy, Prover as SP1ProverTrait, SP1Proof, SP1ProofMode,
     SP1ProofWithPublicValues, SP1ProvingKey, SP1VerifyingKey,
 };
 use sp1_sdk::{HashableKey, ProverClient, SP1Stdin};
@@ -101,7 +102,6 @@ pub struct Sp1Prover;
 #[derive(Clone)]
 struct Sp1ProverClient {
     pub(crate) client: Arc<Box<dyn SP1ProverTrait<CpuProverComponents>>>,
-    pub(crate) network_client: Arc<NetworkProver>,
     pub(crate) pk: SP1ProvingKey,
     pub(crate) vk: SP1VerifyingKey,
 }
@@ -110,6 +110,18 @@ struct Sp1ProverClient {
 // static BLOCK_PROOF_CLIENT: Lazy<DashMap<ProverMode, Sp1ProverClient>> = Lazy::new(DashMap::new);
 // static AGGREGATION_CLIENT: Lazy<DashMap<ProverMode, Sp1ProverClient>> = Lazy::new(DashMap::new);
 // static BATCH_PROOF_CLIENT: Lazy<DashMap<ProverMode, Sp1ProverClient>> = Lazy::new(DashMap::new);
+
+static AGGREGATION_PROGRAM_HASH: Lazy<String> = Lazy::new(|| {
+    let prover = sp1_sdk::CpuProver::new();
+    let key_pair = prover.setup(&AGGREGATION_ELF);
+    key_pair.1.bytes32()
+});
+
+static BLOCK_PROGRAM_HASH: Lazy<String> = Lazy::new(|| {
+    let prover = sp1_sdk::CpuProver::new();
+    let key_pair = prover.setup(&BATCH_ELF);
+    reth_primitives::hex::encode(key_pair.1.hash_bytes())
+});
 
 impl Prover for Sp1Prover {
     async fn run(
@@ -126,20 +138,14 @@ impl Prover for Sp1Prover {
         let mut stdin = SP1Stdin::new();
         stdin.write(&input);
 
-        let Sp1ProverClient {
-            client,
-            pk,
-            vk,
-            network_client,
-        } = {
-            let gpu_number: u64 = config
+        let Sp1ProverClient { client, pk, vk } = {
+            let gpu_number: u32 = config
                 .get("gpu_number")
                 .and_then(|v| v.as_i64())
                 .map(|v| v as u64)
                 .unwrap();
             info!("GPU Number: {}", gpu_number);
 
-            let network_client = Arc::new(ProverClient::builder().network().build());
             let base_client: Box<dyn SP1ProverTrait<CpuProverComponents>> = match mode {
                 ProverMode::Mock => Box::new(ProverClient::builder().mock().build()),
                 ProverMode::Local => Box::new(
@@ -159,12 +165,7 @@ impl Prover for Sp1Prover {
                 "new client and setup() for block {:?}.",
                 output.header.number
             );
-            Sp1ProverClient {
-                client,
-                network_client,
-                pk,
-                vk,
-            }
+            Sp1ProverClient { client, pk, vk }
         };
 
         info!(
@@ -184,6 +185,7 @@ impl Prover for Sp1Prover {
                 .prove(&pk, &stdin, prove_mode)
                 .map_err(|e| ProverError::GuestError(format!("Sp1: local proving failed: {e}")))?
         } else {
+            let network_client = Arc::new(ProverClient::builder().network().build());
             let proof_id = network_client
                 .prove(&pk, &stdin)
                 .mode(param.recursion.clone().into())
@@ -338,13 +340,8 @@ impl Prover for Sp1Prover {
         }
 
         // Generate the proof for the given program.
-        let Sp1ProverClient {
-            client,
-            pk,
-            vk,
-            network_client,
-        } = {
-            let gpu_number = config
+        let Sp1ProverClient { client, pk, vk } = {
+            let gpu_number: u32 = config
                 .get("gpu_number")
                 .and_then(|v| v.as_i64())
                 .map(|v| v as u64)
@@ -352,7 +349,6 @@ impl Prover for Sp1Prover {
 
             info!("GPU Number: {}", gpu_number);
 
-            let network_client = Arc::new(ProverClient::builder().network().build());
             let base_client: Box<dyn SP1ProverTrait<CpuProverComponents>> = param
                 .prover
                 .map(|mode| {
@@ -379,12 +375,7 @@ impl Prover for Sp1Prover {
                 input.proofs.len(),
                 vk.bytes32()
             );
-            Sp1ProverClient {
-                client,
-                pk,
-                vk,
-                network_client,
-            }
+            Sp1ProverClient { client, pk, vk }
         };
 
         info!(
@@ -400,6 +391,7 @@ impl Prover for Sp1Prover {
                 .expect("proving failed");
             prove_result
         } else {
+            let network_client = Arc::new(ProverClient::builder().network().build());
             let proof_id = network_client
                 .prove(&pk, &stdin)
                 .mode(param.recursion.clone().into())
@@ -471,20 +463,14 @@ impl Prover for Sp1Prover {
         let mut stdin = SP1Stdin::new();
         stdin.write(&input);
 
-        let Sp1ProverClient {
-            client,
-            pk,
-            vk,
-            network_client,
-        } = {
-            let gpu_number: u64 = config
+        let Sp1ProverClient { client, pk, vk } = {
+            let gpu_number: u32 = config
                 .get("gpu_number")
                 .and_then(|v| v.as_i64())
                 .map(|v| v as u64)
                 .unwrap();
             info!("GPU Number: {}", gpu_number);
 
-            let network_client = Arc::new(ProverClient::builder().network().build());
             let base_client: Box<dyn SP1ProverTrait<CpuProverComponents>> = match mode {
                 ProverMode::Mock => Box::new(ProverClient::builder().mock().build()),
                 ProverMode::Local => Box::new(
@@ -504,12 +490,7 @@ impl Prover for Sp1Prover {
                 "new client and setup() for batch {:?}.",
                 input.taiko.batch_id
             );
-            Sp1ProverClient {
-                client,
-                network_client,
-                pk,
-                vk,
-            }
+            Sp1ProverClient { client, pk, vk }
         };
 
         info!(
@@ -547,6 +528,7 @@ impl Prover for Sp1Prover {
                 })?
             }
         } else {
+            let network_client = Arc::new(ProverClient::builder().network().build());
             let proof_id = network_client
                 .prove(&pk, &stdin)
                 .mode(param.recursion.clone().into())
@@ -623,6 +605,15 @@ impl Prover for Sp1Prover {
             }
             .into(),
         )
+    }
+
+    async fn get_guest_data() -> ProverResult<serde_json::Value> {
+        Ok(json!({
+            "sp1": {
+                "aggregation_program_hash": AGGREGATION_PROGRAM_HASH.to_string(),
+                "block_program_hash": BLOCK_PROGRAM_HASH.to_string(),
+            }
+        }))
     }
 }
 

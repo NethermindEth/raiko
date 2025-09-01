@@ -3484,6 +3484,7 @@ dependencies = [
  "reth-primitives",
  "reth-primitives-traits",
  "reth-revm",
+ "reth-storage-api",
  "revm",
  "rlp",
  "rust-kzg-zkcrypto",
@@ -5372,6 +5373,7 @@ dependencies = [
 [[package]]
 name = "taiko-reth"
 version = "0.1.0"
+source = "git+https://github.com/NethermindEth/taiko-reth.git?branch=feat%2Ffeature-gates#206e470d912e8ca81f51e670647f194d15fc6133"
 dependencies = [
  "alloy-chains",
  "alloy-consensus",
@@ -5431,7 +5433,7 @@ dependencies = [
  "serde",
  "serde_json",
  "serde_with",
- "sha2 0.10.8",
+ "sha2 0.10.9",
  "thiserror 2.0.15",
  "tokio-retry",
  "tracing",
