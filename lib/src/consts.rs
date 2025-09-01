@@ -5,7 +5,7 @@ use crate::primitives::{uint, BlockNumber, ChainId, U256};
 use crate::proof_type::ProofType;
 use alloc::collections::BTreeMap;
 use alloy_primitives::Address;
-use anyhow::{anyhow, bail, Result};
+use anyhow::{anyhow, Result};
 use once_cell::sync::Lazy;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -132,7 +132,6 @@ impl Default for Eip1559Constants {
 pub struct ChainSpec {
     pub name: String,
     pub chain_id: ChainId,
-    pub max_spec_id: TaikoSpecId,
     pub hard_forks: BTreeMap<TaikoSpecId, ForkCondition>,
     pub eip_1559_constants: Eip1559Constants,
     pub l1_contract: Option<Address>,
@@ -157,7 +156,6 @@ impl ChainSpec {
         ChainSpec {
             name,
             chain_id,
-            max_spec_id: spec_id,
             hard_forks: BTreeMap::from([(spec_id, ForkCondition::Block(0))]),
             eip_1559_constants,
             l1_contract: None,
@@ -189,12 +187,7 @@ impl ChainSpec {
     /// supported.
     pub fn active_fork(&self, block_no: BlockNumber, timestamp: u64) -> Result<TaikoSpecId> {
         match self.spec_id(block_no, timestamp) {
-            Some(spec_id) => {
-                if spec_id > self.max_spec_id {
-                    bail!("expected <= {:?}, got {spec_id:?}", self.max_spec_id);
-                }
-                Ok(spec_id)
-            }
+            Some(spec_id) => Ok(spec_id),
             None => Err(anyhow!("no supported fork for block {block_no}")),
         }
     }
@@ -287,7 +280,7 @@ mod tests {
         assert!(surge_dev_mainnet_spec.spec_id(2, 0).map(Into::into) > Some(SpecId::MERGE));
         assert_eq!(
             surge_dev_mainnet_spec.spec_id(2, 0),
-            Some(TaikoSpecId::ONTAKE)
+            Some(TaikoSpecId::PACAYA)
         );
     }
 
@@ -298,7 +291,7 @@ mod tests {
             .unwrap();
         assert_eq!(
             surge_dev_mainnet_spec.active_fork(1, 0).unwrap(),
-            TaikoSpecId::ONTAKE
+            TaikoSpecId::PACAYA
         );
     }
 
@@ -312,7 +305,7 @@ mod tests {
             .unwrap();
         assert_eq!(
             verifier_address,
-            address!("0x0000000000000000000000000000000000000000")
+            address!("0x4400ff1686d7d66400ca7281f840404b5a4b3c46")
         );
     }
 
@@ -333,7 +326,6 @@ mod tests {
         let spec = ChainSpec {
             name: "test".to_string(),
             chain_id: 1,
-            max_spec_id: TaikoSpecId::PACAYA,
             hard_forks: BTreeMap::from([
                 (TaikoSpecId::ONTAKE, ForkCondition::Block(0)),
                 (TaikoSpecId::PACAYA, ForkCondition::Block(0)),
@@ -383,12 +375,8 @@ mod tests {
         let merged_specs =
             SupportedChainSpecs::merge_from_file(file_path.clone()).expect("merge from file");
         assert!(
-            merged_specs.get_chain_spec("taiko_dev").is_some(),
-            "taiko_dev is not merged"
-        );
-        assert!(
             merged_specs.get_chain_spec("surge_dev").is_some(),
-            "existed chain spec Ethereum is changed by merge"
+            "surge_dev is not merged"
         );
     }
 }

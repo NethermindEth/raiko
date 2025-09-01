@@ -30,6 +30,7 @@ use reth_evm::Database;
 use reth_primitives::RecoveredBlock;
 use reth_primitives::SealedHeader;
 use reth_primitives::{Block, Header, TransactionSigned};
+use reth_storage_api::noop::NoopProvider;
 use revm::primitives::KECCAK_EMPTY;
 use revm::state::Account;
 use revm::state::AccountInfo;
@@ -43,6 +44,7 @@ use taiko_reth::chainspec::TAIKO_DEVNET;
 use taiko_reth::chainspec::TAIKO_MAINNET;
 use taiko_reth::consensus::validation::TaikoBeaconConsensus;
 use taiko_reth::evm::config::TaikoEvmConfig;
+use taiko_reth::evm::factory::TaikoEvmFactory;
 use taiko_reth::evm::spec::TaikoSpecId;
 use tracing::{debug, info};
 
@@ -274,27 +276,17 @@ impl<DB: Database<Error = ProviderError> + DatabaseCommit + OptimisticDatabase +
         let mut block = self.input.block.clone();
         block.body.transactions = pool_txs;
 
-        let taiko_evm_config = TaikoEvmConfig::new(chain_spec.clone());
+        let taiko_evm_config = TaikoEvmConfig::new_with_evm_factory(
+            chain_spec.clone(),
+            TaikoEvmFactory::new(Some(Address::ZERO)), // TODO: make it configurable
+        );
 
+        // TODO: Maybe remove as "prover" feature has been added to taiko-reth?
         let executor = TaikoWithOptimisticBlockExecutor::new(
             taiko_evm_config,
             self.db.take().unwrap(),
             optimistic,
         );
-
-        // let executor = TaikoExecutorProviderBuilder::new(
-        //     taiko_chain_spec.clone(),
-        //     TaikoData {
-        //         l1_header: self.input.taiko.l1_header.clone(),
-        //         parent_header: self.input.parent_header.clone(),
-        //         l2_contract: self.input.chain_spec.l2_contract.unwrap_or_default(),
-        //         base_fee_config,
-        //         gas_limit,
-        //     },
-        // )
-        // .with_optimistic(optimistic)
-        // .build()
-        // .executor(self.db.take().unwrap());
 
         // Recover senders
         let recovered_block = RecoveredBlock::try_recover(block)?;
@@ -334,7 +326,8 @@ impl<DB: Database<Error = ProviderError> + DatabaseCommit + OptimisticDatabase +
         info!("execute_transactions: valid_transaction_indices done");
         // Header validation
         if !optimistic {
-            let consensus = TaikoBeaconConsensus::new(chain_spec.clone());
+            // TODO: change NoopProvider for Shasta
+            let consensus = TaikoBeaconConsensus::new(chain_spec.clone(), NoopProvider::default());
             // Validates if some values are set that should not be set for the current HF
             consensus.validate_header(sealed_header)?;
             info!("execute_transactions: validate_header done");
