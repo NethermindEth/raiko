@@ -229,6 +229,7 @@ pub struct TaikoGuestInput {
     /// header
     pub l1_header: Header,
     pub tx_data: Vec<u8>,
+    #[serde_as(as = "Option<serde_bincode_compat::EthereumTxEnvelope>")]
     pub anchor_tx: Option<TransactionSigned>,
     pub block_proposed: BlockProposedFork,
     pub prover_data: TaikoProverData,
