@@ -1,5 +1,6 @@
 #![cfg(feature = "enable")]
 
+use alloy_primitives::{hex, B256};
 use once_cell::sync::Lazy;
 use raiko_lib::{
     input::{
@@ -120,7 +121,7 @@ static AGGREGATION_PROGRAM_HASH: Lazy<String> = Lazy::new(|| {
 static BLOCK_PROGRAM_HASH: Lazy<String> = Lazy::new(|| {
     let prover = sp1_sdk::CpuProver::new();
     let key_pair = prover.setup(&BATCH_ELF);
-    reth_primitives::hex::encode(key_pair.1.hash_bytes())
+    hex::encode(key_pair.1.hash_bytes())
 });
 
 impl Prover for Sp1Prover {
@@ -139,7 +140,7 @@ impl Prover for Sp1Prover {
         stdin.write(&input);
 
         let Sp1ProverClient { client, pk, vk } = {
-            let gpu_number: u32 = config
+            let gpu_number: u64 = config
                 .get("gpu_number")
                 .and_then(|v| v.as_i64())
                 .map(|v| v as u64)
@@ -341,7 +342,7 @@ impl Prover for Sp1Prover {
 
         // Generate the proof for the given program.
         let Sp1ProverClient { client, pk, vk } = {
-            let gpu_number: u32 = config
+            let gpu_number: u64 = config
                 .get("gpu_number")
                 .and_then(|v| v.as_i64())
                 .map(|v| v as u64)
@@ -464,7 +465,7 @@ impl Prover for Sp1Prover {
         stdin.write(&input);
 
         let Sp1ProverClient { client, pk, vk } = {
-            let gpu_number: u32 = config
+            let gpu_number: u64 = config
                 .get("gpu_number")
                 .and_then(|v| v.as_i64())
                 .map(|v| v as u64)
