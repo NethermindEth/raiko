@@ -86,11 +86,12 @@ risc0-binfmt = { version = "=2.0.1" }
 risc0-zkos-v1compat = { version = "=2.0.1" }
 
 # SP1
-sp1-sdk = { version = "5.0.0", features = ["cuda"] }
-sp1-prover = { version = "5.0.0" }
-sp1-zkvm = { version = "5.0.0" }
-sp1-helper = { version = "5.0.0" }
-sp1-primitives = { version = "5.0.0" }
+sp1-sdk = { version = "5.2.0", features = ["cuda"] }
+sp1-prover = { version = "5.2.0" }
+sp1-zkvm = { version = "5.2.0" }
+sp1-helper = { version = "5.2.0" }
+sp1-primitives = { version = "5.2.0" }
+
 
 # alloy
 alloy-rlp = { version = "0.3.10", default-features = false }
@@ -181,12 +182,13 @@ dashmap = "5.5.3"
 futures = "0.3.31"
 
 # crypto
-bls12_381 = { git = "https://github.com/NethermindEth/rust-kzg", default-features = false }
-kzg_traits = { package = "kzg", git = "https://github.com/NethermindEth/rust-kzg", default-features = false, features = [
+bls12_381 = { git = "https://github.com/NethermindEth/rust-kzg", branch = "surge-main", default-features = false }
+kzg_traits = { package = "kzg", git = "https://github.com/NethermindEth/rust-kzg", branch = "surge-main", default-features = false, features = [
     "serde",
 ] }
-kzg = { package = "rust-kzg-zkcrypto", git = "https://github.com/NethermindEth/rust-kzg", default-features = false, features = [
+kzg = { package = "rust-kzg-zkcrypto", git = "https://github.com/NethermindEth/rust-kzg", branch = "surge-main", default-features = false, features = [
     "serde",
+    "rkyv",
 ] }
 sha3 = { version = "0.10", default-features = false }
 sha2 = "0.10.8"
@@ -233,6 +235,8 @@ derive-getters = "0.5.0"
 test-log = "0.2.16"
 pretty_assertions = "1.4.1"
 serial_test = "2"
+rkyv = "0.8.11"
+
 
 [patch.crates-io]
 secp256k1 = { git = "https://github.com/sp1-patches/rust-secp256k1", tag = "patch-0.30.0-sp1-5.0.0" }

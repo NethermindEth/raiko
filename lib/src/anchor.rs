@@ -194,10 +194,11 @@ pub fn check_common_anchor_conditions<B: reth_primitives_traits::Block>(
     // Check needs to have the base fee set to the block base fee
     ensure!(
         anchor.max_fee_per_gas
-            == block
-                .base_fee_per_gas()
-                .expect("base_fee_per_gas should be present")
-                .into(),
+            == <u64 as Into<u128>>::into(
+                block
+                    .base_fee_per_gas()
+                    .expect("base_fee_per_gas should be present")
+            ),
         "anchor transaction gas mismatch"
     );
 

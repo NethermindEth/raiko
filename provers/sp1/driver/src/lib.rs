@@ -216,7 +216,7 @@ impl Prover for Sp1Prover {
                 proof_id, output.header.number
             );
             network_client
-                .wait_proof(proof_id.clone(), Some(Duration::from_secs(3600)))
+                .wait_proof(proof_id.clone(), Some(Duration::from_secs(3600)), None)
                 .await
                 .map_err(|e| ProverError::GuestError(format!("Sp1: network proof failed {e:?}")))?
         };
@@ -406,7 +406,7 @@ impl Prover for Sp1Prover {
                 })?;
             info!("Sp1: network proof id: {proof_id:?} for aggregation");
             network_client
-                .wait_proof(proof_id.clone(), Some(Duration::from_secs(3600)))
+                .wait_proof(proof_id.clone(), Some(Duration::from_secs(3600)), None)
                 .await
                 .map_err(|e| ProverError::GuestError(format!("Sp1: network proof failed {e:?}")))?
         };
@@ -559,7 +559,7 @@ impl Prover for Sp1Prover {
                 input.taiko.batch_id
             );
             network_client
-                .wait_proof(proof_id.clone(), Some(Duration::from_secs(3600)))
+                .wait_proof(proof_id.clone(), Some(Duration::from_secs(3600)), None)
                 .await
                 .map_err(|e| ProverError::GuestError(format!("Sp1: network proof failed {e:?}")))?
         };
