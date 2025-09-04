@@ -1,25 +1,26 @@
 services:
-  raiko:
-    build:
-      context: ..
-      dockerfile: Dockerfile
-    #image: raiko:sp1
-    container_name: raiko
+  raiko-zk:
+    image: nethermind.jfrog.io/core-oci-local-staging/raiko-zk:latest
+    container_name: raiko-zk
     network_mode: host
+    env_file:
+      - .env
+    environment:
+      ZK: "true"
+      SP1_PLONK_CIRCUIT_PATH: "${HOME}/.sp1/circuits/plonk"
+      RAIKO_CONF_DIR: "/raiko/config"
+      BASE_CONFIG_FILE: "config.json"
+      BASE_CHAINSPEC_FILE: "chain_spec_list_devnet.json"
     runtime: nvidia
     privileged: true
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
-      - ./config:/etc/raiko
-    entrypoint: /opt/raiko/bin/raiko-host
-    command: >
-      --chain-spec-path=/etc/raiko/chain_spec_list_devnet.json
-      --config-path=/etc/raiko/config.json
-      --image-ids-path=/etc/raiko/image_ids.json
-    ports:
-      - "8080:8080"
-  redis:
+      - ../host/config:/raiko/config
+      - /tmp:/tmp
+    depends_on:
+      - redis-zk
+  redis-zk:
     image: redis
-    container_name: redis
+    container_name: redis-zk
     ports:
       - "6379:6379"

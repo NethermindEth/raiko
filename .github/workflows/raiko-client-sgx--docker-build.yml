@@ -1,4 +1,4 @@
-name: "[Nethermind] Raiko Client SP1 - Docker build and push"
+name: "[Nethermind] Raiko Client SGX - Docker build and push"
 
 on:
   workflow_dispatch:
@@ -15,18 +15,18 @@ on:
       - "!docker/**"
       - "!.github/**"
       - "host/config/chain_spec_list_default.json"
-      - "!provers/sgx/**"
+      - "!provers/sp1/**"
       - "!provers/risc0/**"
 
 env:
   DOCKER_REGISTRY: nethermind.jfrog.io
-  DOCKER_REPOSITORY_STAGING: core-oci-local-staging/raiko-zk
-  DOCKER_REPOSITORY_PROD: core-oci-local-prod/raiko-zk
+  DOCKER_REPOSITORY_STAGING: core-oci-local-staging/raiko-sgx
+  DOCKER_REPOSITORY_PROD: core-oci-local-prod/raiko-sgx
 
 jobs:
   build:
-    name: Build and push docker image
-    runs-on: [self-hosted, linux, x64]  # Custom runner labels
+    name: Build and push docker image to Staging
+    runs-on: ubuntu-latest
     if: github.repository == 'NethermindEth/raiko'
     strategy:
       matrix:
@@ -74,7 +74,7 @@ jobs:
         uses: docker/build-push-action@v5
         with:
           context: .
-          file: ./Dockerfile.zk
+          file: ./Dockerfile
           platforms: ${{ matrix.platform }}
           push: true
           tags: ${{ steps.meta-staging.outputs.tags }}
@@ -87,9 +87,10 @@ jobs:
 
   merge:
     name: Create manifest and promote to Production
-    runs-on: [self-hosted, linux, x64]  # Custom runner
+    runs-on: ubuntu-latest
     needs: build
     steps:
+
       - name: Setup ORAS
         uses: oras-project/setup-oras@v1
 
@@ -125,7 +126,7 @@ jobs:
 
       - name: Summary
         run: |
-          echo "## SP1 Docker build completed ✅" >> $GITHUB_STEP_SUMMARY
+          echo "## SGX Docker build completed ✅" >> $GITHUB_STEP_SUMMARY
           echo "### Tags" >> $GITHUB_STEP_SUMMARY
           for tag in $TAGS; do
             echo "- $tag" >> $GITHUB_STEP_SUMMARY
