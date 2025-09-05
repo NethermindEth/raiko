@@ -1,17 +1,21 @@
 {
+  "address": "0.0.0.0:8080",
   "network": "surge_dev",
   "concurrency_limit": 1,
-  "l1_network": "surge_dev_l1",
+  "l1_network": "hoodi",
   "cache_path": "/tmp/raiko/",
   "prover": "0x70997970C51812dc3A010C7d01b50e0d17dc79C8",
   "graffiti": "8008500000000000000000000000000000000000000000000000000000000000",
-  "chain_spec_path": "host/config/chain_spec_list_devnet.json",
+  "proof_type": "sp1",
   "blob_proof_type": "proof_of_equivalence",
+  "redis_url": "redis://redis-zk:6379",
+  "redis_ttl": 3600,
+  "enable_redis_pool": false,
   "sgx": {
     "instance_id": 0
   },
   "risc0": {
-    "bonsai": true,
+    "bonsai": false,
     "snark": true,
     "profile": false,
     "execution_po2": 20
@@ -24,5 +28,5 @@
   "native": {
     "json_guest_input": null
   },
-  "ballot": "{}"
+  "ballot": "{\"Sp1\":1}"
 }
