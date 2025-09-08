@@ -378,7 +378,7 @@ mod tests {
     #[cfg(feature = "std")]
     #[test]
     fn test_merge_from_file() {
-        let file_path = PathBuf::from("../host/config/chain_spec_list_devnet.json");
+        let file_path = PathBuf::from("../host/config/devnet/chain_spec_list.json");
         let merged_specs =
             SupportedChainSpecs::merge_from_file(file_path.clone()).expect("merge from file");
         assert!(

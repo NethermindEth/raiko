@@ -78,7 +78,6 @@ COPY --from=builder /opt/raiko/provers/sgx/config/sgx-guest.docker.manifest.temp
 # copy to /etc/raiko, but if self register mode, the mounted one will overwrite it.
 COPY --from=builder /opt/raiko/host/config/config.sgx.json /etc/raiko/config.sgx.json
 COPY --from=builder /opt/raiko/host/config/chain_spec_list_default.json /etc/raiko/chain_spec_list_default.json
-COPY --from=builder /opt/raiko/host/config/chain_spec_list_devnet.json /etc/raiko/chain_spec_list_devnet.json
 COPY --from=builder /opt/raiko/target/release/sgx-guest ./bin/
 COPY --from=builder /opt/raiko/target/release/raiko-host ./bin/
 COPY --from=builder /opt/raiko/target/release/raiko-setup ./bin/
