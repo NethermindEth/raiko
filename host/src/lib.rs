@@ -44,8 +44,7 @@ pub struct Opts {
     #[serde(default = "Opts::default_max_log")]
     pub max_log: usize,
 
-    #[arg(long, require_equals = true, default_value = "host/config/config.json")]
-    #[serde(default = "Opts::default_config_path")]
+    #[arg(long, require_equals = true)]
     /// Path to a config file that includes sufficient json args to request
     /// a proof of specified type. Curl json-rpc overrides its contents
     pub config_path: PathBuf,
@@ -105,10 +104,6 @@ impl Opts {
 
     fn default_max_log() -> usize {
         16
-    }
-
-    fn default_config_path() -> PathBuf {
-        PathBuf::from("host/config/config.json")
     }
 
     fn default_log_level() -> String {
