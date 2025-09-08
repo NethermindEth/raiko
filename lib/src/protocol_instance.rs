@@ -11,7 +11,6 @@ use reth_taiko_consensus::{decode_anchor_pacaya, ANCHOR_GAS_LIMIT};
 #[cfg(not(feature = "std"))]
 use crate::no_std::*;
 use crate::{
-    consts::SupportedChainSpecs,
     input::{
         ontake::{BlockMetadataV2, BlockProposedV2},
         pacaya::{BatchInfo, BatchMetadata, BlockParams, Transition as PacayaTransition},

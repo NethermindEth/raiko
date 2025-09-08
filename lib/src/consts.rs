@@ -286,7 +286,7 @@ mod tests {
             .get_chain_spec(&Network::SurgeDev.to_string())
             .unwrap();
         assert!(surge_dev_mainnet_spec.spec_id(2, 0) > Some(SpecId::MERGE));
-        assert_eq!(surge_dev_mainnet_spec.spec_id(2, 0), Some(SpecId::ONTAKE));
+        assert_eq!(surge_dev_mainnet_spec.spec_id(2, 0), Some(SpecId::PACAYA));
     }
 
     #[test]
@@ -300,7 +300,7 @@ mod tests {
         );
         assert_eq!(
             surge_dev_mainnet_spec.active_fork(1, 0).unwrap(),
-            SpecId::ONTAKE
+            SpecId::PACAYA
         );
     }
 
@@ -314,7 +314,7 @@ mod tests {
             .unwrap();
         assert_eq!(
             verifier_address,
-            address!("0x0000000000000000000000000000000000000000")
+            address!("0xcacdb1f38cfca5a9abbe24abbd4247f504109425")
         );
     }
 
@@ -378,17 +378,12 @@ mod tests {
     #[cfg(feature = "std")]
     #[test]
     fn test_merge_from_file() {
-        let known_chain_specs = SupportedChainSpecs::default();
-        assert!(
-            known_chain_specs.get_chain_spec("taiko_dev").is_none(),
-            "taiko_dev is not presented in default specs"
-        );
         let file_path = PathBuf::from("../host/config/chain_spec_list_devnet.json");
         let merged_specs =
             SupportedChainSpecs::merge_from_file(file_path.clone()).expect("merge from file");
         assert!(
-            merged_specs.get_chain_spec("taiko_dev").is_some(),
-            "taiko_dev is not merged"
+            merged_specs.get_chain_spec("hoodi").is_some(),
+            "hoodi is not merged"
         );
         assert!(
             merged_specs.get_chain_spec("surge_dev").is_some(),
