@@ -40,17 +40,17 @@
         "chain_id": 763374,
         "max_spec_id": "PACAYA",
         "hard_forks": {
-			      "HEKLA": {
-			        "Block": 0
-			      },
-			      "ONTAKE": {
-			        "Block": 1
-			      },
-			      "PACAYA": {
-			        "Block": 1
-			      },
-			      "CANCUN": "TBD"
-		    },
+            "HEKLA": {
+                "Block": 0
+            },
+            "ONTAKE": {
+                "Block": 1
+            },
+            "PACAYA": {
+                "Block": 1
+            },
+            "CANCUN": "TBD"
+        },
         "eip_1559_constants": {
             "base_fee_change_denominator": "0x8",
             "base_fee_max_increase_denominator": "0x8",
@@ -64,11 +64,13 @@
         "verifier_address_forks": {
             "HEKLA": {
                 "SGX": "0x61795f62aDFCa83539B391667bba4Ffec338d146",
+                "SGXGETH": "0xCD6ADac7ca8D05788563359a83B4B1C53c427736",
                 "SP1": "0xC63aAfc2a65020c4d1090F69158964c35b456fed",
                 "RISC0": "0xa9E77deA8D86AE55F6181472246c9157E85A7F7E"
             },
             "ONTAKE": {
                 "SGX": "0x61795f62aDFCa83539B391667bba4Ffec338d146",
+                "SGXGETH": "0xCD6ADac7ca8D05788563359a83B4B1C53c427736",
                 "SP1": "0xC63aAfc2a65020c4d1090F69158964c35b456fed",
                 "RISC0": "0xa9E77deA8D86AE55F6181472246c9157E85A7F7E"
             }
