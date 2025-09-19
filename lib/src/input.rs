@@ -18,6 +18,7 @@ use crate::{
     consts::ChainSpec, primitives::mpt::MptNode, prover::Proof, utils::zlib_compress_data,
 };
 use alloy_consensus::serde_bincode_compat::Header as BincodeCompactHeader;
+use reth_primitives::serde_bincode_compat::transaction::TransactionSigned as BincodeCompactTransactionSigned;
 use reth_primitives::serde_bincode_compat::Block as BincodeCompactBlock;
 
 /// Represents the state of an account's storage.
@@ -225,6 +226,7 @@ pub struct TaikoGuestInput {
     /// header
     pub l1_header: Header,
     pub tx_data: Vec<u8>,
+    #[serde_as(as = "Option<BincodeCompactTransactionSigned>")]
     pub anchor_tx: Option<TransactionSigned>,
     pub block_proposed: BlockProposedFork,
     pub prover_data: TaikoProverData,
