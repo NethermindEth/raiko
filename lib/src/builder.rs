@@ -80,8 +80,50 @@ pub static SURGE_DEV_HARDFORKS: LazyLock<reth_chainspec::ChainHardforks> = LazyL
     ])
 });
 
-pub static SURGE_DEV: LazyLock<Arc<TaikoChainSpec>> = LazyLock::new(|| {
-    let hardforks = SURGE_DEV_HARDFORKS.clone();
+pub static SURGE_DEVNET: LazyLock<Arc<TaikoChainSpec>> = LazyLock::new(|| {
+    let hardforks = SURGE_DEVNET_HARDFORKS.clone();
+    TaikoChainSpec {
+        inner: reth_chainspec::ChainSpec {
+            chain: 763373.into(), // TODO: make this dynamic based on the chain spec
+            paris_block_and_final_difficulty: None,
+            hardforks,
+            deposit_contract: None,
+            ..Default::default()
+        },
+    }
+    .into()
+});
+
+pub static SURGE_STAGING: LazyLock<Arc<TaikoChainSpec>> = LazyLock::new(|| {
+    let hardforks = SURGE_STAGING_HARDFORKS.clone();
+    TaikoChainSpec {
+        inner: reth_chainspec::ChainSpec {
+            chain: 763373.into(), // TODO: make this dynamic based on the chain spec
+            paris_block_and_final_difficulty: None,
+            hardforks,
+            deposit_contract: None,
+            ..Default::default()
+        },
+    }
+    .into()
+});
+
+pub static SURGE_TESTNET: LazyLock<Arc<TaikoChainSpec>> = LazyLock::new(|| {
+    let hardforks = SURGE_TESTNET_HARDFORKS.clone();
+    TaikoChainSpec {
+        inner: reth_chainspec::ChainSpec {
+            chain: 763375.into(), // TODO: make this dynamic based on the chain spec
+            paris_block_and_final_difficulty: None,
+            hardforks,
+            deposit_contract: None,
+            ..Default::default()
+        },
+    }
+    .into()
+});
+
+pub static SURGE_MAINNET: LazyLock<Arc<TaikoChainSpec>> = LazyLock::new(|| {
+    let hardforks = SURGE_STAGING_HARDFORKS.clone();
     TaikoChainSpec {
         inner: reth_chainspec::ChainSpec {
             chain: 763374.into(), // TODO: make this dynamic based on the chain spec
