@@ -3,7 +3,7 @@ services:
     build:
       context: ..
       dockerfile: Dockerfile
-    image: us-docker.pkg.dev/evmchain/images/raiko:latest
+    image: nethermind.jfrog.io/core-oci-local-prod/raiko-sgx:latest
     container_name: raiko-init
     command: --init
     env_file:
@@ -29,7 +29,7 @@ services:
       args:
         ENABLE_SELF_REGISTER: "true"
       dockerfile: Dockerfile
-    image: us-docker.pkg.dev/evmchain/images/raiko:latest
+    image: nethermind.jfrog.io/core-oci-local-prod/raiko-sgx:latest
     container_name: raiko-init-self-register
     command: --init-self-register
     env_file:
@@ -51,14 +51,14 @@ services:
       - HOLESKY_BEACON_RPC=${HOLESKY_BEACON_RPC}
       - TAIKO_A7_RPC=${TAIKO_A7_RPC}
       - REDIS_URL=${REDIS_URL:-redis://redis:6379}
-      #- PCCS_HOST=host.docker.internal:8081
+    #- PCCS_HOST=host.docker.internal:8081
     depends_on:
       - pccs
   raiko:
     build:
       context: ..
       dockerfile: Dockerfile
-    image: us-docker.pkg.dev/evmchain/images/raiko:latest
+    image: nethermind.jfrog.io/core-oci-local-prod/raiko-sgx:latest
     container_name: raiko
     command: --concurrency-limit=1
     env_file:
@@ -70,18 +70,19 @@ services:
       - /var/log/raiko:/var/log/raiko
       - ${HOME}/.config/gramine:/root/.config/gramine
       - ${HOME}/.config/raiko:/root/.config/raiko
-      # - ${HOME}/raiko/host/config/chain_spec_list_default.json:/etc/raiko/chain_spec_list.docker.json
+      - ../host/config:/raiko/config
     ports:
       - "8080:8080"
     environment:
+      - RAIKO_CONF_DIR:=${RAIKO_CONF_DIR}"/raiko/config/devnet"
+      - BASE_CONFIG_FILE:=${BASE_CONFIG_FILE}="config.json"
+      - BASE_CHAINSPEC_FILE:=${BASE_CHAINSPEC_FILE}="chain_spec_list.json"
       - SGX=true
       - SGXGETH=${SGXGETH}
       - SGX_MODE=${SGX_MODE:-local}
       - RAIKO_REMOTE_URL=${RAIKO_REMOTE_URL:-http://raiko-sgx-server:9090}
       - GAIKO_REMOTE_URL=${GAIKO_REMOTE_URL:-http://raiko-sgx-server:8090}
       - PREFETCH_CHUNK_SIZE=${PREFETCH_CHUNK_SIZE}
-      - BASE_CONFIG_FILE=${BASE_CONFIG_FILE:-config.sgx.json}
-      - BASE_CHAINSPEC_FILE=${BASE_CHAINSPEC_FILE:-chain_spec_list.docker.json}
       # Set to 0 (which is the default) to run on real hardware; use 1 for testing
       - SGX_DIRECT=${SGX_DIRECT}
       - SGX_INSTANCE_ID=${SGX_INSTANCE_ID}
@@ -98,11 +99,11 @@ services:
       - NETWORK=${NETWORK}
       - REDIS_URL=${REDIS_URL:-redis://redis:6379}
       - RUST_LOG=${RUST_LOG:-info}
-      # you can use your own PCCS host
-      #- PCCS_HOST=host.docker.internal:8081
-      # use the host's network to connect to the PCCS
-      #extra_hosts:
-      #  - "host.docker.internal:host-gateway"
+    # you can use your own PCCS host
+    #- PCCS_HOST=host.docker.internal:8081
+    # use the host's network to connect to the PCCS
+    #extra_hosts:
+    #  - "host.docker.internal:host-gateway"
     depends_on:
       - redis
       - pccs
@@ -112,7 +113,7 @@ services:
     build:
       context: ..
       dockerfile: Dockerfile
-    image: us-docker.pkg.dev/evmchain/images/raiko:latest
+    image: nethermind.jfrog.io/core-oci-local-prod/raiko-sgx:latest
     container_name: sgx-server
     command:
     env_file:
@@ -133,11 +134,11 @@ services:
       - SGX_PACAYA_INSTANCE_ID=${SGX_PACAYA_INSTANCE_ID}
       - SGXGETH_PACAYA_INSTANCE_ID=${SGXGETH_PACAYA_INSTANCE_ID}
       - GAIKO_GUEST_APP_VERBOSE_LEVEL=${GAIKO_GUEST_APP_VERBOSE_LEVEL}
-      # you can use your own PCCS host
-      #- PCCS_HOST=host.docker.internal:8081
-      # use the host's network to connect to the PCCS
-      #extra_hosts:
-      #  - "host.docker.internal:host-gateway"
+  # you can use your own PCCS host
+  #- PCCS_HOST=host.docker.internal:8081
+  # use the host's network to connect to the PCCS
+  #extra_hosts:
+  #  - "host.docker.internal:host-gateway"
   pccs:
     build:
       context: ..
