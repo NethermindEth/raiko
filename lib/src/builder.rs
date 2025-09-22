@@ -80,8 +80,96 @@ pub static SURGE_DEV_HARDFORKS: LazyLock<reth_chainspec::ChainHardforks> = LazyL
     ])
 });
 
-pub static SURGE_DEVNET: LazyLock<Arc<TaikoChainSpec>> = LazyLock::new(|| {
-    let hardforks = SURGE_DEVNET_HARDFORKS.clone();
+pub static SURGE_TEST_HARDFORKS: LazyLock<reth_chainspec::ChainHardforks> = LazyLock::new(|| {
+    ChainHardforks::new(vec![
+        (EthereumHardfork::Frontier.boxed(), ForkCondition::Block(0)),
+        (EthereumHardfork::Homestead.boxed(), ForkCondition::Block(0)),
+        (EthereumHardfork::Dao.boxed(), ForkCondition::Block(0)),
+        (EthereumHardfork::Tangerine.boxed(), ForkCondition::Block(0)),
+        (
+            EthereumHardfork::SpuriousDragon.boxed(),
+            ForkCondition::Block(0),
+        ),
+        (EthereumHardfork::Byzantium.boxed(), ForkCondition::Block(0)),
+        (
+            EthereumHardfork::Constantinople.boxed(),
+            ForkCondition::Block(0),
+        ),
+        (
+            EthereumHardfork::Petersburg.boxed(),
+            ForkCondition::Block(0),
+        ),
+        (EthereumHardfork::Istanbul.boxed(), ForkCondition::Block(0)),
+        (EthereumHardfork::Berlin.boxed(), ForkCondition::Block(0)),
+        (EthereumHardfork::London.boxed(), ForkCondition::Block(0)),
+        (
+            EthereumHardfork::Paris.boxed(),
+            ForkCondition::TTD {
+                fork_block: None,
+                total_difficulty: U256::from(0),
+            },
+        ),
+        (
+            EthereumHardfork::Shanghai.boxed(),
+            ForkCondition::Timestamp(0),
+        ),
+        (TaikoHardfork::Hekla.boxed(), ForkCondition::Block(0)),
+        (
+            TaikoHardfork::Ontake.boxed(),
+            ForkCondition::Block(
+                std::env::var("SURGE_TESTNET_ONTAKE_HEIGHT").map_or(1, |h| h.parse().unwrap_or(1)),
+            ),
+        ),
+        (TaikoHardfork::Pacaya.boxed(), ForkCondition::Block(1)),
+    ])
+});
+
+pub static SURGE_STAGE_HARDFORKS: LazyLock<reth_chainspec::ChainHardforks> = LazyLock::new(|| {
+    ChainHardforks::new(vec![
+        (EthereumHardfork::Frontier.boxed(), ForkCondition::Block(0)),
+        (EthereumHardfork::Homestead.boxed(), ForkCondition::Block(0)),
+        (EthereumHardfork::Dao.boxed(), ForkCondition::Block(0)),
+        (EthereumHardfork::Tangerine.boxed(), ForkCondition::Block(0)),
+        (
+            EthereumHardfork::SpuriousDragon.boxed(),
+            ForkCondition::Block(0),
+        ),
+        (EthereumHardfork::Byzantium.boxed(), ForkCondition::Block(0)),
+        (
+            EthereumHardfork::Constantinople.boxed(),
+            ForkCondition::Block(0),
+        ),
+        (
+            EthereumHardfork::Petersburg.boxed(),
+            ForkCondition::Block(0),
+        ),
+        (EthereumHardfork::Istanbul.boxed(), ForkCondition::Block(0)),
+        (EthereumHardfork::Berlin.boxed(), ForkCondition::Block(0)),
+        (EthereumHardfork::London.boxed(), ForkCondition::Block(0)),
+        (
+            EthereumHardfork::Paris.boxed(),
+            ForkCondition::TTD {
+                fork_block: None,
+                total_difficulty: U256::from(0),
+            },
+        ),
+        (
+            EthereumHardfork::Shanghai.boxed(),
+            ForkCondition::Timestamp(0),
+        ),
+        (TaikoHardfork::Hekla.boxed(), ForkCondition::Block(0)),
+        (
+            TaikoHardfork::Ontake.boxed(),
+            ForkCondition::Block(
+                std::env::var("SURGE_STAGING_ONTAKE_HEIGHT").map_or(1, |h| h.parse().unwrap_or(1)),
+            ),
+        ),
+        (TaikoHardfork::Pacaya.boxed(), ForkCondition::Block(1)),
+    ])
+});
+
+pub static SURGE_DEV: LazyLock<Arc<TaikoChainSpec>> = LazyLock::new(|| {
+    let hardforks = SURGE_DEV_HARDFORKS.clone();
     TaikoChainSpec {
         inner: reth_chainspec::ChainSpec {
             chain: 763373.into(), // TODO: make this dynamic based on the chain spec
@@ -94,8 +182,8 @@ pub static SURGE_DEVNET: LazyLock<Arc<TaikoChainSpec>> = LazyLock::new(|| {
     .into()
 });
 
-pub static SURGE_STAGING: LazyLock<Arc<TaikoChainSpec>> = LazyLock::new(|| {
-    let hardforks = SURGE_STAGING_HARDFORKS.clone();
+pub static SURGE_STAGE: LazyLock<Arc<TaikoChainSpec>> = LazyLock::new(|| {
+    let hardforks = SURGE_STAGE_HARDFORKS.clone();
     TaikoChainSpec {
         inner: reth_chainspec::ChainSpec {
             chain: 763373.into(), // TODO: make this dynamic based on the chain spec
@@ -108,8 +196,8 @@ pub static SURGE_STAGING: LazyLock<Arc<TaikoChainSpec>> = LazyLock::new(|| {
     .into()
 });
 
-pub static SURGE_TESTNET: LazyLock<Arc<TaikoChainSpec>> = LazyLock::new(|| {
-    let hardforks = SURGE_TESTNET_HARDFORKS.clone();
+pub static SURGE_TEST: LazyLock<Arc<TaikoChainSpec>> = LazyLock::new(|| {
+    let hardforks = SURGE_TEST_HARDFORKS.clone();
     TaikoChainSpec {
         inner: reth_chainspec::ChainSpec {
             chain: 763375.into(), // TODO: make this dynamic based on the chain spec
@@ -123,7 +211,7 @@ pub static SURGE_TESTNET: LazyLock<Arc<TaikoChainSpec>> = LazyLock::new(|| {
 });
 
 pub static SURGE_MAINNET: LazyLock<Arc<TaikoChainSpec>> = LazyLock::new(|| {
-    let hardforks = SURGE_STAGING_HARDFORKS.clone();
+    let hardforks = SURGE_STAGE_HARDFORKS.clone();
     TaikoChainSpec {
         inner: reth_chainspec::ChainSpec {
             chain: 763374.into(), // TODO: make this dynamic based on the chain spec
@@ -267,6 +355,9 @@ impl<DB: Database<Error = ProviderError> + DatabaseCommit + OptimisticDatabase>
             "taiko_mainnet" => TAIKO_MAINNET.clone(),
             "taiko_dev" => TAIKO_DEV.clone(),
             "surge_dev" => SURGE_DEV.clone(),
+            "surge_test" => SURGE_TEST.clone(),
+            "surge_stage" => SURGE_STAGE.clone(),
+            "surge_mainnet" => SURGE_MAINNET.clone(),
             _ => unimplemented!(),
         };
 
