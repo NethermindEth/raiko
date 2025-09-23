@@ -150,3 +150,13 @@ if [[ -n $SGX ]]; then
         /opt/raiko/bin/raiko-host --config-path=$RAIKO_CONF_BASE_CONFIG --chain-spec-path=$RAIKO_CONF_CHAIN_SPECS "$@"
     fi
 fi
+
+if [[ -n $ZK ]]; then
+    echo "running raiko in zk mode"
+    if [ ! -f $RAIKO_CONF_BASE_CONFIG ]; then
+        echo "$RAIKO_CONF_BASE_CONFIG file not found."
+        exit 1
+    fi
+
+    /opt/raiko/bin/raiko-host  --config-path=$RAIKO_CONF_BASE_CONFIG --chain-spec-path=$RAIKO_CONF_CHAIN_SPECS "$@"
+fi

@@ -43,7 +43,7 @@ services:
     ports:
       - "8080:8080"
     environment:
-      - RAIKO_CONF_DIR=/raiko/config
+      - RAIKO_CONF_DIR=${RAIKO_CONF_DIR:-/raiko/config}
       - BASE_CONFIG_FILE=${BASE_CONFIG_FILE:-config.json}
       - BASE_CHAINSPEC_FILE=${BASE_CHAINSPEC_FILE:-chain_spec_list_devnet.json}
       - SGX=true
