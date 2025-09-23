@@ -147,8 +147,6 @@ if [[ -n $SGX ]]; then
         #update raiko server config
         update_raiko_sgx_instance_id $RAIKO_CONF_BASE_CONFIG
 
-        update_docker_chain_specs $RAIKO_CONF_CHAIN_SPECS
-
         /opt/raiko/bin/raiko-host --config-path=$RAIKO_CONF_BASE_CONFIG --chain-spec-path=$RAIKO_CONF_CHAIN_SPECS "$@"
     fi
 fi
