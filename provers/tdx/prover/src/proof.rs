@@ -201,6 +201,7 @@ pub fn prove_batch(input: &GuestBatchInput, tdx_config: &TdxConfig) -> Result<Pr
     Ok(ProveBatchData {
         proof,
         quote,
+        nonce,
         address,
         instance_hash: pi_hash,
     })
