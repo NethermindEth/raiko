@@ -1,0 +1,82 @@
+[
+    {
+        "name": "hoodi",
+        "chain_id": 560048,
+        "max_spec_id": "CANCUN",
+        "hard_forks": {
+            "FRONTIER": {
+                "Block": 0
+            },
+            "SHANGHAI": {
+                "Timestamp": 0
+            },
+            "CANCUN": {
+                "Timestamp": 0
+            }
+        },
+        "eip_1559_constants": {
+            "base_fee_change_denominator": "0x8",
+            "base_fee_max_increase_denominator": "0x8",
+            "base_fee_max_decrease_denominator": "0x8",
+            "elasticity_multiplier": "0x2"
+        },
+        "l1_contract": null,
+        "l2_contract": null,
+        "rpc": "https://l1-rpc-internal.hoodi.surge.wtf",
+        "beacon_rpc": "https://l1-beacon-internal.hoodi.surge.wtf",
+        "verifier_address_forks": {
+            "FRONTIER": {
+                "SGX": null,
+                "SP1": null,
+                "RISC0": null
+            }
+        },
+        "genesis_time": 1742213400,
+        "seconds_per_slot": 12,
+        "is_taiko": false
+    },
+    {
+        "name": "surge_test",
+        "chain_id": 763375,
+        "max_spec_id": "PACAYA",
+        "hard_forks": {
+            "HEKLA": {
+                "Block": 0
+            },
+            "ONTAKE": {
+                "Block": 1
+            },
+            "PACAYA": {
+                "Block": 1
+            },
+            "CANCUN": "TBD"
+        },
+        "eip_1559_constants": {
+            "base_fee_change_denominator": "0x8",
+            "base_fee_max_increase_denominator": "0x8",
+            "base_fee_max_decrease_denominator": "0x8",
+            "elasticity_multiplier": "0x2"
+        },
+        "l1_contract": "0x624ec8F33DA83707f360D6d25136AA0741713BC4",
+        "l2_contract": "0x7633750000000000000000000000000000010001",
+        "rpc": "https://l2-rpc.hoodi.surge.wtf",
+        "beacon_rpc": null,
+        "verifier_address_forks": {
+            "HEKLA": {
+                "SGX": "0x5A237047C090e086FD6eF3447e81086b42456DB8",
+                "SGXGETH": "0xd9fd6a7694C93d5Db47f1802F629362F1E2129d4",
+                "SP1": "0x56e229501eBAA5C288982dB34590f4D8547D019A",
+                "RISC0": "0x7D99Bf0d506352F7C84e5F0411a18c8d3dB397C8"
+            },
+            "ONTAKE": {
+                "SGX": "0x5A237047C090e086FD6eF3447e81086b42456DB8",
+                "SGXGETH": "0xd9fd6a7694C93d5Db47f1802F629362F1E2129d4",
+                "SP1": "0x56e229501eBAA5C288982dB34590f4D8547D019A",
+                "RISC0": "0x7D99Bf0d506352F7C84e5F0411a18c8d3dB397C8"
+            }
+        },
+        "genesis_time": 0,
+        "seconds_per_slot": 1,
+        "is_taiko": true
+    }
+]
