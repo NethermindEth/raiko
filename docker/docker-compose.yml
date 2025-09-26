@@ -23,37 +23,6 @@ services:
     #- PCCS_HOST=host.docker.internal:8081
     depends_on:
       - pccs
-  init-self-register:
-    build:
-      context: ..
-      args:
-        ENABLE_SELF_REGISTER: "true"
-      dockerfile: Dockerfile
-    image: nethermind.jfrog.io/core-oci-local-prod/raiko-sgx:latest
-    container_name: raiko-init-self-register
-    command: --init-self-register
-    env_file:
-      - .env
-    devices:
-      - "/dev/sgx_enclave:/dev/sgx_enclave"
-      - "/dev/sgx_provision:/dev/sgx_provision"
-    volumes:
-      - /var/log/raiko:/var/log/raiko
-      - ${HOME}/.config/gramine:/root/.config/gramine
-      - ${HOME}/.config/raiko:/root/.config/raiko
-      - ${HOME}/.config/raiko/config/config.sgx.json:/etc/raiko/config.sgx.json
-    environment:
-      - SGX=true
-      - SGXGETH=${SGXGETH}
-      - SENDER_PRIV_KEY=${SENDER_PRIV_KEY}
-      - SGX_VERIFIER_ADDRESS=${SGX_VERIFIER_ADDRESS}
-      - HOLESKY_RPC=${HOLESKY_RPC}
-      - HOLESKY_BEACON_RPC=${HOLESKY_BEACON_RPC}
-      - TAIKO_A7_RPC=${TAIKO_A7_RPC}
-      - REDIS_URL=${REDIS_URL:-redis://redis:6379}
-    #- PCCS_HOST=host.docker.internal:8081
-    depends_on:
-      - pccs
   raiko:
     build:
       context: ..
@@ -74,9 +43,9 @@ services:
     ports:
       - "8080:8080"
     environment:
-      - RAIKO_CONF_DIR:=${RAIKO_CONF_DIR}"/raiko/config/devnet"
-      - BASE_CONFIG_FILE:=${BASE_CONFIG_FILE}="config.json"
-      - BASE_CHAINSPEC_FILE:=${BASE_CHAINSPEC_FILE}="chain_spec_list.json"
+      - RAIKO_CONF_DIR=${RAIKO_CONF_DIR:-/raiko/config/devnet}
+      - BASE_CONFIG_FILE=${BASE_CONFIG_FILE:-config.json}
+      - BASE_CHAINSPEC_FILE=${BASE_CHAINSPEC_FILE:-chain_spec_list.json}
       - SGX=true
       - SGXGETH=${SGXGETH}
       - SGX_MODE=${SGX_MODE:-local}
@@ -89,14 +58,6 @@ services:
       - SGX_ONTAKE_INSTANCE_ID=${SGX_ONTAKE_INSTANCE_ID}
       - SGX_PACAYA_INSTANCE_ID=${SGX_PACAYA_INSTANCE_ID}
       - SGXGETH_PACAYA_INSTANCE_ID=${SGXGETH_PACAYA_INSTANCE_ID}
-      - ETHEREUM_RPC=${ETHEREUM_RPC}
-      - ETHEREUM_BEACON_RPC=${ETHEREUM_BEACON_RPC}
-      - HOLESKY_RPC=${HOLESKY_RPC}
-      - HOLESKY_BEACON_RPC=${HOLESKY_BEACON_RPC}
-      - TAIKO_A7_RPC=${TAIKO_A7_RPC}
-      - TAIKO_MAINNET_RPC=${TAIKO_MAINNET_RPC}
-      - L1_NETWORK=${L1_NETWORK}
-      - NETWORK=${NETWORK}
       - REDIS_URL=${REDIS_URL:-redis://redis:6379}
       - RUST_LOG=${RUST_LOG:-info}
     # you can use your own PCCS host
@@ -109,36 +70,6 @@ services:
       - pccs
     profiles:
       - prod-redis
-  raiko-sgx-server:
-    build:
-      context: ..
-      dockerfile: Dockerfile
-    image: nethermind.jfrog.io/core-oci-local-prod/raiko-sgx:latest
-    container_name: sgx-server
-    command:
-    env_file:
-      - .env
-    devices:
-      - "/dev/sgx_enclave:/dev/sgx_enclave"
-      - "/dev/sgx_provision:/dev/sgx_provision"
-    volumes:
-      - /var/log/raiko:/var/log/raiko
-      - ${HOME}/.config/gramine:/root/.config/gramine
-      - ${HOME}/.config/raiko:/root/.config/raiko
-    ports:
-      - "8090:8090"
-      - "9090:9090"
-    environment:
-      - SGXGETH=${SGXGETH}
-      - SGX_SERVER=true
-      - SGX_PACAYA_INSTANCE_ID=${SGX_PACAYA_INSTANCE_ID}
-      - SGXGETH_PACAYA_INSTANCE_ID=${SGXGETH_PACAYA_INSTANCE_ID}
-      - GAIKO_GUEST_APP_VERBOSE_LEVEL=${GAIKO_GUEST_APP_VERBOSE_LEVEL}
-  # you can use your own PCCS host
-  #- PCCS_HOST=host.docker.internal:8081
-  # use the host's network to connect to the PCCS
-  #extra_hosts:
-  #  - "host.docker.internal:host-gateway"
   pccs:
     build:
       context: ..

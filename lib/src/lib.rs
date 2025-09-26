@@ -16,6 +16,8 @@ mod no_std {
 
 use tracing::debug;
 
+pub mod anchor;
+pub mod block_executor;
 pub mod builder;
 pub mod consts;
 pub mod input;

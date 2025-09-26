@@ -1,9 +1,10 @@
 #![cfg(feature = "statedb_lru")]
+use alloy_primitives::{map::HashMap, B256};
 use lazy_static::lazy_static;
-use std::{collections::HashMap, num::NonZeroUsize, sync::Mutex};
+use std::{num::NonZeroUsize, sync::Mutex};
 
 use raiko_lib::mem_db::MemDb;
-use reth_primitives::{Header, B256};
+use reth_primitives::Header;
 use tracing::debug;
 
 use lru::LruCache;
@@ -43,14 +44,13 @@ pub(crate) fn load_state_db(key: ChainBlockCacheKey) -> Option<ChainBlockCacheEn
 mod test {
     use super::*;
     use raiko_lib::mem_db::MemDb;
-    use reth_primitives::B256;
     use serial_test::serial;
 
     #[test]
     #[serial]
     fn test_lru_cache_save_load() {
         let key = (1, B256::ZERO);
-        let value = (MemDb::default(), HashMap::new());
+        let value = (MemDb::default(), HashMap::default());
         save_state_db(key, value.clone());
         let result = load_state_db(key);
         assert!(result.is_some());
@@ -76,7 +76,7 @@ mod test {
         clear_state_db();
         for i in 0..256 + 4 {
             let key = (i, B256::ZERO);
-            let value = (MemDb::default(), HashMap::new());
+            let value = (MemDb::default(), HashMap::default());
             save_state_db(key, value.clone());
         }
         // 0 is out

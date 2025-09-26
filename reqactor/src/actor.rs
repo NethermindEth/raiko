@@ -6,6 +6,7 @@ use std::{
     },
 };
 
+use alloy_primitives::BlockHash;
 use raiko_ballot::Ballot;
 use raiko_core::interfaces::ProofRequestOpt;
 use raiko_lib::{
@@ -13,7 +14,6 @@ use raiko_lib::{
     proof_type::ProofType,
 };
 use raiko_reqpool::{Pool, RequestKey, StatusWithContext};
-use reth_primitives::BlockHash;
 use tokio::sync::{mpsc::Sender, oneshot};
 
 use crate::Action;
