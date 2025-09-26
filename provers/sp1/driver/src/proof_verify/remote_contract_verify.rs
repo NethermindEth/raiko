@@ -1,8 +1,7 @@
-use alloy_primitives::Address;
+use alloy_primitives::{hex, Address, B256};
 use alloy_provider::ProviderBuilder;
 use alloy_sol_types::sol;
 use raiko_lib::prover::ProverResult;
-use reth_primitives::B256;
 use std::{env, str::FromStr};
 use tracing::{error, info};
 use url::Url;
@@ -30,14 +29,14 @@ pub(crate) async fn verify_sol_by_contract_call(fixture: &RaikoProofFixture) -> 
         Address::from_str(&addr).unwrap()
     };
 
-    let provider = ProviderBuilder::new().on_http(Url::parse(&sp1_verifier_rpc_url).unwrap());
-    let program_key: B256 = B256::from_str(&fixture.vkey).unwrap();
-    let public_value = reth_primitives::hex::decode(&fixture.public_values).unwrap();
+    let provider = ProviderBuilder::new().connect_http(Url::parse(&sp1_verifier_rpc_url).unwrap());
+    let program_key = B256::from_str(&fixture.vkey).unwrap();
+    let public_value = hex::decode(&fixture.public_values).unwrap();
     let proof_bytes = fixture.proof.clone();
 
     info!(
         "verify sp1 proof with program key: {program_key:?} public value: {public_value:?} proof: {:?}",
-        reth_primitives::hex::encode(&proof_bytes)
+        hex::encode(&proof_bytes)
     );
 
     let sp1_verifier = ISP1Verifier::new(sp1_verifier_addr, provider);
