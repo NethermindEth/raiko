@@ -1,7 +1,7 @@
 use raiko_pipeline::{
     parse_metadata, rerun_if_changed, CommandBuilder, GuestMetadata, Metadata, Pipeline,
 };
-use std::path::PathBuf;
+use std::{env, path::PathBuf};
 
 fn main() {
     let pipeline = Risc0Pipeline::new("provers/risc0/guest", "release");
@@ -30,6 +30,9 @@ impl Pipeline for Risc0Pipeline {
     }
 
     fn builder(&self) -> CommandBuilder {
+        let home_dir = env::var("HOME").expect("HOME environment variable not set");
+        let gcc_path = format!("{home_dir}/.risc0/cpp/bin/riscv32-unknown-elf-gcc");
+
         let mut builder = CommandBuilder::new(&self.meta, "riscv32im-risc0-zkvm-elf", "risc0")
             // Note: this env is usually enabled by the `unstable` feature flag of risc0-build.
             //       and can be removed in the future.
@@ -43,7 +46,7 @@ impl Pipeline for Risc0Pipeline {
             .rust_cfgs(&["getrandom_backend=\"custom\""])
             .cc_compiler("gcc".into())
             .c_flags(&[
-                "/opt/riscv/bin/riscv32-unknown-elf-gcc",
+                &gcc_path,
                 "-march=rv32im",
                 "-mstrict-align",
                 "-falign-functions=2",
