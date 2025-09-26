@@ -1,13 +1,20 @@
 {
-    "network": "surge_dev",
-    "l1_network": "surge_dev_l1",
+    "network": "surge_test",
+    "concurrency_limit": 1,
+    "l1_network": "hoodi",
     "cache_path": "/tmp/raiko/",
     "prover": "0x70997970C51812dc3A010C7d01b50e0d17dc79C8",
     "graffiti": "8008500000000000000000000000000000000000000000000000000000000000",
-    "proof_type": "sp1",
     "blob_proof_type": "proof_of_equivalence",
     "sgx": {
-        "instance_id": 0
+        "instance_ids": {
+            "HEKLA": 1,
+            "ONTAKE": 1,
+            "PACAYA": 1
+        },
+        "setup": false,
+        "bootstrap": false,
+        "prove": true
     },
     "risc0": {
         "bonsai": true,
@@ -16,11 +23,13 @@
         "execution_po2": 20
     },
     "sp1": {
-		"recursion": "core",
-		"prover": "mock",
+        "recursion": "core",
+        "prover": "local",
         "verify": true
-	},
-    "native" : {
+    },
+    "native": {
         "json_guest_input": null
-	}
+    },
+    "ballot_zk": "{\"Sp1\":1}",
+    "ballot_sgx": "{\"Sgx\":1}"
 }

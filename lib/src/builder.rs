@@ -127,7 +127,6 @@ pub static SURGE_TEST_HARDFORKS: LazyLock<reth_chainspec::ChainHardforks> = Lazy
             EthereumHardfork::Shanghai.boxed(),
             ForkCondition::Timestamp(0),
         ),
-        (TaikoHardfork::Hekla.boxed(), ForkCondition::Block(0)),
         (
             TaikoHardfork::Ontake.boxed(),
             ForkCondition::Block(
@@ -172,7 +171,6 @@ pub static SURGE_STAGE_HARDFORKS: LazyLock<reth_chainspec::ChainHardforks> = Laz
             EthereumHardfork::Shanghai.boxed(),
             ForkCondition::Timestamp(0),
         ),
-        (TaikoHardfork::Hekla.boxed(), ForkCondition::Block(0)),
         (
             TaikoHardfork::Ontake.boxed(),
             ForkCondition::Block(
@@ -366,7 +364,7 @@ impl<DB: Database<Error = ProviderError> + DatabaseCommit + OptimisticDatabase +
         let chain_spec = &self.input.chain_spec;
         let chain_spec = match chain_spec.name.as_str() {
             "taiko_mainnet" => TAIKO_MAINNET.clone(),
-            "taiko_dev" => TAIKO_DEV.clone(),
+            "taiko_dev" => TAIKO_DEVNET.clone(),
             "surge_dev" => SURGE_DEV.clone(),
             "surge_test" => SURGE_TEST.clone(),
             "surge_stage" => SURGE_STAGE.clone(),

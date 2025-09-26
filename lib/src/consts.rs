@@ -305,7 +305,7 @@ mod tests {
             .unwrap();
         assert_eq!(
             verifier_address,
-            address!("0x4400ff1686d7d66400ca7281f840404b5a4b3c46")
+            address!("0x82689c09b5f47592311a13cdb66caf912d78f496")
         );
     }
 
@@ -366,14 +366,13 @@ mod tests {
     #[cfg(feature = "std")]
     #[test]
     fn test_merge_from_file() {
-        let known_chain_specs = SupportedChainSpecs::default();
-        assert!(
-            known_chain_specs.get_chain_spec("taiko_dev").is_none(),
-            "taiko_dev is not presented in default specs"
-        );
-        let file_path = PathBuf::from("../host/config/chain_spec_list_devnet.json");
+        let file_path = PathBuf::from("../host/config/devnet/chain_spec_list.json");
         let merged_specs =
             SupportedChainSpecs::merge_from_file(file_path.clone()).expect("merge from file");
+        assert!(
+            merged_specs.get_chain_spec("hoodi").is_some(),
+            "hoodi is not merged"
+        );
         assert!(
             merged_specs.get_chain_spec("surge_dev").is_some(),
             "surge_dev is not merged"
