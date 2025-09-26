@@ -28,5 +28,6 @@
   "native": {
     "json_guest_input": null
   },
-  "ballot": "{\"Sp1\":1}"
+  "ballot_zk": "{\"Sp1\":1}",
+  "ballot_sgx": "{\"Sgx\":1}"
 }
