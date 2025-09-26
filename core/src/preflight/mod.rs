@@ -4,7 +4,7 @@ use crate::{
     interfaces::{RaikoError, RaikoResult},
     provider::{db::ProviderDb, rpc::RpcBlockDataProvider, BlockDataProvider},
 };
-use alloy_primitives::Bytes;
+use alloy_primitives::{Address, Bytes, U256};
 use futures::future::join_all;
 use raiko_lib::{
     builder::RethBlockBuilder,
@@ -18,8 +18,8 @@ use reth_primitives::TransactionSigned;
 use tracing::{debug, info};
 
 use util::{
-    execute_txs, get_batch_blocks_and_parent_data, get_block_and_parent_data,
-    prepare_taiko_chain_batch_input, prepare_taiko_chain_input,
+    collect_l1_storage_proofs_and_headers, execute_txs, get_batch_blocks_and_parent_data,
+    get_block_and_parent_data, prepare_taiko_chain_batch_input, prepare_taiko_chain_input,
 };
 
 pub use util::parse_l1_batch_proposal_tx_for_pacaya_fork;
@@ -110,12 +110,24 @@ pub async fn preflight<BDP: BlockDataProvider>(
 
     info!("preflight: parent header done");
 
+    // Collect L1 storage proofs and headers if running on L2.
+    let (l1_storage_proofs, l1_headers) = if taiko_chain_spec.is_taiko() {
+        let l1_provider = RpcBlockDataProvider::new(&l1_chain_spec.rpc, 0).await?;
+        collect_l1_storage_proofs_and_headers(&block, &l1_provider).await?
+    } else {
+        (Vec::new(), Vec::new())
+    };
+
+    info!("preflight: L1 data collection done");
+
     // Create the guest input
     let input = GuestInput {
         block: block.clone(),
         parent_header,
         chain_spec: taiko_chain_spec.clone(),
         taiko: taiko_guest_input,
+        l1_storage_proofs,
+        l1_headers,
         ..Default::default()
     };
 
@@ -249,6 +261,7 @@ pub async fn batch_preflight<BDP: BlockDataProvider>(
         .iter()
         .map(|(block, _)| block.clone())
         .collect::<Vec<_>>();
+
     let taiko_guest_batch_input = if taiko_chain_spec.is_taiko() {
         prepare_taiko_chain_batch_input(
             &l1_chain_spec,

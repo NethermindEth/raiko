@@ -1,6 +1,7 @@
 use core::{fmt::Debug, str::FromStr};
 
 use alloy_consensus::serde_bincode_compat;
+
 use anyhow::{anyhow, Error, Result};
 use ontake::BlockProposedV2;
 use pacaya::{BatchInfo, BatchProposed};
@@ -25,6 +26,25 @@ use reth_primitives::serde_bincode_compat::Block as BincodeCompactBlock;
 /// required values.
 pub type StorageEntry = (MptNode, Vec<U256>);
 
+/// L1 storage proof for L1SLOAD precompile calls
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct L1StorageProof {
+    pub contract_address: Address,
+    pub storage_key: B256,
+    pub block_number: B256,
+    pub value: B256,
+    pub account_proof: Vec<Bytes>,
+    pub storage_proof: Vec<Bytes>,
+}
+
+/// L1 block header information needed for proof verification
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct L1BlockHeader {
+    pub number: u64,
+    pub hash: B256,
+    pub state_root: B256,
+}
+
 /// External block input.
 #[serde_as]
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
@@ -48,6 +68,12 @@ pub struct GuestInput {
     pub ancestor_headers: Vec<Header>,
     /// Taiko specific data
     pub taiko: TaikoGuestInput,
+    /// L1 storage proofs for L1SLOAD precompile calls
+    #[serde(default)]
+    pub l1_storage_proofs: Vec<L1StorageProof>,
+    /// L1 headers for blocks referenced by L1SLOAD calls
+    #[serde(default)]
+    pub l1_headers: Vec<L1BlockHeader>,
 }
 
 /// External block input.
@@ -330,6 +356,8 @@ mod test {
             contracts: vec![],
             ancestor_headers: vec![],
             taiko: TaikoGuestInput::default(),
+            l1_storage_proofs: vec![],
+            l1_headers: vec![],
         };
         let input_ser = serde_json::to_string(&input).unwrap();
         let input_de: GuestInput = serde_json::from_str(&input_ser).unwrap();
@@ -347,6 +375,8 @@ mod test {
             contracts: vec![],
             ancestor_headers: vec![],
             taiko: TaikoGuestInput::default(),
+            l1_storage_proofs: vec![],
+            l1_headers: vec![],
         };
         let input_ser = serde_json::to_value(&input).unwrap();
         let input_de: GuestInput = serde_json::from_value(input_ser).unwrap();
