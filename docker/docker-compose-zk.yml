@@ -1,5 +1,8 @@
 services:
   raiko-zk:
+    build:
+      context: ..
+      dockerfile: Dockerfile
     image: nethermind.jfrog.io/core-oci-local-staging/raiko-zk:latest
     container_name: raiko-zk
     network_mode: host
