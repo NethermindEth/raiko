@@ -1,23 +1,23 @@
-# FROM ghcr.io/edgelesssys/ego-dev:v1.7.0 AS build-gaiko
-# WORKDIR /opt/gaiko
+FROM ghcr.io/edgelesssys/ego-dev:v1.7.0 AS build-gaiko
+WORKDIR /opt/gaiko
 
-# # Install dependencies
-# COPY gaiko/go.mod .
-# COPY gaiko/go.sum .
-# RUN go mod download
+# Install dependencies
+COPY gaiko/go.mod .
+COPY gaiko/go.sum .
+RUN go mod download
 
-# # Build
-# COPY gaiko/ .
-# RUN ego-go build -o gaiko-ego ./cmd/gaiko
+# Build
+COPY gaiko/ .
+RUN ego-go build -o gaiko-ego ./cmd/gaiko
 
-# # Sign with our enclave config and private key
-# COPY gaiko/ego/enclave.json .
-# COPY docker/enclave-key.pem private.pem
-# RUN ego sign && ego bundle gaiko-ego gaiko
-# RUN ego uniqueid gaiko-ego
-# RUN ego signerid gaiko-ego
+# Sign with our enclave config and private key
+COPY gaiko/ego/enclave.json .
+COPY docker/enclave-key.pem private.pem
+RUN ego sign && ego bundle gaiko-ego gaiko
+RUN ego uniqueid gaiko-ego
+RUN ego signerid gaiko-ego
 
-FROM rust:1.85.0 AS chef
+FROM rust:1.88.0 AS chef
 RUN curl -L --proto '=https' --tlsv1.2 -sSf https://raw.githubusercontent.com/cargo-bins/cargo-binstall/main/install-from-binstall-release.sh | bash
 RUN cargo binstall -y cargo-chef wild-linker
 RUN apt-get update && apt-get install -y clang
@@ -72,7 +72,7 @@ RUN mkdir -p \
     ./provers/sgx \
     /var/log/raiko
 
-# COPY --from=build-gaiko /opt/gaiko/gaiko ./bin/
+COPY --from=build-gaiko /opt/gaiko/gaiko ./bin/
 COPY --from=builder /opt/raiko/docker/entrypoint.sh ./bin/
 COPY --from=builder /opt/raiko/provers/sgx/config/sgx-guest.docker.manifest.template ./provers/sgx/config/sgx-guest.local.manifest.template
 # copy to /etc/raiko, but if self register mode, the mounted one will overwrite it.
