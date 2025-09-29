@@ -8,13 +8,17 @@
     "blob_proof_type": "proof_of_equivalence",
     "sgx": {
         "instance_ids": {
-            "HEKLA": 1,
-            "ONTAKE": 1,
-            "PACAYA": 1
+            "ONTAKE": 0,
+            "PACAYA": 0
         },
         "setup": false,
         "bootstrap": false,
         "prove": true
+    },
+    "sgxgeth": {
+        "instance_ids": {
+            "PACAYA": 0
+        }
     },
     "risc0": {
         "bonsai": true,
