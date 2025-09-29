@@ -23,7 +23,10 @@
 	"sgxgeth": {
 		"instance_ids": {
 			"PACAYA": 0
-		}
+		},
+		"setup": false,
+		"bootstrap": false,
+		"prove": true
 	},
 	"risc0": {
 		"bonsai": false,
