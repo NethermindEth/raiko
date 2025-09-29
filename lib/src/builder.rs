@@ -409,8 +409,6 @@ impl<DB: Database<Error = ProviderError> + DatabaseCommit + OptimisticDatabase +
         let mut block = self.input.block.clone();
         block.body.transactions = pool_txs;
 
-        tracing::error!("Executing block");
-
         let taiko_evm_config = TaikoEvmConfig::new_with_evm_factory(
             chain_spec.clone(),
             TaikoEvmFactory::new(Some(Address::ZERO)), // TODO: make it configurable
