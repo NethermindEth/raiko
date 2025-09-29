@@ -185,7 +185,7 @@ pub static SURGE_DEV: LazyLock<Arc<TaikoChainSpec>> = LazyLock::new(|| {
     let hardforks = SURGE_DEV_HARDFORKS.clone();
     TaikoChainSpec {
         inner: reth_chainspec::ChainSpec {
-            chain: 763373.into(), // TODO: make this dynamic based on the chain spec
+            chain: 763374.into(), // TODO: make this dynamic based on the chain spec
             paris_block_and_final_difficulty: None,
             hardforks,
             deposit_contract: None,
@@ -409,10 +409,13 @@ impl<DB: Database<Error = ProviderError> + DatabaseCommit + OptimisticDatabase +
         let mut block = self.input.block.clone();
         block.body.transactions = pool_txs;
 
+        tracing::error!("Executing block");
+
         let taiko_evm_config = TaikoEvmConfig::new_with_evm_factory(
             chain_spec.clone(),
             TaikoEvmFactory::new(Some(Address::ZERO)), // TODO: make it configurable
         );
+        tracing::error!("ABOBA 1");
 
         // TODO: Maybe remove as "prover" feature has been added to taiko-reth?
         let executor = TaikoWithOptimisticBlockExecutor::new(
@@ -420,9 +423,11 @@ impl<DB: Database<Error = ProviderError> + DatabaseCommit + OptimisticDatabase +
             self.db.take().unwrap(),
             optimistic,
         );
+        tracing::error!("ABOBA 2");
 
         // Recover senders
         let recovered_block = RecoveredBlock::try_recover(block)?;
+        tracing::error!("ABOBA 3");
 
         let mut tmp_db = None;
         let BlockExecutionOutput {
