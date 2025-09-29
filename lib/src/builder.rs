@@ -415,7 +415,6 @@ impl<DB: Database<Error = ProviderError> + DatabaseCommit + OptimisticDatabase +
             chain_spec.clone(),
             TaikoEvmFactory::new(Some(Address::ZERO)), // TODO: make it configurable
         );
-        tracing::error!("ABOBA 1");
 
         // TODO: Maybe remove as "prover" feature has been added to taiko-reth?
         let executor = TaikoWithOptimisticBlockExecutor::new(
@@ -423,11 +422,9 @@ impl<DB: Database<Error = ProviderError> + DatabaseCommit + OptimisticDatabase +
             self.db.take().unwrap(),
             optimistic,
         );
-        tracing::error!("ABOBA 2");
 
         // Recover senders
         let recovered_block = RecoveredBlock::try_recover(block)?;
-        tracing::error!("ABOBA 3");
 
         let mut tmp_db = None;
         let BlockExecutionOutput {
