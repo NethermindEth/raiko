@@ -14,7 +14,6 @@ use serde::{Deserialize, Serialize};
 use serde_with::serde_as;
 use std::collections::HashMap;
 use tracing::info;
-use once_cell::sync::Lazy;
 use serde_json::json;
 
 mod attestation_client;
@@ -172,10 +171,7 @@ impl Prover for TdxProver {
     }
 
     async fn get_guest_data() -> ProverResult<serde_json::Value> {
-        match TDX_GUEST_DATA.as_ref() {
-            Ok(value) => Ok(value.clone()),
-            Err(e) => Err(ProverError::GuestError(e.clone())),
-        }
+        get_tdx_guest_data().map_err(|e| ProverError::GuestError(e))
     }
 }
 
@@ -210,7 +206,11 @@ impl TdxProver {
     }
 }
 
-pub static TDX_GUEST_DATA: Lazy<Result<serde_json::Value, String>> = Lazy::new(|| {
+fn get_tdx_guest_data() -> Result<serde_json::Value, String> {
+    if !config::bootstrap_exists().map_err(|e| format!("Failed to check bootstrap existence: {}", e))? {
+        return Err("Bootstrap data does not exist yet".to_string());
+    }
+
     let bootstrap_data = config::read_bootstrap()
         .map_err(|e| format!("Failed to read bootstrap data for guest data: {}", e))?;
 
@@ -220,4 +220,4 @@ pub static TDX_GUEST_DATA: Lazy<Result<serde_json::Value, String>> = Lazy::new(|
         "nonce": bootstrap_data.nonce,
         "metadata": bootstrap_data.metadata,
     }))
-});
+}
