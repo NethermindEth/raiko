@@ -20,6 +20,7 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock
       - ../host/config:/raiko/config
       - /tmp:/tmp
+      - ${HOME}/.sp1/circuits/plonk:${HOME}/.sp1/circuits/plonk
     depends_on:
       - redis-zk
   redis-zk:

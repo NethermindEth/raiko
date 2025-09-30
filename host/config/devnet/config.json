@@ -29,7 +29,7 @@
 		"prove": true
 	},
 	"risc0": {
-		"bonsai": false,
+		"bonsai": true,
 		"snark": true,
 		"profile": false,
 		"execution_po2": 20

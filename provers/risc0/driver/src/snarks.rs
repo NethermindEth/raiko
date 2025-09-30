@@ -234,9 +234,10 @@ pub async fn verify_groth16_snark_impl(
     post_state_digest: Digest,
 ) -> Result<Vec<u8>> {
     let verifier_rpc_url =
-        std::env::var("GROTH16_VERIFIER_RPC_URL").expect("env GROTH16_VERIFIER_RPC_URL");
+        std::env::var("GROTH16_VERIFIER_RPC_URL").expect("env GROTH16_VERIFIER_RPC_URL not set");
     let groth16_verifier_addr = {
-        let addr = std::env::var("GROTH16_VERIFIER_ADDRESS").expect("env GROTH16_VERIFIER_RPC_URL");
+        let addr = std::env::var("GROTH16_VERIFIER_ADDRESS")
+            .expect("env GROTH16_VERIFIER_ADDRESS not set");
         H160::from_str(&addr).unwrap()
     };
 
@@ -264,7 +265,9 @@ pub async fn verify_groth16_snark_impl(
         tracing_info!("SNARK verified successfully using {groth16_verifier_addr:?}!");
     } else {
         tracing_err!("SNARK verification failed: {verify_call_res:?}!");
-        return Err(anyhow::Error::msg(format!("SNARK verification failed: {verify_call_res:?}!")));
+        return Err(anyhow::Error::msg(format!(
+            "SNARK verification failed: {verify_call_res:?}!"
+        )));
     }
 
     Ok(enc_seal)
