@@ -80,9 +80,9 @@ reqwest_alloy = { package = "reqwest", version = "0.12.4", features = ["json"] }
 
 
 # risc zero
-risc0-zkvm = { version = "=2.2.0", features = ["prove", "getrandom"] }
-bonsai-sdk = { version = "=1.4.0" }
-risc0-binfmt = { version = "=2.0.3" }
+risc0-zkvm = { version = "=3.0.3", features = ["prove", "getrandom"] }
+bonsai-sdk = { version = "=1.4.1" }
+risc0-binfmt = { version = "=3.0.2" }
 risc0-zkos-v1compat = { version = "=2.2.0" }
 
 # SP1
