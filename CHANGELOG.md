@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.9.0-pre-alethia-reth-surge](https://github.com/NethermindEth/raiko/compare/v1.8.4-pre-alethia-reth-surge...v1.9.0-pre-alethia-reth-surge) (2025-10-03)
+
+
+### Features
+
+* Alethia-Reth support added ([#33](https://github.com/NethermindEth/raiko/issues/33)) ([239fa2c](https://github.com/NethermindEth/raiko/commit/239fa2c80d61e23ef0bc42c32187c90e79b84661))
+* submodule init to sgx workflow build ([0d021ea](https://github.com/NethermindEth/raiko/commit/0d021ea4d80ac3739430786a940073aad290c7e0))
+
 ## [1.7.0](https://github.com/taikoxyz/raiko/compare/v1.6.1...v1.7.0) (2025-04-08)
 
 
