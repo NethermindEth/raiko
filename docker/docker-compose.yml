@@ -3,7 +3,7 @@ services:
     build:
       context: ..
       dockerfile: Dockerfile
-    image: nethermind.jfrog.io/core-oci-local-prod/raiko-sgx:v1.8.3
+    image: nethermind.jfrog.io/core-oci-local-prod/raiko-sgx:latest
     container_name: raiko-init
     command: --init
     env_file:
@@ -27,7 +27,7 @@ services:
     build:
       context: ..
       dockerfile: Dockerfile
-    image: nethermind.jfrog.io/core-oci-local-prod/raiko-sgx:v1.8.3
+    image: nethermind.jfrog.io/core-oci-local-prod/raiko-sgx:latest
     container_name: raiko
     command: --concurrency-limit=1
     env_file:
@@ -43,9 +43,9 @@ services:
     ports:
       - "8080:8080"
     environment:
-      - RAIKO_CONF_DIR=${RAIKO_CONF_DIR:-/raiko/config}
+      - RAIKO_CONF_DIR=${RAIKO_CONF_DIR:-/raiko/config/devnet}
       - BASE_CONFIG_FILE=${BASE_CONFIG_FILE:-config.json}
-      - BASE_CHAINSPEC_FILE=${BASE_CHAINSPEC_FILE:-chain_spec_list_devnet.json}
+      - BASE_CHAINSPEC_FILE=${BASE_CHAINSPEC_FILE:-chain_spec_list.json}
       - SGX=true
       - SGXGETH=${SGXGETH}
       - SGX_MODE=${SGX_MODE:-local}

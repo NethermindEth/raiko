@@ -1,5 +1,6 @@
 #![cfg(feature = "enable")]
 
+use alloy_primitives::{hex, B256};
 use once_cell::sync::Lazy;
 use raiko_lib::{
     input::{
@@ -10,7 +11,6 @@ use raiko_lib::{
     prover::{IdStore, IdWrite, Proof, ProofKey, Prover, ProverConfig, ProverError, ProverResult},
     Measurement,
 };
-use reth_primitives::B256;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use serde_with::serde_as;
@@ -121,7 +121,7 @@ static AGGREGATION_PROGRAM_HASH: Lazy<String> = Lazy::new(|| {
 static BLOCK_PROGRAM_HASH: Lazy<String> = Lazy::new(|| {
     let prover = sp1_sdk::CpuProver::new();
     let key_pair = prover.setup(&BATCH_ELF);
-    reth_primitives::hex::encode(key_pair.1.hash_bytes())
+    hex::encode(key_pair.1.hash_bytes())
 });
 
 impl Prover for Sp1Prover {
@@ -140,10 +140,10 @@ impl Prover for Sp1Prover {
         stdin.write(&input);
 
         let Sp1ProverClient { client, pk, vk } = {
-            let gpu_number: u32 = config
+            let gpu_number: u64 = config
                 .get("gpu_number")
                 .and_then(|v| v.as_i64())
-                .map(|v| v as u32)
+                .map(|v| v as u64)
                 .unwrap();
             info!("GPU Number: {}", gpu_number);
 
@@ -152,7 +152,9 @@ impl Prover for Sp1Prover {
                 ProverMode::Local => Box::new(
                     ProverClient::builder()
                         .cuda()
-                        .with_gpu_number(gpu_number)
+                        .local()
+                        .visible_device(gpu_number)
+                        .port(3000 + gpu_number)
                         .build(),
                 ),
                 ProverMode::Network => Box::new(ProverClient::builder().network().build()),
@@ -214,7 +216,7 @@ impl Prover for Sp1Prover {
                 proof_id, output.header.number
             );
             network_client
-                .wait_proof(proof_id.clone(), Some(Duration::from_secs(3600)))
+                .wait_proof(proof_id.clone(), Some(Duration::from_secs(3600)), None)
                 .await
                 .map_err(|e| ProverError::GuestError(format!("Sp1: network proof failed {e:?}")))?
         };
@@ -246,11 +248,7 @@ impl Prover for Sp1Prover {
         let proof_string = (!proof_bytes.is_empty()).then_some(
             // 0x + 64 bytes of the vkey + the proof
             // vkey itself contains 0x prefix
-            format!(
-                "{}{}",
-                vk.bytes32(),
-                reth_primitives::hex::encode(proof_bytes)
-            ),
+            format!("{}{}", vk.bytes32(), hex::encode(proof_bytes)),
         );
 
         info!(
@@ -344,10 +342,10 @@ impl Prover for Sp1Prover {
 
         // Generate the proof for the given program.
         let Sp1ProverClient { client, pk, vk } = {
-            let gpu_number: u32 = config
+            let gpu_number: u64 = config
                 .get("gpu_number")
                 .and_then(|v| v.as_i64())
-                .map(|v| v as u32)
+                .map(|v| v as u64)
                 .unwrap();
 
             info!("GPU Number: {}", gpu_number);
@@ -360,7 +358,9 @@ impl Prover for Sp1Prover {
                         ProverMode::Local => Box::new(
                             ProverClient::builder()
                                 .cuda()
-                                .with_gpu_number(gpu_number)
+                                .local()
+                                .visible_device(gpu_number)
+                                .port(3000 + gpu_number)
                                 .build(),
                         ),
                         ProverMode::Network => Box::new(ProverClient::builder().network().build()),
@@ -381,7 +381,7 @@ impl Prover for Sp1Prover {
 
         info!(
             "sp1 aggregate: {:?} based {:?} blocks with vk {:?}",
-            reth_primitives::hex::encode_prefixed(stark_vk.hash_bytes()),
+            hex::encode_prefixed(stark_vk.hash_bytes()),
             input.proofs.len(),
             vk.bytes32()
         );
@@ -406,7 +406,7 @@ impl Prover for Sp1Prover {
                 })?;
             info!("Sp1: network proof id: {proof_id:?} for aggregation");
             network_client
-                .wait_proof(proof_id.clone(), Some(Duration::from_secs(3600)))
+                .wait_proof(proof_id.clone(), Some(Duration::from_secs(3600)), None)
                 .await
                 .map_err(|e| ProverError::GuestError(format!("Sp1: network proof failed {e:?}")))?
         };
@@ -431,8 +431,8 @@ impl Prover for Sp1Prover {
             format!(
                 "{}{}{}",
                 vk.bytes32(),
-                reth_primitives::hex::encode(stark_vk.hash_bytes()),
-                reth_primitives::hex::encode(proof_bytes)
+                hex::encode(stark_vk.hash_bytes()),
+                hex::encode(proof_bytes)
             ),
         );
 
@@ -465,10 +465,10 @@ impl Prover for Sp1Prover {
         stdin.write(&input);
 
         let Sp1ProverClient { client, pk, vk } = {
-            let gpu_number: u32 = config
+            let gpu_number: u64 = config
                 .get("gpu_number")
                 .and_then(|v| v.as_i64())
-                .map(|v| v as u32)
+                .map(|v| v as u64)
                 .unwrap();
             info!("GPU Number: {}", gpu_number);
 
@@ -477,7 +477,9 @@ impl Prover for Sp1Prover {
                 ProverMode::Local => Box::new(
                     ProverClient::builder()
                         .cuda()
-                        .with_gpu_number(gpu_number)
+                        .local()
+                        .visible_device(gpu_number)
+                        .port(3000 + gpu_number)
                         .build(),
                 ),
                 ProverMode::Network => Box::new(ProverClient::builder().network().build()),
@@ -518,6 +520,7 @@ impl Prover for Sp1Prover {
                     proof: SP1Proof::Groth16(Groth16Bn254Proof::default()),
                     public_values: sp1_primitives::io::SP1PublicValues::new(),
                     sp1_version: "0".to_owned(),
+                    tee_proof: None,
                 }
             } else {
                 info!("Execute locally with recursion mode: {:?}", param.recursion);
@@ -556,7 +559,7 @@ impl Prover for Sp1Prover {
                 input.taiko.batch_id
             );
             network_client
-                .wait_proof(proof_id.clone(), Some(Duration::from_secs(3600)))
+                .wait_proof(proof_id.clone(), Some(Duration::from_secs(3600)), None)
                 .await
                 .map_err(|e| ProverError::GuestError(format!("Sp1: network proof failed {e:?}")))?
         };
@@ -588,11 +591,7 @@ impl Prover for Sp1Prover {
         let proof_string = (!proof_bytes.is_empty()).then_some(
             // 0x + 64 bytes of the vkey + the proof
             // vkey itself contains 0x prefix
-            format!(
-                "{}{}",
-                vk.bytes32(),
-                reth_primitives::hex::encode(proof_bytes)
-            ),
+            format!("{}{}", vk.bytes32(), hex::encode(proof_bytes)),
         );
 
         info!(

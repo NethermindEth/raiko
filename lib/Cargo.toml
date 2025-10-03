@@ -6,13 +6,15 @@ edition = "2021"
 [dependencies]
 # reth
 reth-primitives = { workspace = true }
+reth-primitives-traits = { workspace = true }
 reth-evm-ethereum = { workspace = true }
 reth-evm = { workspace = true }
 reth-chainspec = { workspace = true }
-reth-taiko-consensus = { workspace = true }
-reth-taiko-evm = { workspace = true }
-reth-taiko-forks = { workspace = true }
-reth-taiko-chainspec = { workspace = true }
+reth-revm = { workspace = true }
+taiko-reth = { workspace = true }
+
+# revm
+revm = { workspace = true }
 
 
 # alloy
@@ -39,6 +41,7 @@ libflate = { workspace = true }
 once_cell = { workspace = true }
 url = { workspace = true }
 hex = { workspace = true }
+bls12_381 = { workspace = true }
 kzg = { workspace = true }
 kzg_traits = { workspace = true }
 sha2 = { workspace = true }
@@ -53,6 +56,7 @@ tracing = { workspace = true }
 bincode = { workspace = true }
 async-trait = { workspace = true }
 pretty_assertions = { workspace = true }
+rkyv = { workspace = true }
 
 # [target.'cfg(feature = "std")'.dependencies]
 flate2 = { workspace = true, optional = true }
@@ -62,10 +66,16 @@ chrono = { workspace = true, optional = true }
 lazy_static = { workspace = true }
 
 reth-ethereum-consensus = { workspace = true }
+reth-storage-api = { workspace = true }
 reth-consensus = { workspace = true }
 
 [dev-dependencies]
 hex-literal = { workspace = true }
+
+[build-dependencies]
+rkyv = { workspace = true }
+kzg_traits = { workspace = true }
+kzg = { workspace = true }
 
 [features]
 default = ["std"]
@@ -85,3 +95,4 @@ sgx = []
 sp1 = []
 risc0 = []
 sp1-cycle-tracker = []
+preflight = ["taiko-reth/prover"]

@@ -100,7 +100,3 @@ path = "src/bin/main.rs"
 [[bin]]
 name = "docs"
 path = "src/bin/docs.rs"
-
-[[bin]]
-name = "gen-kzg-settings"
-path = "src/bin/gen_kzg_settings.rs"

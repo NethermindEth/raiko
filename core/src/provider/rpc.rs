@@ -1,11 +1,9 @@
 use alloy_primitives::{Address, Bytes, StorageKey, Uint, U256};
-use alloy_provider::{ProviderBuilder, ReqwestProvider, RootProvider};
+use alloy_provider::RootProvider;
 use alloy_rpc_client::{ClientBuilder, RpcClient};
 use alloy_rpc_types::{Block, BlockId, BlockNumberOrTag, EIP1186AccountProofResponse};
-use alloy_transport_http::Http;
 use raiko_lib::clear_line;
-use reqwest_alloy::Client;
-use reth_primitives::revm_primitives::{AccountInfo, Bytecode};
+use reth_revm::state::{AccountInfo, Bytecode};
 use std::{collections::HashMap, future::Future, time::Duration};
 use tokio::time::sleep;
 use tracing::{debug, trace};
@@ -16,10 +14,10 @@ use crate::{
     MerkleProof,
 };
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct RpcBlockDataProvider {
-    pub provider: ReqwestProvider,
-    pub client: RpcClient<Http<Client>>,
+    pub provider: RootProvider,
+    pub client: RpcClient,
     block_numbers: Vec<u64>,
 }
 
@@ -33,7 +31,7 @@ impl RpcBlockDataProvider {
             url, block_number
         );
         Ok(Self {
-            provider: ProviderBuilder::new().on_provider(RootProvider::new_http(url.clone())),
+            provider: RootProvider::new_http(url.clone()),
             client: ClientBuilder::default().http(url),
             block_numbers: vec![block_number, block_number + 1],
         })
@@ -51,13 +49,13 @@ impl RpcBlockDataProvider {
             url, block_numbers[0]
         );
         Ok(Self {
-            provider: ProviderBuilder::new().on_provider(RootProvider::new_http(url.clone())),
+            provider: RootProvider::new_http(url.clone()),
             client: ClientBuilder::default().http(url),
             block_numbers,
         })
     }
 
-    pub fn provider(&self) -> &ReqwestProvider {
+    pub fn provider(&self) -> &RootProvider {
         &self.provider
     }
 

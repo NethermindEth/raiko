@@ -2,6 +2,7 @@ use core::mem;
 use std::sync::Arc;
 use std::sync::LazyLock;
 
+use crate::block_executor::TaikoWithOptimisticBlockExecutor;
 use crate::primitives::keccak::keccak;
 use crate::primitives::mpt::StateAccount;
 use crate::utils::{generate_transactions, generate_transactions_for_batch_blocks};
@@ -12,28 +13,40 @@ use crate::{
     mem_db::{AccountState, DbAccount, MemDb},
     CycleTracker,
 };
-use alloy_primitives::Sealable;
+use alloy_primitives::map::HashMap;
+use alloy_primitives::Address;
+use alloy_primitives::Bytes;
+use alloy_primitives::B256;
+use alloy_primitives::U256;
 use anyhow::{bail, ensure, Result};
-use reth_chainspec::{ChainHardforks, EthChainSpec, EthereumHardfork, ForkCondition, Hardforks};
+use reth_chainspec::Hardfork;
+use reth_chainspec::{ChainHardforks, EthereumHardfork, ForkCondition, Hardforks};
 use reth_consensus::{Consensus, HeaderValidator};
 use reth_ethereum_consensus::validate_block_post_execution;
-use reth_evm::execute::{
-    BlockExecutionOutput, BlockExecutorProvider, BlockValidationError, ProviderError,
-};
-use reth_primitives::revm_primitives::db::{Database, DatabaseCommit};
-use reth_primitives::revm_primitives::{
-    Account, AccountInfo, AccountStatus, Bytecode, Bytes, EvmStorageSlot, HashMap, SpecId,
-    KECCAK_EMPTY,
-};
-use reth_primitives::{
-    Address, Block, BlockExt, BlockWithSenders, Header, TransactionSigned, B256, U256,
-};
-use reth_taiko_chainspec::spec::{TAIKO_A7, TAIKO_DEV, TAIKO_MAINNET};
-use reth_taiko_chainspec::TaikoChainSpec;
-use reth_taiko_consensus::{TaikoData, TaikoSimpleBeaconConsensus};
-use reth_taiko_evm::TaikoExecutorProviderBuilder;
-use reth_taiko_forks::TaikoHardfork;
-use tracing::{debug, error, info};
+use reth_evm::block::BlockExecutionResult;
+use reth_evm::execute::Executor;
+use reth_evm::execute::{BlockExecutionOutput, ProviderError};
+use reth_evm::Database;
+use reth_primitives::RecoveredBlock;
+use reth_primitives::SealedHeader;
+use reth_primitives::{Block, Header, TransactionSigned};
+use reth_storage_api::noop::NoopProvider;
+use revm::primitives::KECCAK_EMPTY;
+use revm::state::Account;
+use revm::state::AccountInfo;
+use revm::state::AccountStatus;
+use revm::state::Bytecode;
+use revm::state::EvmStorageSlot;
+use revm::DatabaseCommit;
+use taiko_reth::chainspec::hardfork::TaikoHardfork;
+use taiko_reth::chainspec::spec::TaikoChainSpec;
+use taiko_reth::chainspec::TAIKO_DEVNET;
+use taiko_reth::chainspec::TAIKO_MAINNET;
+use taiko_reth::consensus::validation::TaikoBeaconConsensus;
+use taiko_reth::evm::config::TaikoEvmConfig;
+use taiko_reth::evm::factory::TaikoEvmFactory;
+use taiko_reth::evm::spec::TaikoSpecId;
+use tracing::{debug, info};
 
 /// Surge dev list of hardforks.
 pub static SURGE_DEV_HARDFORKS: LazyLock<reth_chainspec::ChainHardforks> = LazyLock::new(|| {
@@ -63,13 +76,13 @@ pub static SURGE_DEV_HARDFORKS: LazyLock<reth_chainspec::ChainHardforks> = LazyL
             ForkCondition::TTD {
                 fork_block: None,
                 total_difficulty: U256::from(0),
+                activation_block_number: 0,
             },
         ),
         (
             EthereumHardfork::Shanghai.boxed(),
             ForkCondition::Timestamp(0),
         ),
-        (TaikoHardfork::Hekla.boxed(), ForkCondition::Block(0)),
         (
             TaikoHardfork::Ontake.boxed(),
             ForkCondition::Block(
@@ -107,13 +120,13 @@ pub static SURGE_TEST_HARDFORKS: LazyLock<reth_chainspec::ChainHardforks> = Lazy
             ForkCondition::TTD {
                 fork_block: None,
                 total_difficulty: U256::from(0),
+                activation_block_number: 0,
             },
         ),
         (
             EthereumHardfork::Shanghai.boxed(),
             ForkCondition::Timestamp(0),
         ),
-        (TaikoHardfork::Hekla.boxed(), ForkCondition::Block(0)),
         (
             TaikoHardfork::Ontake.boxed(),
             ForkCondition::Block(
@@ -151,13 +164,13 @@ pub static SURGE_STAGE_HARDFORKS: LazyLock<reth_chainspec::ChainHardforks> = Laz
             ForkCondition::TTD {
                 fork_block: None,
                 total_difficulty: U256::from(0),
+                activation_block_number: 0,
             },
         ),
         (
             EthereumHardfork::Shanghai.boxed(),
             ForkCondition::Timestamp(0),
         ),
-        (TaikoHardfork::Hekla.boxed(), ForkCondition::Block(0)),
         (
             TaikoHardfork::Ontake.boxed(),
             ForkCondition::Block(
@@ -172,7 +185,7 @@ pub static SURGE_DEV: LazyLock<Arc<TaikoChainSpec>> = LazyLock::new(|| {
     let hardforks = SURGE_DEV_HARDFORKS.clone();
     TaikoChainSpec {
         inner: reth_chainspec::ChainSpec {
-            chain: 763373.into(), // TODO: make this dynamic based on the chain spec
+            chain: 763374.into(), // TODO: make this dynamic based on the chain spec
             paris_block_and_final_difficulty: None,
             hardforks,
             deposit_contract: None,
@@ -306,8 +319,6 @@ fn validate_final_batch_blocks(input: &GuestBatchInput, final_blocks: &[Block]) 
                 parent_block.header.hash_slow(),
                 current_block.header.parent_hash
             );
-            // state root is checked in finalize(), skip here
-            // assert!(current_block.state_root == current_input.block.state_root)
         });
 }
 
@@ -328,7 +339,7 @@ pub struct RethBlockBuilder<DB> {
     pub db: Option<DB>,
 }
 
-impl<DB: Database<Error = ProviderError> + DatabaseCommit + OptimisticDatabase>
+impl<DB: Database<Error = ProviderError> + DatabaseCommit + OptimisticDatabase + Clone>
     RethBlockBuilder<DB>
 {
     /// Creates a new block builder.
@@ -349,11 +360,9 @@ impl<DB: Database<Error = ProviderError> + DatabaseCommit + OptimisticDatabase>
         info!("execute_transactions: start");
         // Get the chain spec
         let chain_spec = &self.input.chain_spec;
-        let total_difficulty = U256::ZERO;
-        let reth_chain_spec = match chain_spec.name.as_str() {
-            "taiko_a7" => TAIKO_A7.clone(),
+        let chain_spec = match chain_spec.name.as_str() {
             "taiko_mainnet" => TAIKO_MAINNET.clone(),
-            "taiko_dev" => TAIKO_DEV.clone(),
+            "taiko_dev" => TAIKO_DEVNET.clone(),
             "surge_dev" => SURGE_DEV.clone(),
             "surge_test" => SURGE_TEST.clone(),
             "surge_stage" => SURGE_STAGE.clone(),
@@ -363,133 +372,111 @@ impl<DB: Database<Error = ProviderError> + DatabaseCommit + OptimisticDatabase>
 
         info!("execute_transactions: reth_chain_spec done");
 
-        if reth_chain_spec.is_taiko() {
-            let block_num = self.input.taiko.block_proposed.block_number();
-            let block_timestamp = 0u64; // self.input.taiko.block_proposed.block_timestamp();
+        let block_num = self.input.taiko.block_proposed.block_number();
+        // let block_timestamp = 0u64;
+        let block_timestamp = self.input.taiko.block_proposed.block_timestamp();
 
-            let taiko_fork = self
-                .input
-                .chain_spec
-                .spec_id(block_num, block_timestamp)
-                .unwrap();
+        let taiko_fork = self
+            .input
+            .chain_spec
+            .spec_id(block_num, block_timestamp)
+            .unwrap();
 
-            match taiko_fork {
-                SpecId::HEKLA => {
-                    assert!(
-                        reth_chain_spec
-                            .fork(TaikoHardfork::Hekla)
-                            .active_at_block(block_num),
-                        "evm fork HEKLA is not active, please update the chain spec"
-                    );
-                }
-                SpecId::ONTAKE => {
-                    assert!(
-                        reth_chain_spec
-                            .fork(TaikoHardfork::Ontake)
-                            .active_at_block(block_num),
-                        "evm fork ONTAKE is not active, please update the chain spec"
-                    );
-                }
-                SpecId::PACAYA => {
-                    assert!(
-                        reth_chain_spec
-                            .fork(TaikoHardfork::Pacaya)
-                            .active_at_block(block_num),
-                        "evm fork PACAYA is not active, please update the chain spec"
-                    );
-                }
-                _ => unimplemented!(),
+        match taiko_fork {
+            TaikoSpecId::ONTAKE => {
+                assert!(
+                    chain_spec
+                        .fork(TaikoHardfork::Ontake)
+                        .active_at_block(block_num),
+                    "evm fork ONTAKE is not active, please update the chain spec"
+                );
             }
-            info!("execute_transactions: is_taiko done");
+            TaikoSpecId::PACAYA => {
+                assert!(
+                    chain_spec
+                        .fork(TaikoHardfork::Pacaya)
+                        .active_at_block(block_num),
+                    "evm fork PACAYA is not active, please update the chain spec"
+                );
+            }
+            _ => unimplemented!(),
         }
+        info!("execute_transactions: is_taiko done");
 
         // Generate the transactions from the tx list
         let mut block = self.input.block.clone();
         block.body.transactions = pool_txs;
+
+        let taiko_evm_config = TaikoEvmConfig::new_with_evm_factory(
+            chain_spec.clone(),
+            TaikoEvmFactory::new(Some(Address::ZERO)), // TODO: make it configurable
+        );
+
+        // TODO: Maybe remove as "prover" feature has been added to taiko-reth?
+        let executor = TaikoWithOptimisticBlockExecutor::new(
+            taiko_evm_config,
+            self.db.take().unwrap(),
+            optimistic,
+        );
+
         // Recover senders
-        let mut block = block
-            .with_recovered_senders()
-            .ok_or(BlockValidationError::SenderRecoveryError)?;
+        let recovered_block = RecoveredBlock::try_recover(block)?;
 
-        let base_fee_config = self.input.taiko.block_proposed.base_fee_config();
-        let gas_limit = self.input.taiko.block_proposed.gas_limit_with_anchor();
-
-        let taiko_chain_spec = Arc::new(TaikoChainSpec::from((*reth_chain_spec).clone()));
-
-        let executor = TaikoExecutorProviderBuilder::new(
-            taiko_chain_spec.clone(),
-            TaikoData {
-                l1_header: self.input.taiko.l1_header.clone(),
-                parent_header: self.input.parent_header.clone(),
-                l2_contract: self.input.chain_spec.l2_contract.unwrap_or_default(),
-                base_fee_config,
-                gas_limit,
-            },
-        )
-        .with_optimistic(optimistic)
-        .build()
-        .executor(self.db.take().unwrap());
-
-        let (
-            BlockExecutionOutput {
-                state,
-                receipts,
-                requests,
-                gas_used: _,
-                skipped_list,
-            },
-            full_state,
-        ) = executor
-            .execute_and_get_state((&block, total_difficulty).into())
-            .map_err(|e| {
-                error!("Error executing block: {e:?}");
-                e
-            })?;
+        let mut tmp_db = None;
+        let BlockExecutionOutput {
+            state,
+            result:
+                BlockExecutionResult {
+                    receipts,
+                    requests,
+                    gas_used: _,
+                },
+        } = executor.execute_with_state_closure(&recovered_block, |state| {
+            tmp_db = Some(state.database.clone());
+        })?;
 
         info!("execute_transactions: execute done");
+
         // Filter out the valid transactions so that the header checks only take these into account
-        block.body.transactions = block
+        let mut block = recovered_block.into_block();
+
+        let (filtered_txs, _): (Vec<_>, Vec<_>) = block
             .body
             .transactions
-            .iter()
-            .enumerate()
-            .filter(|(i, _)| !skipped_list.contains(i))
-            .map(|(_, tx)| tx.clone())
-            .collect();
+            .into_iter()
+            .zip(receipts.clone())
+            .filter(|(_, receipt)| receipt.success || (!receipt.success && optimistic))
+            .unzip();
+
+        block.body.transactions = filtered_txs;
+
+        let recovered_block = RecoveredBlock::try_recover(block)?;
+        let sealed_block = recovered_block.sealed_block();
+        let sealed_header = sealed_block.sealed_header();
+
         info!("execute_transactions: valid_transaction_indices done");
         // Header validation
-        // TODO: Use TaikoConsensus for this?
-        let block = block.seal_slow();
         if !optimistic {
-            let consensus = TaikoSimpleBeaconConsensus::new(reth_chain_spec.clone());
-            // Validates extra data
-            consensus.validate_header_with_total_difficulty(&block.header, total_difficulty)?;
-            info!("execute_transactions: validate_header_with_total_difficulty done");
+            // TODO: change NoopProvider for Shasta
+            let consensus = TaikoBeaconConsensus::new(chain_spec.clone(), NoopProvider::default());
             // Validates if some values are set that should not be set for the current HF
-            consensus.validate_header(&block.header)?;
+            consensus.validate_header(sealed_header)?;
             info!("execute_transactions: validate_header done");
             // Validates parent block hash, block number and timestamp
-            let parent = self.input.parent_header.clone().seal_slow();
-            consensus.validate_header_against_parent(&block.header, &parent.into())?;
+            let parent_sealed_header = SealedHeader::new_unhashed(self.input.parent_header.clone());
+            consensus.validate_header_against_parent(sealed_header, &parent_sealed_header)?;
             info!("execute_transactions: validate_header_against_parent done");
             // Validates ommers hash, transaction root, withdrawals root
-            consensus.validate_block_pre_execution(&block)?;
+            consensus.validate_block_pre_execution(sealed_block)?;
             info!("execute_transactions: validate_block_pre_execution done");
             // Validates the gas used, the receipts root and the logs bloom
-            validate_block_post_execution(
-                &BlockWithSenders {
-                    block: block.block.unseal(),
-                    senders: block.senders,
-                },
-                &reth_chain_spec.clone(),
-                &receipts,
-                &requests,
-            )?;
+
+            validate_block_post_execution(&recovered_block, &chain_spec, &receipts, &requests)?;
             info!("execute_transactions: validate_block_post_execution done");
         }
 
-        // Apply DB changes
-        self.db = Some(full_state.database);
+        // Apply DB change
+        self.db = tmp_db;
         info!("execute_transactions: changes start");
         let changes: HashMap<Address, Account> = state
             .state
@@ -506,6 +493,7 @@ impl<DB: Database<Error = ProviderError> + DatabaseCommit + OptimisticDatabase>
                                 EvmStorageSlot {
                                     original_value: v.original_value(),
                                     present_value: v.present_value(),
+                                    transaction_id: 0,
                                     // is_cold used in EIP-2929 for optimizing gas costs for slot accesses, we don't need this in proving
                                     is_cold: false,
                                 },
@@ -513,6 +501,7 @@ impl<DB: Database<Error = ProviderError> + DatabaseCommit + OptimisticDatabase>
                         })
                         .collect(),
                     status: AccountStatus::default(),
+                    transaction_id: 0,
                 };
                 account.mark_touch();
                 if bundle_account.info.is_none() {

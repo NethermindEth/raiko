@@ -18,14 +18,14 @@ use core::{
     fmt::{Debug, Write},
     iter, mem,
 };
+use std::collections::HashMap;
 
-use alloy_primitives::{b256, TxNumber, B256, U256};
+use alloy_primitives::{b256, Address, TxNumber, B256, U256};
 use alloy_rlp::Encodable;
 use alloy_rlp_derive::{RlpDecodable, RlpEncodable, RlpMaxEncodedLen};
-use alloy_rpc_types::EIP1186AccountProofResponse;
 
+use alloy_rpc_types::EIP1186AccountProofResponse;
 use anyhow::{Context, Result};
-use reth_primitives::revm_primitives::{Address, HashMap};
 use rlp::{Decodable, DecoderError, Prototype, Rlp};
 use serde::{Deserialize, Serialize};
 use thiserror::Error as ThisError;
@@ -1039,12 +1039,13 @@ pub fn proofs_to_tries(
 ) -> Result<(MptNode, HashMap<Address, StorageEntry>)> {
     // if no addresses are provided, return the trie only consisting of the state root
     if parent_proofs.is_empty() {
-        return Ok((node_from_digest(state_root), HashMap::new()));
+        return Ok((node_from_digest(state_root), HashMap::default()));
     }
 
-    let mut storage: HashMap<Address, StorageEntry> = HashMap::with_capacity(parent_proofs.len());
+    let mut storage: HashMap<Address, StorageEntry> =
+        HashMap::with_capacity_and_hasher(parent_proofs.len(), Default::default());
 
-    let mut state_nodes = HashMap::new();
+    let mut state_nodes = HashMap::default();
     let mut state_root_node = MptNode::default();
     for (address, proof) in parent_proofs {
         let proof_nodes = parse_proof(&proof.account_proof).unwrap();
@@ -1072,7 +1073,7 @@ pub fn proofs_to_tries(
             continue;
         }
 
-        let mut storage_nodes = HashMap::new();
+        let mut storage_nodes = HashMap::default();
         let mut storage_root_node = MptNode::default();
         for storage_proof in &proof.storage_proof {
             let proof_nodes = parse_proof(&storage_proof.proof).unwrap();

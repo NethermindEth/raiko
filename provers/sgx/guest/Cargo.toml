@@ -14,7 +14,8 @@ raiko-lib = { workspace = true, features = ["sgx"] }
 tokio = { workspace = true }
 anyhow = { workspace = true }
 thiserror = { workspace = true }
-secp256k1 = { workspace = true, features = ["rand-std"] }
+# secp256k1 = { workspace = true, features = ["rand-std"] }
+secp256k1 = { workspace = true }
 serde = { workspace = true }
 rand = { workspace = true }
 hex = { workspace = true }

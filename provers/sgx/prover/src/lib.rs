@@ -9,7 +9,7 @@ use std::{
 
 use once_cell::sync::Lazy;
 use raiko_lib::{
-    consts::SpecId,
+    consts::TaikoSpecId,
     input::{
         AggregationGuestInput, AggregationGuestOutput, GuestBatchInput, GuestBatchOutput,
         GuestInput, GuestOutput,
@@ -93,7 +93,7 @@ static SGX_GUEST_DATA: Lazy<Result<Value, String>> = Lazy::new(|| {
 #[serde_as]
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct SgxParam {
-    pub instance_ids: HashMap<SpecId, u64>,
+    pub instance_ids: HashMap<TaikoSpecId, u64>,
     pub setup: bool,
     pub bootstrap: bool,
     pub prove: bool,

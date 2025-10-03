@@ -20,7 +20,7 @@ test: ## Run the tests
 	TEST=1 RUN=1 ./script/build.sh $(TARGET)
 
 integration: ## Run the integration tests
-	CONFIG_PATH="config/config.json" ./script/integration.sh $(TARGET)
+	CONFIG_PATH="config/devnet/config.json" ./script/integration.sh $(TARGET)
 
 fmt: ## Run cargo fmt
 	@cargo fmt --all --check
