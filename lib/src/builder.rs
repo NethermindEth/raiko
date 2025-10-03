@@ -319,8 +319,6 @@ fn validate_final_batch_blocks(input: &GuestBatchInput, final_blocks: &[Block]) 
                 parent_block.header.hash_slow(),
                 current_block.header.parent_hash
             );
-            // state root is checked in finalize(), skip here
-            // assert!(current_block.state_root == current_input.block.state_root)
         });
 }
 
