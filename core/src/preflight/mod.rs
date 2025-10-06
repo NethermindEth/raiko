@@ -18,8 +18,9 @@ use reth_primitives::TransactionSigned;
 use tracing::{debug, info};
 
 use util::{
-    collect_l1_storage_proofs_and_headers, execute_txs, get_batch_blocks_and_parent_data,
-    get_block_and_parent_data, prepare_taiko_chain_batch_input, prepare_taiko_chain_input,
+    collect_l1_storage_proofs, execute_txs, get_anchor_tx_info_by_fork,
+    get_batch_blocks_and_parent_data, get_block_and_parent_data, prepare_taiko_chain_batch_input,
+    prepare_taiko_chain_input,
 };
 
 pub use util::parse_l1_batch_proposal_tx_for_pacaya_fork;
@@ -110,12 +111,29 @@ pub async fn preflight<BDP: BlockDataProvider>(
 
     info!("preflight: parent header done");
 
-    // Collect L1 storage proofs and headers if running on L2.
-    let (l1_storage_proofs, l1_headers) = if taiko_chain_spec.is_taiko() {
+    // Collect L1 storage proofs with anchor block validation.
+    let l1_storage_proofs = if taiko_chain_spec.is_taiko() {
         let l1_provider = RpcBlockDataProvider::new(&l1_chain_spec.rpc, 0).await?;
-        collect_l1_storage_proofs_and_headers(&block, &l1_provider).await?
+
+        // Extract anchor info from TaikoGuestInput
+        let anchor_tx = taiko_guest_input
+            .anchor_tx
+            .as_ref()
+            .ok_or_else(|| RaikoError::Preflight("No anchor tx available".to_owned()))?;
+        let fork = taiko_chain_spec.active_fork(block_number, block.timestamp)?;
+        let (anchor_block_id, anchor_state_root) = get_anchor_tx_info_by_fork(fork, anchor_tx)?;
+
+        // Validate anchor state root matches TaikoGuestInput.l1_header.state_root
+        if anchor_state_root != taiko_guest_input.l1_header.state_root {
+            return Err(RaikoError::Preflight(format!(
+                "Anchor state root mismatch: expected {:?}, got {:?}",
+                anchor_state_root, taiko_guest_input.l1_header.state_root
+            )));
+        }
+
+        collect_l1_storage_proofs(&block, &l1_provider, anchor_block_id, anchor_state_root).await?
     } else {
-        (Vec::new(), Vec::new())
+        Vec::new()
     };
 
     info!("preflight: L1 data collection done");
@@ -127,7 +145,6 @@ pub async fn preflight<BDP: BlockDataProvider>(
         chain_spec: taiko_chain_spec.clone(),
         taiko: taiko_guest_input,
         l1_storage_proofs,
-        l1_headers,
         ..Default::default()
     };
 
@@ -330,12 +347,44 @@ pub async fn batch_preflight<BDP: BlockDataProvider>(
                     blob_proof_type: taiko_guest_batch_input.blob_proof_type.clone(),
                 };
 
+                // Collect L1 storage proofs for this specific block's anchor
+                let l1_storage_proofs = if taiko_chain_spec.is_taiko() {
+                    let l1_provider = RpcBlockDataProvider::new(&taiko_chain_spec.rpc, 0).await?;
+
+                    // Extract anchor info for this specific block
+                    let fork = taiko_chain_spec
+                        .active_fork(prove_block.header.number, prove_block.timestamp)?;
+                    let (anchor_block_id, anchor_state_root) =
+                        get_anchor_tx_info_by_fork(fork, &anchor_tx)?;
+
+                    // Validate anchor state root matches this block's L1 header
+                    if anchor_state_root != taiko_input.l1_header.state_root {
+                        return Err(RaikoError::Preflight(format!(
+                            "Anchor state root mismatch for block {}: expected {:?}, got {:?}",
+                            prove_block.header.number,
+                            anchor_state_root,
+                            taiko_input.l1_header.state_root
+                        )));
+                    }
+
+                    collect_l1_storage_proofs(
+                        &prove_block,
+                        &l1_provider,
+                        anchor_block_id,
+                        anchor_state_root,
+                    )
+                    .await?
+                } else {
+                    Vec::new()
+                };
+
                 // Create the guest input
                 let input = GuestInput {
                     block: prove_block.clone(),
                     parent_header,
                     chain_spec: taiko_chain_spec.clone(),
                     taiko: taiko_input.clone(),
+                    l1_storage_proofs,
                     ..Default::default()
                 };
 

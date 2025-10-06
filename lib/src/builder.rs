@@ -13,6 +13,8 @@ use crate::{
     CycleTracker,
 };
 use alloy_primitives::Sealable;
+use alloy_rlp::Decodable;
+use alloy_trie::{proof::verify_proof, Nibbles};
 use anyhow::{bail, ensure, Result};
 use reth_chainspec::{ChainHardforks, EthChainSpec, EthereumHardfork, ForkCondition, Hardforks};
 use reth_consensus::{Consensus, HeaderValidator};
@@ -224,22 +226,138 @@ pub static SURGE_MAINNET: LazyLock<Arc<TaikoChainSpec>> = LazyLock::new(|| {
     .into()
 });
 
-/// Populate L1SLOAD cache with storage values before EVM execution
+/// Verify and populate L1SLOAD cache with storage values before EVM execution
 /// This must be called before any EVM execution to ensure L1SLOAD precompile has access to L1 data
-fn populate_l1sload_cache(l1_storage_proofs: &[L1StorageProof]) {
-    // TODO: Use/import set_l1_storage_value from REVM precompile
-    for proof in l1_storage_proofs {
+fn verify_and_populate_l1sload_cache(
+    l1_storage_proofs: &[L1StorageProof],
+    anchor_state_root: B256,
+) -> Result<()> {
+    for (i, proof) in l1_storage_proofs.iter().enumerate() {
+        // Verify L1 storage proof against anchor state root
+        if let Err(e) = verify_l1_proof(proof, anchor_state_root) {
+            bail!(
+                "L1SLOAD proof verification failed for proof #{} (contract={:?}, key={:?}, block={:?}): {}",
+                i,
+                proof.contract_address,
+                proof.storage_key,
+                proof.block_number,
+                e
+            );
+        }
+
+        // TODO: Populate REVM L1SLOAD cache with verified value, add once revm-precompile changes are merged
+        // use revm_precompile::l1sload::set_l1_storage_value;
         // set_l1_storage_value(
         //     proof.contract_address,
         //     proof.storage_key,
         //     proof.block_number,
         //     proof.value,
         // );
+        //
         info!(
-            "L1SLOAD cache: contract={:?}, key={:?}, block={:?}, value={:?}",
+            "L1SLOAD cache ready: addr={:?}, key={:?}, block={:?} -> value={:?}",
+            proof.contract_address, proof.storage_key, proof.block_number, proof.value
+        );
+
+        info!(
+            "Verified and cached L1SLOAD: contract={:?}, key={:?}, block={:?}, value={:?}",
             proof.contract_address, proof.storage_key, proof.block_number, proof.value
         );
     }
+
+    info!(
+        "Successfully verified and populated {} L1SLOAD storage proofs",
+        l1_storage_proofs.len()
+    );
+    Ok(())
+}
+
+/// Verify L1 storage and account proof against anchor state root using MPT proof verification
+fn verify_l1_proof(proof: &L1StorageProof, anchor_state_root: B256) -> Result<()> {
+    if proof.account_proof.is_empty() || proof.storage_proof.is_empty() {
+        bail!("Empty proof provided");
+    }
+
+    // Get and verify account data
+    let account_key = B256::from(keccak(proof.contract_address.as_slice()));
+    let account_rlp = get_and_verify_value(account_key, anchor_state_root, &proof.account_proof)?;
+
+    if account_rlp.is_empty() {
+        bail!("Account does not exist on L1");
+    }
+
+    // Extract storage root and get/verify storage value
+    let storage_root = get_storage_root(&account_rlp)?;
+    let storage_key_hash = B256::from(keccak(proof.storage_key.as_slice()));
+    let storage_rlp = get_and_verify_value(storage_key_hash, storage_root, &proof.storage_proof)?;
+
+    // Compare with claimed value
+    let actual_value = if storage_rlp.is_empty() {
+        B256::ZERO
+    } else {
+        let mut rlp_slice = storage_rlp.as_slice();
+        B256::from(U256::decode(&mut rlp_slice)?)
+    };
+
+    if actual_value != proof.value {
+        bail!(
+            "Value mismatch: expected {:?}, got {:?}",
+            proof.value,
+            actual_value
+        );
+    }
+
+    info!(
+        "L1 storage proof verified for contract {:?}",
+        proof.contract_address
+    );
+    Ok(())
+}
+
+/// Get value and verify proof
+fn get_and_verify_value(key_hash: B256, root: B256, proof: &[Bytes]) -> Result<Vec<u8>> {
+    let nibbles = Nibbles::unpack(&key_hash);
+    let proof_refs: Vec<&Bytes> = proof.iter().collect();
+
+    // Try with None first (empty/non-existent)
+    if verify_proof(root, nibbles.clone(), None, proof_refs.clone()).is_ok() {
+        return Ok(Vec::new());
+    }
+
+    // Extract and verify actual value
+    let value = get_leaf_value(proof)?;
+    let value_option = if value.is_empty() {
+        None
+    } else {
+        Some(value.clone())
+    };
+    verify_proof(root, nibbles, value_option, proof_refs)?;
+
+    Ok(value)
+}
+
+/// Extract value from leaf node
+fn get_leaf_value(proof: &[Bytes]) -> Result<Vec<u8>> {
+    let last_node = proof.last().ok_or_else(|| anyhow::anyhow!("Empty proof"))?;
+    let mut rlp = last_node.as_ref();
+    let decoded: Vec<Vec<u8>> = Vec::decode(&mut rlp)?;
+
+    // Return the value part of a 2-element leaf node, or empty for other cases
+    Ok(if decoded.len() == 2 {
+        decoded[1].clone()
+    } else {
+        Vec::new()
+    })
+}
+
+/// Extract storage root from account RLP
+fn get_storage_root(account_rlp: &[u8]) -> Result<B256> {
+    let mut rlp = account_rlp;
+    let account: Vec<Vec<u8>> = Vec::decode(&mut rlp)?;
+    if account.len() < 3 {
+        bail!("Invalid account format");
+    }
+    Ok(B256::from_slice(&account[2]))
 }
 
 pub fn calculate_block_header(input: &GuestInput) -> Header {
@@ -248,7 +366,9 @@ pub fn calculate_block_header(input: &GuestInput) -> Header {
     cycle_tracker.end();
 
     if !input.l1_storage_proofs.is_empty() {
-        populate_l1sload_cache(&input.l1_storage_proofs);
+        let anchor_state_root = input.taiko.l1_header.state_root;
+        verify_and_populate_l1sload_cache(&input.l1_storage_proofs, anchor_state_root)
+            .expect("Failed to verify and populate L1SLOAD cache for block");
     }
 
     let mut builder = RethBlockBuilder::new(input, db);
@@ -277,7 +397,15 @@ pub fn calculate_batch_blocks_final_header(input: &GuestBatchInput) -> Vec<Block
     let mut final_blocks = Vec::new();
     for (i, pool_txs) in pool_txs_list.iter().enumerate() {
         if !input.inputs[i].l1_storage_proofs.is_empty() {
-            populate_l1sload_cache(&input.inputs[i].l1_storage_proofs);
+            let anchor_state_root = input.inputs[i].taiko.l1_header.state_root;
+            verify_and_populate_l1sload_cache(
+                &input.inputs[i].l1_storage_proofs,
+                anchor_state_root,
+            )
+            .expect(&format!(
+                "Failed to verify and populate L1SLOAD cache for batch block #{}",
+                i
+            ));
         }
 
         let mut builder = RethBlockBuilder::new(

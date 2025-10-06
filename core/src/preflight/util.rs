@@ -40,7 +40,7 @@ use crate::{
     provider::{db::ProviderDb, rpc::RpcBlockDataProvider, BlockDataProvider},
     require,
 };
-use raiko_lib::input::{L1BlockHeader, L1StorageProof};
+use raiko_lib::input::L1StorageProof;
 
 /// Optimize data gathering by executing the transactions multiple times so data can be requested in batches
 pub async fn execute_txs<'a, BDP>(
@@ -231,7 +231,7 @@ pub async fn prepare_taiko_chain_input(
 }
 
 // get fork corresponding anchor block height and state root
-fn get_anchor_tx_info_by_fork(
+pub fn get_anchor_tx_info_by_fork(
     fork: SpecId,
     anchor_tx: &TransactionSigned,
 ) -> RaikoResult<(u64, B256)> {
@@ -454,15 +454,15 @@ pub async fn get_tx_blob(
     Ok((blob, Some(commitment.to_vec()), blob_proof))
 }
 
-/// Collect L1 storage proofs and headers from block transactions
-pub async fn collect_l1_storage_proofs_and_headers(
+/// Collect L1 storage proofs and validates the requested block number matches anchor block
+pub async fn collect_l1_storage_proofs(
     block: &reth_primitives::Block,
     l1_provider: &RpcBlockDataProvider,
-) -> RaikoResult<(Vec<L1StorageProof>, Vec<L1BlockHeader>)> {
+    anchor_block_id: u64,
+    _anchor_state_root: B256,
+) -> RaikoResult<Vec<L1StorageProof>> {
     let mut proofs = Vec::new();
-    let mut l1_headers = Vec::new();
     let mut seen_proofs = std::collections::HashSet::new();
-    let mut seen_blocks = std::collections::HashMap::new(); // block_num -> index in l1_headers
 
     // L1SLOAD precompile address from RIP-7728 (0x0000000000000000000000000000000000010001)
     let l1sload_address = Address::from_slice(&[
@@ -480,37 +480,28 @@ pub async fn collect_l1_storage_proofs_and_headers(
                 let input = tx.input();
                 let contract_address = Address::from_slice(&input[0..20]);
                 let storage_key = B256::from_slice(&input[20..52]);
-                let block_number = B256::from_slice(&input[52..84]);
+                let requested_block_number = B256::from_slice(&input[52..84]);
 
-                // Convert B256 block number to u64 for RPC calls
-                // Assuming block number is in the last 8 bytes of B256
-                let block_num =
-                    u64::from_be_bytes(block_number[24..32].try_into().map_err(|_| {
-                        RaikoError::Preflight("Invalid block number in L1SLOAD".to_owned())
-                    })?);
+                // Validate requested block number matches anchor block
+                let requested_block_u64 =
+                    u64::from_be_bytes(requested_block_number[24..32].try_into().map_err(
+                        |_| RaikoError::Preflight("Invalid block number in L1SLOAD".to_owned()),
+                    )?);
 
-                // Collect L1 header if not seen
-                if !seen_blocks.contains_key(&block_num) {
-                    let l1_blocks = l1_provider.get_blocks(&[(block_num, false)]).await?;
-                    let l1_block = l1_blocks.first().ok_or_else(|| {
-                        RaikoError::Preflight(format!("L1 block {} not found", block_num))
-                    })?;
-
-                    l1_headers.push(L1BlockHeader {
-                        number: block_num,
-                        hash: l1_block.header.hash,
-                        state_root: l1_block.header.state_root,
-                    });
-                    seen_blocks.insert(block_num, l1_headers.len() - 1);
+                if requested_block_u64 != anchor_block_id {
+                    return Err(RaikoError::Preflight(format!(
+                        "L1SLOAD call requests block {} but only anchor block {} is allowed",
+                        requested_block_u64, anchor_block_id
+                    )));
                 }
 
-                // Collect storage proof if not seen
-                let cache_key = (contract_address, storage_key, block_number);
+                // Collect storage proof if not seen (use anchor block for fetching)
+                let cache_key = (contract_address, storage_key);
                 if seen_proofs.insert(cache_key) {
                     let storage_key_u256 = U256::from_be_bytes(storage_key.into());
                     let proof_response = l1_provider
                         .get_l1_storage_proofs(
-                            block_num,
+                            anchor_block_id, // Always use anchor block
                             HashMap::from([(contract_address, vec![storage_key_u256])]),
                         )
                         .await?;
@@ -527,7 +518,7 @@ pub async fn collect_l1_storage_proofs_and_headers(
                         proofs.push(L1StorageProof {
                             contract_address,
                             storage_key,
-                            block_number,
+                            block_number: requested_block_number, // Keep original for validation
                             value: B256::from(proof.storage_proof[0].value),
                             account_proof: proof.account_proof.iter().map(|p| p.clone()).collect(),
                             storage_proof: proof.storage_proof[0]
@@ -544,7 +535,7 @@ pub async fn collect_l1_storage_proofs_and_headers(
 
     // TODO: Handle indirect L1SLOAD calls from smart contracts (requires tracer)
 
-    Ok((proofs, l1_headers))
+    Ok(proofs)
 }
 
 /// get tx data(blob data) vec from blob hashes
