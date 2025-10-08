@@ -459,7 +459,6 @@ pub async fn collect_l1_storage_proofs(
     block: &reth_primitives::Block,
     l1_provider: &RpcBlockDataProvider,
     anchor_block_id: u64,
-    _anchor_state_root: B256,
 ) -> RaikoResult<Vec<L1StorageProof>> {
     let mut proofs = Vec::new();
     let mut seen_proofs = std::collections::HashSet::new();
@@ -501,7 +500,7 @@ pub async fn collect_l1_storage_proofs(
                     let storage_key_u256 = U256::from_be_bytes(storage_key.into());
                     let proof_response = l1_provider
                         .get_l1_storage_proofs(
-                            anchor_block_id, // Always use anchor block
+                            anchor_block_id,
                             HashMap::from([(contract_address, vec![storage_key_u256])]),
                         )
                         .await?;

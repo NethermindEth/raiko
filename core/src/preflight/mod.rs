@@ -131,7 +131,7 @@ pub async fn preflight<BDP: BlockDataProvider>(
             )));
         }
 
-        collect_l1_storage_proofs(&block, &l1_provider, anchor_block_id, anchor_state_root).await?
+        collect_l1_storage_proofs(&block, &l1_provider, anchor_block_id).await?
     } else {
         Vec::new()
     };
@@ -367,13 +367,7 @@ pub async fn batch_preflight<BDP: BlockDataProvider>(
                         )));
                     }
 
-                    collect_l1_storage_proofs(
-                        &prove_block,
-                        &l1_provider,
-                        anchor_block_id,
-                        anchor_state_root,
-                    )
-                    .await?
+                    collect_l1_storage_proofs(&prove_block, &l1_provider, anchor_block_id).await?
                 } else {
                     Vec::new()
                 };

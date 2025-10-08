@@ -23,7 +23,10 @@ members = [
 
 # Always optimize; building and running the guest takes much longer without optimization.
 [profile.dev]
-opt-level = 3
+opt-level = 0        # No optimization for debugging
+debug = true         # Full debug info
+debug-assertions = true
+overflow-checks = true
 
 [profile.dev.build-override]
 opt-level = 3
@@ -120,6 +123,7 @@ alloy-transport-http = { version = "0.7.2", default-features = false, features =
 ] }
 alloy-signer = { version = "0.7.2", default-features = false }
 alloy-signer-local = { version = "0.7.2", default-features = false }
+alloy-trie = { version = "0.7.2", default-features = false }
 
 # ethers (TODO: remove)
 ethers-contract = { git = "https://github.com/smtmfft/ethers-rs", branch = "ethers-core-2.0.10" }

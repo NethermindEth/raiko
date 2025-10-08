@@ -28,7 +28,8 @@ check_toolchain() {
 }
 
 if [ -z "${DEBUG}" ]; then
-    FLAGS=--release
+    #FLAGS=--release
+    FLAGS=""
 else
     echo "Warning: in debug mode"
 fi

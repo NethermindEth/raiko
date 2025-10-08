@@ -88,7 +88,7 @@ impl From<eyre::Report> for RaikoError {
 pub type RaikoResult<T> = Result<T, RaikoError>;
 
 pub async fn get_guest_data() -> RaikoResult<serde_json::Value> {
-    let mut guest_data_array = Vec::new();
+    let mut guest_data_array: Vec<serde_json::Value> = Vec::new();
 
     #[cfg(feature = "sp1")]
     {
@@ -563,6 +563,7 @@ pub struct ProofRequestOpt {
     /// To support batch proof generation.
     /// The block numbers and l1 inclusion block numbers for the blocks to aggregate proofs for.
     /// This is used for batch proof generation.
+    #[arg(long, require_equals = true)]
     pub l2_block_numbers: Option<Vec<u64>>,
     #[arg(long, require_equals = true)]
     /// The network to generate the proof for.
