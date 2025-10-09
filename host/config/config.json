@@ -8,7 +8,15 @@
   "chain_spec_path": "host/config/chain_spec_list_devnet.json",
   "blob_proof_type": "proof_of_equivalence",
   "sgx": {
-    "instance_id": 0
+    "instance_ids": {
+      "HEKLA": 0,
+      "ONTAKE": 0,
+      "PACAYA": 0
+    },
+    "setup": false,
+    "bootstrap": false,
+    "prove": true,
+    "input_path": null
   },
   "risc0": {
     "bonsai": true,
