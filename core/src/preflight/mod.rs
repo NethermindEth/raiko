@@ -322,8 +322,11 @@ pub async fn batch_preflight<BDP: BlockDataProvider>(
         let task_batch_vec = task_batch.to_vec();
         let taiko_guest_batch_input = taiko_guest_batch_input.clone();
         let taiko_chain_spec = taiko_chain_spec.clone();
+        let l1_chain_spec = l1_chain_spec.clone();
         let handle = tokio::spawn(async move {
             let mut chunk_guest_input = Vec::new();
+            let l1_provider = RpcBlockDataProvider::new(&l1_chain_spec.rpc, 0).await?;
+
             for ((prove_block, parent_block), pure_pool_txs) in task_batch_vec {
                 let taiko_chain_spec = taiko_chain_spec.clone();
                 let taiko_guest_batch_input = taiko_guest_batch_input.clone();
@@ -349,8 +352,6 @@ pub async fn batch_preflight<BDP: BlockDataProvider>(
 
                 // Collect L1 storage proofs for this specific block's anchor
                 let l1_storage_proofs = if taiko_chain_spec.is_taiko() {
-                    let l1_provider = RpcBlockDataProvider::new(&taiko_chain_spec.rpc, 0).await?;
-
                     // Extract anchor info for this specific block
                     let fork = taiko_chain_spec
                         .active_fork(prove_block.header.number, prove_block.timestamp)?;
