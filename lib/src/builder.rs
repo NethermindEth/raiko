@@ -37,6 +37,8 @@ use reth_taiko_evm::TaikoExecutorProviderBuilder;
 use reth_taiko_forks::TaikoHardfork;
 use revm_precompile::l1sload::set_l1_storage_value;
 
+use rlp::Rlp;
+
 use tracing::{debug, error, info};
 
 /// Surge dev list of hardforks.
@@ -362,27 +364,46 @@ fn get_and_verify_value(key_hash: B256, root: B256, proof: &[Bytes]) -> Result<V
 /// Extract value from leaf node
 fn get_leaf_value(proof: &[Bytes]) -> Result<Vec<u8>> {
     let last_node = proof.last().ok_or_else(|| anyhow::anyhow!("Empty proof"))?;
-    let mut rlp = last_node.as_ref();
-    let decoded: Vec<Vec<u8>> = Vec::decode(&mut rlp).with_context(|| {
+    let rlp = Rlp::new(last_node.as_ref());
+
+    // Check if it's a list
+    if !rlp.is_list() {
+        bail!(
+            "Last proof node is not a list, raw bytes: 0x{}",
+            hex::encode(last_node)
+        );
+    }
+
+    let item_count = rlp.item_count().with_context(|| {
         format!(
-            "Failed to decode last proof node as Vec<Vec<u8>>, raw bytes: 0x{}, proof has {} nodes",
-            hex::encode(last_node),
-            proof.len()
+            "Failed to get item count from proof node: 0x{}",
+            hex::encode(last_node)
         )
     })?;
 
-    // Return the value part of a 2-element leaf node, or empty for other cases
-    if decoded.len() == 2 {
+    // MPT leaf nodes are 2-element lists [path, value]
+    if item_count == 2 {
+        let value = rlp
+            .at(1)
+            .with_context(|| {
+                format!(
+                    "Failed to extract value from 2-element node: 0x{}",
+                    hex::encode(last_node)
+                )
+            })?
+            .as_raw()
+            .to_vec();
+
         info!(
             "Extracted leaf value: {} bytes from {}-element node",
-            decoded[1].len(),
-            decoded.len()
+            value.len(),
+            item_count
         );
-        Ok(decoded[1].clone())
+        Ok(value)
     } else {
         info!(
             "Last node is not a 2-element leaf (has {} elements), treating as non-existent",
-            decoded.len()
+            item_count
         );
         Ok(Vec::new())
     }
@@ -390,21 +411,57 @@ fn get_leaf_value(proof: &[Bytes]) -> Result<Vec<u8>> {
 
 /// Extract storage root from account RLP
 fn get_storage_root(account_rlp: &[u8]) -> Result<B256> {
-    let mut rlp = account_rlp;
-    let account: Vec<Vec<u8>> = Vec::decode(&mut rlp).with_context(|| {
-        format!(
-            "Failed to decode account RLP, raw bytes: {:?}",
-            hex::encode(account_rlp)
-        )
-    })?;
-    if account.len() < 3 {
+    let rlp = Rlp::new(account_rlp);
+
+    if !rlp.is_list() {
         bail!(
-            "Invalid account format: expected at least 3 fields, got {}, raw bytes: {:?}",
-            account.len(),
+            "Account RLP is not a list, raw bytes: 0x{}",
             hex::encode(account_rlp)
         );
     }
-    Ok(B256::from_slice(&account[2]))
+
+    let item_count = rlp.item_count().with_context(|| {
+        format!(
+            "Failed to get item count from account RLP: 0x{}",
+            hex::encode(account_rlp)
+        )
+    })?;
+
+    // Account format: [nonce, balance, storage_root, code_hash]
+    if item_count < 3 {
+        bail!(
+            "Invalid account format: expected at least 3 fields, got {}, raw bytes: 0x{}",
+            item_count,
+            hex::encode(account_rlp)
+        );
+    }
+
+    // Extract storage root (index 2)
+    let storage_root_bytes = rlp
+        .at(2)
+        .with_context(|| {
+            format!(
+                "Failed to extract storage root from account: 0x{}",
+                hex::encode(account_rlp)
+            )
+        })?
+        .data()
+        .with_context(|| {
+            format!(
+                "Storage root is not a data item: 0x{}",
+                hex::encode(account_rlp)
+            )
+        })?;
+
+    if storage_root_bytes.len() != 32 {
+        bail!(
+            "Invalid storage root length: expected 32 bytes, got {}, raw bytes: 0x{}",
+            storage_root_bytes.len(),
+            hex::encode(account_rlp)
+        );
+    }
+
+    Ok(B256::from_slice(storage_root_bytes))
 }
 
 pub fn calculate_block_header(input: &GuestInput) -> Header {

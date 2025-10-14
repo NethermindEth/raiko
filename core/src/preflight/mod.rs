@@ -4,7 +4,7 @@ use crate::{
     interfaces::{RaikoError, RaikoResult},
     provider::{db::ProviderDb, rpc::RpcBlockDataProvider, BlockDataProvider},
 };
-use alloy_primitives::{Address, Bytes, U256};
+use alloy_primitives::Bytes;
 use futures::future::join_all;
 use raiko_lib::{
     builder::RethBlockBuilder,

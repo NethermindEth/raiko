@@ -1,9 +1,7 @@
 use alloy_consensus::Transaction;
 use alloy_primitives::{hex, Address, Log as LogStruct, B256, U256};
 use alloy_provider::{Provider, ReqwestProvider};
-use alloy_rpc_types::{
-    EIP1186AccountProofResponse, Filter, Header, Log, Transaction as AlloyRpcTransaction,
-};
+use alloy_rpc_types::{Filter, Header, Log, Transaction as AlloyRpcTransaction};
 use alloy_sol_types::{SolCall, SolEvent};
 use anyhow::{anyhow, bail, ensure, Result};
 use kzg::kzg_types::ZFr;
@@ -23,8 +21,6 @@ use raiko_lib::{
         TaikoGuestInput, TaikoProverData,
     },
     primitives::eip4844::{self, commitment_to_version_hash, KZG_SETTINGS},
-    primitives::keccak::keccak,
-    primitives::mpt::{proofs_to_tries, MptNode, StateAccount, StorageEntry},
 };
 use std::collections::HashMap;
 
