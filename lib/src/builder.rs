@@ -15,7 +15,7 @@ use crate::{
 use alloy_primitives::Sealable;
 use alloy_rlp::Decodable;
 use alloy_trie::{proof::verify_proof, Nibbles};
-use anyhow::{bail, ensure, Result};
+use anyhow::{bail, ensure, Context, Result};
 use reth_chainspec::{ChainHardforks, EthChainSpec, EthereumHardfork, ForkCondition, Hardforks};
 use reth_consensus::{Consensus, HeaderValidator};
 use reth_ethereum_consensus::validate_block_post_execution;
@@ -35,6 +35,8 @@ use reth_taiko_chainspec::TaikoChainSpec;
 use reth_taiko_consensus::{TaikoData, TaikoSimpleBeaconConsensus};
 use reth_taiko_evm::TaikoExecutorProviderBuilder;
 use reth_taiko_forks::TaikoHardfork;
+use revm_precompile::l1sload::set_l1_storage_value;
+
 use tracing::{debug, error, info};
 
 /// Surge dev list of hardforks.
@@ -245,18 +247,12 @@ fn verify_and_populate_l1sload_cache(
             );
         }
 
-        // TODO: Populate REVM L1SLOAD cache with verified value, add once revm-precompile changes are merged
-        // use revm_precompile::l1sload::set_l1_storage_value;
-        // set_l1_storage_value(
-        //     proof.contract_address,
-        //     proof.storage_key,
-        //     proof.block_number,
-        //     proof.value,
-        // );
-        //
-        info!(
-            "L1SLOAD cache ready: addr={:?}, key={:?}, block={:?} -> value={:?}",
-            proof.contract_address, proof.storage_key, proof.block_number, proof.value
+        // Populate REVM L1SLOAD cache with verified value
+        set_l1_storage_value(
+            proof.contract_address,
+            proof.storage_key,
+            proof.block_number,
+            proof.value,
         );
 
         info!(
@@ -273,30 +269,48 @@ fn verify_and_populate_l1sload_cache(
 }
 
 /// Verify L1 storage and account proof against anchor state root using MPT proof verification
+/// For non-existent accounts/storage should return zero, given that the provided proofs are empty.
 fn verify_l1_proof(proof: &L1StorageProof, anchor_state_root: B256) -> Result<()> {
-    if proof.account_proof.is_empty() || proof.storage_proof.is_empty() {
-        bail!("Empty proof provided");
-    }
-
     // Get and verify account data
     let account_key = B256::from(keccak(proof.contract_address.as_slice()));
     let account_rlp = get_and_verify_value(account_key, anchor_state_root, &proof.account_proof)?;
 
-    if account_rlp.is_empty() {
-        bail!("Account does not exist on L1");
-    }
-
-    // Extract storage root and get/verify storage value
-    let storage_root = get_storage_root(&account_rlp)?;
-    let storage_key_hash = B256::from(keccak(proof.storage_key.as_slice()));
-    let storage_rlp = get_and_verify_value(storage_key_hash, storage_root, &proof.storage_proof)?;
-
-    // Compare with claimed value
-    let actual_value = if storage_rlp.is_empty() {
+    // If account doesn't exist, storage must be zero
+    let actual_value = if account_rlp.is_empty() {
+        // Account doesn't exist on L1, value must be zero
         B256::ZERO
     } else {
-        let mut rlp_slice = storage_rlp.as_slice();
-        B256::from(U256::decode(&mut rlp_slice)?)
+        // Account exists, check storage
+        let storage_root = get_storage_root(&account_rlp).with_context(|| {
+            format!(
+                "Failed to extract storage root for contract {:?}",
+                proof.contract_address
+            )
+        })?;
+        let storage_key_hash = B256::from(keccak(proof.storage_key.as_slice()));
+        let storage_rlp =
+            get_and_verify_value(storage_key_hash, storage_root, &proof.storage_proof)
+                .with_context(|| {
+                    format!(
+                        "Failed to verify storage proof for contract {:?}, key {:?}",
+                        proof.contract_address, proof.storage_key
+                    )
+                })?;
+
+        // Compare with claimed value
+        if storage_rlp.is_empty() {
+            B256::ZERO
+        } else {
+            let mut rlp_slice = storage_rlp.as_slice();
+            B256::from(U256::decode(&mut rlp_slice).with_context(|| {
+                format!(
+                    "Failed to decode storage value for contract {:?}, key {:?}, raw bytes: 0x{}",
+                    proof.contract_address,
+                    proof.storage_key,
+                    hex::encode(&storage_rlp)
+                )
+            })?)
+        }
     };
 
     if actual_value != proof.value {
@@ -308,14 +322,23 @@ fn verify_l1_proof(proof: &L1StorageProof, anchor_state_root: B256) -> Result<()
     }
 
     info!(
-        "L1 storage proof verified for contract {:?}",
-        proof.contract_address
+        "L1 storage proof verified for contract {:?}, value={:?}",
+        proof.contract_address, proof.value
     );
     Ok(())
 }
 
 /// Get value and verify proof
 fn get_and_verify_value(key_hash: B256, root: B256, proof: &[Bytes]) -> Result<Vec<u8>> {
+    // Handle empty proof array (proves non-existence at the root level)
+    if proof.is_empty() {
+        // For non-existent keys, verify against the root
+        let nibbles = Nibbles::unpack(&key_hash);
+        let proof_refs: Vec<&Bytes> = Vec::new();
+        verify_proof(root, nibbles, None, proof_refs)?;
+        return Ok(Vec::new());
+    }
+
     let nibbles = Nibbles::unpack(&key_hash);
     let proof_refs: Vec<&Bytes> = proof.iter().collect();
 
@@ -340,22 +363,46 @@ fn get_and_verify_value(key_hash: B256, root: B256, proof: &[Bytes]) -> Result<V
 fn get_leaf_value(proof: &[Bytes]) -> Result<Vec<u8>> {
     let last_node = proof.last().ok_or_else(|| anyhow::anyhow!("Empty proof"))?;
     let mut rlp = last_node.as_ref();
-    let decoded: Vec<Vec<u8>> = Vec::decode(&mut rlp)?;
+    let decoded: Vec<Vec<u8>> = Vec::decode(&mut rlp).with_context(|| {
+        format!(
+            "Failed to decode last proof node as Vec<Vec<u8>>, raw bytes: 0x{}, proof has {} nodes",
+            hex::encode(last_node),
+            proof.len()
+        )
+    })?;
 
     // Return the value part of a 2-element leaf node, or empty for other cases
-    Ok(if decoded.len() == 2 {
-        decoded[1].clone()
+    if decoded.len() == 2 {
+        info!(
+            "Extracted leaf value: {} bytes from {}-element node",
+            decoded[1].len(),
+            decoded.len()
+        );
+        Ok(decoded[1].clone())
     } else {
-        Vec::new()
-    })
+        info!(
+            "Last node is not a 2-element leaf (has {} elements), treating as non-existent",
+            decoded.len()
+        );
+        Ok(Vec::new())
+    }
 }
 
 /// Extract storage root from account RLP
 fn get_storage_root(account_rlp: &[u8]) -> Result<B256> {
     let mut rlp = account_rlp;
-    let account: Vec<Vec<u8>> = Vec::decode(&mut rlp)?;
+    let account: Vec<Vec<u8>> = Vec::decode(&mut rlp).with_context(|| {
+        format!(
+            "Failed to decode account RLP, raw bytes: {:?}",
+            hex::encode(account_rlp)
+        )
+    })?;
     if account.len() < 3 {
-        bail!("Invalid account format");
+        bail!(
+            "Invalid account format: expected at least 3 fields, got {}, raw bytes: {:?}",
+            account.len(),
+            hex::encode(account_rlp)
+        );
     }
     Ok(B256::from_slice(&account[2]))
 }

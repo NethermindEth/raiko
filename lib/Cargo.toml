@@ -14,6 +14,7 @@ reth-taiko-evm = { workspace = true }
 reth-taiko-forks = { workspace = true }
 reth-taiko-chainspec = { workspace = true }
 
+revm-precompile = { workspace = true }
 
 # alloy
 alloy-rlp = { workspace = true }

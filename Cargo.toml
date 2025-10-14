@@ -74,6 +74,7 @@ reth-taiko-consensus = { git = "https://github.com/NethermindEth/surge-reth.git"
 reth-taiko-forks = { git = "https://github.com/NethermindEth/surge-reth.git", branch = "surge", default-features = false }
 reth-taiko-chainspec = { git = "https://github.com/NethermindEth/surge-reth.git", branch = "surge", default-features = false }
 
+revm-precompile = { git = "https://github.com/NethermindEth/surge-revm.git", tag = "v50-taiko-l1sload", default-features = false }
 
 reqwest_alloy = { package = "reqwest", version = "0.12.4", features = ["json"] }
 
@@ -229,7 +230,7 @@ serial_test = "2"
 
 [patch.crates-io]
 revm = { git = "https://github.com/NethermindEth/surge-revm.git", tag = "v50-taiko" }
-revm-precompile = { git = "https://github.com/NethermindEth/surge-revm.git", tag = "v50-taiko" }
+revm-precompile = { git = "https://github.com/NethermindEth/surge-revm.git", tag = "v50-taiko-l1sload" }
 revm-primitives = { git = "https://github.com/NethermindEth/surge-revm.git", tag = "v50-taiko" }
 
 secp256k1 = { git = "https://github.com/sp1-patches/rust-secp256k1", tag = "patch-0.29.1-sp1-4.0.0" }

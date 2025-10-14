@@ -507,13 +507,16 @@ pub async fn collect_l1_storage_proofs(
 
                     // Find the proof for this specific contract
                     if let Some(proof) = proof_response.get(&contract_address) {
-                        // Ensure we have storage proof
+                        // Ensure we have storage proof array
                         if proof.storage_proof.is_empty() {
                             return Err(RaikoError::Preflight(
                                 "No storage proof returned for L1SLOAD".to_owned(),
                             ));
                         }
 
+                        // Note: account_proof and storage_proof[0].proof can be empty for non-existent
+                        // accounts/storage. This is valid and proves non-existence (returns zero).
+                        // The MPT proof verification will handle these cases.
                         proofs.push(L1StorageProof {
                             contract_address,
                             storage_key,
