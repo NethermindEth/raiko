@@ -386,18 +386,18 @@ fn get_leaf_value(proof: &[Bytes]) -> Result<Vec<u8>> {
 
     // Capture value position
     let value_start_offset = last_node.len() - data.len();
-    info!(
-        "DEBUG: After skipping path, data has {} bytes remaining",
+    eprintln!(
+        "DEBUG get_leaf_value: After skipping path, data has {} bytes remaining",
         data.len()
     );
-    info!(
-        "DEBUG: value_start_offset = {} (last_node.len={} - data.len={})",
+    eprintln!(
+        "DEBUG get_leaf_value: value_start_offset = {} (last_node.len={} - data.len={})",
         value_start_offset,
         last_node.len(),
         data.len()
     );
-    info!(
-        "DEBUG: Bytes at value_start_offset: 0x{}",
+    eprintln!(
+        "DEBUG get_leaf_value: Bytes at value_start_offset: 0x{}",
         hex::encode(
             &last_node[value_start_offset..value_start_offset.min(value_start_offset + 10)]
         )
@@ -408,28 +408,34 @@ fn get_leaf_value(proof: &[Bytes]) -> Result<Vec<u8>> {
     let value_header = RlpHeader::decode(&mut temp_data)
         .with_context(|| format!("Failed to decode value header"))?;
 
-    info!("DEBUG: value_header.list = {}", value_header.list);
-    info!(
-        "DEBUG: value_header.payload_length = {}",
+    eprintln!(
+        "DEBUG get_leaf_value: value_header.list = {}",
+        value_header.list
+    );
+    eprintln!(
+        "DEBUG get_leaf_value: value_header.payload_length = {}",
         value_header.payload_length
     );
-    info!("DEBUG: value_header.length() = {}", value_header.length());
-    info!(
-        "DEBUG: value_header.length_with_payload() = {}",
+    eprintln!(
+        "DEBUG get_leaf_value: value_header.length() = {}",
+        value_header.length()
+    );
+    eprintln!(
+        "DEBUG get_leaf_value: value_header.length_with_payload() = {}",
         value_header.length_with_payload()
     );
 
     // Calculate the total length
     let value_total_len = value_header.length() + value_header.payload_length;
 
-    info!(
-        "DEBUG: Calculated value_total_len = {} + {} = {}",
+    eprintln!(
+        "DEBUG get_leaf_value: Calculated value_total_len = {} + {} = {}",
         value_header.length(),
         value_header.payload_length,
         value_total_len
     );
-    info!(
-        "DEBUG: Will extract last_node[{}..{}]",
+    eprintln!(
+        "DEBUG get_leaf_value: Will extract last_node[{}..{}]",
         value_start_offset,
         value_start_offset + value_total_len
     );
@@ -437,13 +443,12 @@ fn get_leaf_value(proof: &[Bytes]) -> Result<Vec<u8>> {
     // Extract the value with its RLP encoding
     let value = last_node[value_start_offset..value_start_offset + value_total_len].to_vec();
 
-    info!(
-        "DEBUG: Extracted {} bytes: 0x{}",
+    eprintln!(
+        "DEBUG get_leaf_value: Extracted {} bytes: 0x{}",
         value.len(),
         hex::encode(&value[..value.len().min(20)])
     );
-
-    info!("DEBUG: For comparison, expected format should start with RLP string prefix (b8xx for long strings)");
+    eprintln!("DEBUG get_leaf_value: Expected should start with 0xb846");
 
     info!(
         "Extracted leaf value: {} bytes (RLP-encoded) from 2-element node",
