@@ -132,7 +132,7 @@ pub async fn preflight<BDP: BlockDataProvider>(
 
     // for TDX proofs, we avoid rebuilding the state trie and re-executing the
     // block as the node execution is trusted
-    if proof_type == ProofType::Tdx {
+    if proof_type == ProofType::Tdx || proof_type == ProofType::AzureTdx {
         info!("preflight: skipping re-execution since TDX proof");
         return Ok(input);
     }
@@ -342,7 +342,8 @@ pub async fn batch_preflight<BDP: BlockDataProvider>(
 
                 // for TDX proofs, we avoid rebuilding the state trie and re-executing the
                 // block as the node execution is trusted
-                if proof_type != ProofType::Tdx {
+                // TODO: reverse this check
+                if proof_type != ProofType::Tdx && proof_type != ProofType::AzureTdx {
                     info!("batch_preflight: skipping re-execution since TDX proof");
                     chunk_guest_input.push(input);
                     continue;

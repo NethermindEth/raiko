@@ -37,6 +37,11 @@ pub enum ProofType {
     /// Builds the block on a TDX supported CPU to create a proof.
     #[serde(alias = "TDX")]
     Tdx = 5u8,
+    /// # Azure Tdx
+    ///
+    /// Builds the block on an Azure TDX VM to create a proof.
+    #[serde(alias = "AZURE_TDX")]
+    AzureTdx = 6u8,
 }
 
 impl std::fmt::Display for ProofType {
@@ -48,6 +53,7 @@ impl std::fmt::Display for ProofType {
             ProofType::Risc0 => "risc0",
             ProofType::SgxGeth => "sgxgeth",
             ProofType::Tdx => "tdx",
+            ProofType::AzureTdx => "azure_tdx",
         })
     }
 }
@@ -63,6 +69,7 @@ impl std::str::FromStr for ProofType {
             "risc0" => Ok(ProofType::Risc0),
             "sgxgeth" => Ok(ProofType::SgxGeth),
             "tdx" => Ok(ProofType::Tdx),
+            "azure_tdx" => Ok(ProofType::AzureTdx),
             _ => Err(format!("Unknown proof type {}", s)),
         }
     }
@@ -79,6 +86,7 @@ impl TryFrom<u8> for ProofType {
             3 => Ok(Self::Risc0),
             4 => Ok(Self::SgxGeth),
             5 => Ok(Self::Tdx),
+            6 => Ok(Self::AzureTdx),
             _ => Err(format!("Unknown proof type {}", value)),
         }
     }

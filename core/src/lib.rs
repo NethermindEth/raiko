@@ -235,7 +235,7 @@ impl Raiko {
     }
 
     fn should_execute_transactions(&self) -> bool {
-        self.request.proof_type != raiko_lib::proof_type::ProofType::Tdx
+        self.request.proof_type != raiko_lib::proof_type::ProofType::Tdx && self.request.proof_type != raiko_lib::proof_type::ProofType::AzureTdx
     }
 
     pub async fn prove(
@@ -429,6 +429,17 @@ mod tests {
         );
         prover_args.insert(
             "tdx".to_string(),
+            json! {
+                {
+                    "instance_id": 121,
+                    "socket_path": "/var/run/tdxd.sock",
+                    "bootstrap": enable_aggregation,
+                    "prove": true,
+                }
+            },
+        );
+        prover_args.insert(
+            "azure_tdx".to_string(),
             json! {
                 {
                     "instance_id": 121,
