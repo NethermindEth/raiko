@@ -1,7 +1,6 @@
 use core::{fmt::Debug, str::FromStr};
 
 use alloy_consensus::serde_bincode_compat;
-
 use anyhow::{anyhow, Error, Result};
 use ontake::BlockProposedV2;
 use pacaya::{BatchInfo, BatchProposed};
