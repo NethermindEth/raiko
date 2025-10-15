@@ -13,7 +13,7 @@ use crate::{
     CycleTracker,
 };
 use alloy_primitives::Sealable;
-use alloy_rlp::Decodable;
+use alloy_rlp::{Buf, Decodable, Header as RlpHeader};
 use alloy_trie::{proof::verify_proof, Nibbles};
 use anyhow::{bail, ensure, Context, Result};
 use reth_chainspec::{ChainHardforks, EthChainSpec, EthereumHardfork, ForkCondition, Hardforks};
@@ -36,8 +36,6 @@ use reth_taiko_consensus::{TaikoData, TaikoSimpleBeaconConsensus};
 use reth_taiko_evm::TaikoExecutorProviderBuilder;
 use reth_taiko_forks::TaikoHardfork;
 use revm_precompile::l1sload::set_l1_storage_value;
-
-use rlp::Rlp;
 
 use tracing::{debug, error, info};
 
@@ -364,103 +362,107 @@ fn get_and_verify_value(key_hash: B256, root: B256, proof: &[Bytes]) -> Result<V
 /// Extract value from leaf node
 fn get_leaf_value(proof: &[Bytes]) -> Result<Vec<u8>> {
     let last_node = proof.last().ok_or_else(|| anyhow::anyhow!("Empty proof"))?;
-    let rlp = Rlp::new(last_node.as_ref());
+    let mut data = last_node.as_ref();
 
-    // Check if it's a list
-    if !rlp.is_list() {
+    // Decode the list header
+    let list_header = RlpHeader::decode(&mut data).with_context(|| {
+        format!(
+            "Failed to decode list header from proof node: 0x{}",
+            hex::encode(last_node)
+        )
+    })?;
+
+    if !list_header.list {
         bail!(
             "Last proof node is not a list, raw bytes: 0x{}",
             hex::encode(last_node)
         );
     }
 
-    let item_count = rlp.item_count().with_context(|| {
+    // For a 2-element list [path, value], we need to skip the path and decode the value
+    let path_header = RlpHeader::decode(&mut data)
+        .with_context(|| format!("Failed to decode path header: 0x{}", hex::encode(last_node)))?;
+    data.advance(path_header.payload_length);
+
+    // Capture value position
+    let value_start_offset = last_node.len() - data.len();
+
+    // Decode the value header to get its total length
+    let value_header = RlpHeader::decode(&mut data).with_context(|| {
         format!(
-            "Failed to get item count from proof node: 0x{}",
+            "Failed to decode value header: 0x{}",
             hex::encode(last_node)
         )
     })?;
 
-    // MPT leaf nodes are 2-element lists [path, value]
-    if item_count == 2 {
-        let value = rlp
-            .at(1)
-            .with_context(|| {
-                format!(
-                    "Failed to extract value from 2-element node: 0x{}",
-                    hex::encode(last_node)
-                )
-            })?
-            .as_raw()
-            .to_vec();
+    // Calculate the total length of the value element (header + payload)
+    let value_total_len = value_header.length() + value_header.payload_length;
 
-        info!(
-            "Extracted leaf value: {} bytes from {}-element node",
-            value.len(),
-            item_count
-        );
-        Ok(value)
-    } else {
-        info!(
-            "Last node is not a 2-element leaf (has {} elements), treating as non-existent",
-            item_count
-        );
-        Ok(Vec::new())
-    }
+    // Extract the value with its RLP encoding (alloy-trie expects in this format)
+    let value = last_node[value_start_offset..value_start_offset + value_total_len].to_vec();
+
+    info!(
+        "Extracted leaf value: {} bytes (RLP-encoded) from 2-element node",
+        value.len()
+    );
+    Ok(value)
 }
 
 /// Extract storage root from account RLP
 fn get_storage_root(account_rlp: &[u8]) -> Result<B256> {
-    let rlp = Rlp::new(account_rlp);
+    let mut data = account_rlp;
 
-    if !rlp.is_list() {
+    // Decode the list header for account [nonce, balance, storage_root, code_hash]
+    let list_header = RlpHeader::decode(&mut data).with_context(|| {
+        format!(
+            "Failed to decode account list header: 0x{}",
+            hex::encode(account_rlp)
+        )
+    })?;
+
+    if !list_header.list {
         bail!(
             "Account RLP is not a list, raw bytes: 0x{}",
             hex::encode(account_rlp)
         );
     }
 
-    let item_count = rlp.item_count().with_context(|| {
+    // Skip nonce (field 0)
+    let nonce_header = RlpHeader::decode(&mut data).with_context(|| {
         format!(
-            "Failed to get item count from account RLP: 0x{}",
+            "Failed to decode nonce header: 0x{}",
+            hex::encode(account_rlp)
+        )
+    })?;
+    data.advance(nonce_header.payload_length);
+
+    // Skip balance (field 1)
+    let balance_header = RlpHeader::decode(&mut data).with_context(|| {
+        format!(
+            "Failed to decode balance header: 0x{}",
+            hex::encode(account_rlp)
+        )
+    })?;
+    data.advance(balance_header.payload_length);
+
+    // Decode storage_root (field 2)
+    let storage_root_header = RlpHeader::decode(&mut data).with_context(|| {
+        format!(
+            "Failed to decode storage root header: 0x{}",
             hex::encode(account_rlp)
         )
     })?;
 
-    // Account format: [nonce, balance, storage_root, code_hash]
-    if item_count < 3 {
-        bail!(
-            "Invalid account format: expected at least 3 fields, got {}, raw bytes: 0x{}",
-            item_count,
-            hex::encode(account_rlp)
-        );
-    }
-
-    // Extract storage root (index 2)
-    let storage_root_bytes = rlp
-        .at(2)
-        .with_context(|| {
-            format!(
-                "Failed to extract storage root from account: 0x{}",
-                hex::encode(account_rlp)
-            )
-        })?
-        .data()
-        .with_context(|| {
-            format!(
-                "Storage root is not a data item: 0x{}",
-                hex::encode(account_rlp)
-            )
-        })?;
-
-    if storage_root_bytes.len() != 32 {
+    if storage_root_header.payload_length != 32 {
         bail!(
             "Invalid storage root length: expected 32 bytes, got {}, raw bytes: 0x{}",
-            storage_root_bytes.len(),
+            storage_root_header.payload_length,
             hex::encode(account_rlp)
         );
     }
 
+    // Extract the storage root bytes
+    let storage_root_bytes = &data[..32];
     Ok(B256::from_slice(storage_root_bytes))
 }
 
