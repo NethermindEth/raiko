@@ -386,20 +386,64 @@ fn get_leaf_value(proof: &[Bytes]) -> Result<Vec<u8>> {
 
     // Capture value position
     let value_start_offset = last_node.len() - data.len();
-
-    // Decode the value header to get its total length
-    let value_header = RlpHeader::decode(&mut data).with_context(|| {
-        format!(
-            "Failed to decode value header: 0x{}",
-            hex::encode(last_node)
+    info!(
+        "DEBUG: After skipping path, data has {} bytes remaining",
+        data.len()
+    );
+    info!(
+        "DEBUG: value_start_offset = {} (last_node.len={} - data.len={})",
+        value_start_offset,
+        last_node.len(),
+        data.len()
+    );
+    info!(
+        "DEBUG: Bytes at value_start_offset: 0x{}",
+        hex::encode(
+            &last_node[value_start_offset..value_start_offset.min(value_start_offset + 10)]
         )
-    })?;
+    );
 
-    // Calculate the total length of the value element (header + payload)
+    // Peek at the value header (without consuming it)
+    let mut temp_data = data;
+    let value_header = RlpHeader::decode(&mut temp_data)
+        .with_context(|| format!("Failed to decode value header"))?;
+
+    info!("DEBUG: value_header.list = {}", value_header.list);
+    info!(
+        "DEBUG: value_header.payload_length = {}",
+        value_header.payload_length
+    );
+    info!("DEBUG: value_header.length() = {}", value_header.length());
+    info!(
+        "DEBUG: value_header.length_with_payload() = {}",
+        value_header.length_with_payload()
+    );
+
+    // Calculate the total length
     let value_total_len = value_header.length() + value_header.payload_length;
 
-    // Extract the value with its RLP encoding (alloy-trie expects in this format)
+    info!(
+        "DEBUG: Calculated value_total_len = {} + {} = {}",
+        value_header.length(),
+        value_header.payload_length,
+        value_total_len
+    );
+    info!(
+        "DEBUG: Will extract last_node[{}..{}]",
+        value_start_offset,
+        value_start_offset + value_total_len
+    );
+
+    // Extract the value with its RLP encoding
     let value = last_node[value_start_offset..value_start_offset + value_total_len].to_vec();
+
+    info!(
+        "DEBUG: Extracted {} bytes: 0x{}",
+        value.len(),
+        hex::encode(&value[..value.len().min(20)])
+    );
+
+    info!("DEBUG: For comparison, expected format should start with RLP string prefix (b8xx for long strings)");
 
     info!(
         "Extracted leaf value: {} bytes (RLP-encoded) from 2-element node",
