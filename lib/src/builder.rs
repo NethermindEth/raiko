@@ -384,71 +384,13 @@ fn get_leaf_value(proof: &[Bytes]) -> Result<Vec<u8>> {
         .with_context(|| format!("Failed to decode path header: 0x{}", hex::encode(last_node)))?;
     data.advance(path_header.payload_length);
 
-    // Capture value position
-    let value_start_offset = last_node.len() - data.len();
-    eprintln!(
-        "DEBUG get_leaf_value: After skipping path, data has {} bytes remaining",
-        data.len()
-    );
-    eprintln!(
-        "DEBUG get_leaf_value: value_start_offset = {} (last_node.len={} - data.len={})",
-        value_start_offset,
-        last_node.len(),
-        data.len()
-    );
-    eprintln!(
-        "DEBUG get_leaf_value: Bytes at value_start_offset: 0x{}",
-        hex::encode(
-            &last_node[value_start_offset..value_start_offset.min(value_start_offset + 10)]
-        )
-    );
+    // Decode the value element header to get its payload
+    let value_header =
+        RlpHeader::decode(&mut data).with_context(|| format!("Failed to decode value header"))?;
 
-    // Peek at the value header (without consuming it)
-    let mut temp_data = data;
-    let value_header = RlpHeader::decode(&mut temp_data)
-        .with_context(|| format!("Failed to decode value header"))?;
-
-    eprintln!(
-        "DEBUG get_leaf_value: value_header.list = {}",
-        value_header.list
-    );
-    eprintln!(
-        "DEBUG get_leaf_value: value_header.payload_length = {}",
-        value_header.payload_length
-    );
-    eprintln!(
-        "DEBUG get_leaf_value: value_header.length() = {}",
-        value_header.length()
-    );
-    eprintln!(
-        "DEBUG get_leaf_value: value_header.length_with_payload() = {}",
-        value_header.length_with_payload()
-    );
-
-    // Calculate the total length
-    let value_total_len = value_header.length() + value_header.payload_length;
-
-    eprintln!(
-        "DEBUG get_leaf_value: Calculated value_total_len = {} + {} = {}",
-        value_header.length(),
-        value_header.payload_length,
-        value_total_len
-    );
-    eprintln!(
-        "DEBUG get_leaf_value: Will extract last_node[{}..{}]",
-        value_start_offset,
-        value_start_offset + value_total_len
-    );
-
-    // Extract the value with its RLP encoding
-    let value = last_node[value_start_offset..value_start_offset + value_total_len].to_vec();
-
-    eprintln!(
-        "DEBUG get_leaf_value: Extracted {} bytes: 0x{}",
-        value.len(),
-        hex::encode(&value[..value.len().min(20)])
-    );
-    eprintln!("DEBUG get_leaf_value: Expected should start with 0xb846");
+    // In an MPT leaf node [path, value], when the 2-element list is decoded,
+    // the value field is the PAYLOAD only (not including the RLP header).
+    let value = data[..value_header.payload_length].to_vec();
 
     info!(
         "Extracted leaf value: {} bytes (RLP-encoded) from 2-element node",
