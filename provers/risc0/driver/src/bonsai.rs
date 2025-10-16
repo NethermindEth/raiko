@@ -11,8 +11,8 @@ use raiko_lib::{
     prover::{IdWrite, ProofKey, ProverError, ProverResult},
 };
 use risc0_zkvm::{
-    compute_image_id, is_dev_mode, serde::to_vec, sha::Digest, AssumptionReceipt, ExecutorEnv,
-    ExecutorImpl, Receipt,
+    compute_image_id, serde::to_vec, sha::Digest, AssumptionReceipt, ExecutorEnv, ExecutorImpl,
+    Receipt,
 };
 use risc0_zkvm::{get_prover_server, ProverOpts, VerifierContext};
 use serde::{de::DeserializeOwned, Serialize};
@@ -414,7 +414,8 @@ pub fn prove_locally(
 pub fn load_receipt<T: serde::de::DeserializeOwned>(
     file_name: &String,
 ) -> anyhow::Result<Option<(String, T)>> {
-    if is_dev_mode() {
+    #[allow(deprecated)]
+    if risc0_zkvm::is_dev_mode() {
         // Nothing to load
         return Ok(None);
     }
@@ -432,7 +433,8 @@ pub fn load_receipt<T: serde::de::DeserializeOwned>(
 }
 
 pub fn save_receipt<T: serde::Serialize>(receipt_label: &String, receipt_data: &(String, T)) {
-    if !is_dev_mode() {
+    #[allow(deprecated)]
+    if !risc0_zkvm::is_dev_mode() {
         let cache_path = zkp_cache_path(receipt_label);
         info!("Saving receipt to cache: {cache_path:?}");
         fs::write(

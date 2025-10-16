@@ -2,7 +2,7 @@ use alloy_primitives::Address;
 use anyhow::{anyhow, Context, Result};
 use file_lock::{FileLock, FileOptions};
 use raiko_lib::{
-    consts::{ChainSpec, SpecId, SupportedChainSpecs},
+    consts::{ChainSpec, SupportedChainSpecs, TaikoSpecId},
     proof_type::ProofType,
 };
 use serde_json::Value;
@@ -170,9 +170,9 @@ pub(crate) async fn setup_bootstrap_inner(
 fn get_hard_fork_verifiers(
     taiko_chain_spec: &ChainSpec,
     proof_type: ProofType,
-) -> BTreeMap<Address, Vec<SpecId>> {
-    let mut fork_verifiers: BTreeMap<Address, Vec<SpecId>> =
-        BTreeMap::<Address, Vec<SpecId>>::new();
+) -> BTreeMap<Address, Vec<TaikoSpecId>> {
+    let mut fork_verifiers: BTreeMap<Address, Vec<TaikoSpecId>> =
+        BTreeMap::<Address, Vec<TaikoSpecId>>::new();
     taiko_chain_spec
         .verifier_address_forks
         .iter()
@@ -194,9 +194,9 @@ mod test {
 
     use super::*;
     use env_logger;
+    use log::LevelFilter;
     use raiko_lib::consts::Network;
     use tracing::info;
-    use tracing::log::LevelFilter;
 
     #[test]
     fn test_hard_fork_verifier() {

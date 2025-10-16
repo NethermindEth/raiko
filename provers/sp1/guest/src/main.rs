@@ -6,9 +6,6 @@ use raiko_lib::{
     protocol_instance::ProtocolInstance, CycleTracker,
 };
 
-pub mod sys;
-pub use sys::*;
-
 pub fn main() {
     let mut ct = CycleTracker::start("input");
     let input = sp1_zkvm::io::read_vec();
@@ -30,8 +27,7 @@ pub fn main() {
 
 harness::zk_suits!(
     pub mod tests {
-        use reth_primitives::alloy_primitives::PrimitiveSignature as Signature;
-        use reth_primitives::U256;
+        use raiko_lib::primitives::{Signature, B256, U256};
         use std::str::FromStr;
 
         #[test]
@@ -51,10 +47,9 @@ harness::zk_suits!(
                 .unwrap(),
                 false,
             );
-            let hash = reth_primitives::B256::from_str(
-                "daf5a779ae972f972197303d7b574746c7ef83eadac0f2791ad23db92e4c8e53",
-            )
-            .unwrap();
+            let hash =
+                B256::from_str("daf5a779ae972f972197303d7b574746c7ef83eadac0f2791ad23db92e4c8e53")
+                    .unwrap();
             signature.recover_address_from_msg(hash).unwrap();
         }
     }

@@ -5,7 +5,7 @@ use alloy_sol_types::sol;
 use anyhow::Result;
 use pem::parse_many;
 use raiko_lib::{
-    consts::SpecId,
+    consts::TaikoSpecId,
     primitives::{hex, Address, Bytes, FixedBytes, U256},
     proof_type::ProofType,
 };
@@ -23,7 +23,7 @@ fn get_registered_file(proof_type: ProofType) -> &'static str {
     }
 }
 
-pub type ForkRegisterId = BTreeMap<SpecId, u64>;
+pub type ForkRegisterId = BTreeMap<TaikoSpecId, u64>;
 
 pub fn get_instance_id(dir: &Path, proof_type: ProofType) -> Result<Option<ForkRegisterId>> {
     let file = dir.join(get_registered_file(proof_type));
@@ -293,9 +293,8 @@ pub async fn register_sgx_instance(
     // init rpc conn
     let url = Url::parse(l1_rpc_url).map_err(|_| "Invalid RPC URL".to_owned())?;
     let provider = ProviderBuilder::new()
-        .with_recommended_fillers()
         .wallet(EthereumWallet::from(wallet.clone()))
-        .on_provider(RootProvider::new_http(url.clone()));
+        .connect_provider(RootProvider::new_http(url.clone()));
     let sgx_verifier_contract = SgxVerifier::new(sgx_verifier_addr, &provider);
 
     // init account
@@ -390,9 +389,8 @@ mod test {
         )
         .await?;
         let mut fork_ids = ForkRegisterId::new();
-        fork_ids.insert(SpecId::HEKLA, id0);
-        fork_ids.insert(SpecId::ONTAKE, id0);
-        fork_ids.insert(SpecId::PACAYA, id1);
+        fork_ids.insert(TaikoSpecId::ONTAKE, id0);
+        fork_ids.insert(TaikoSpecId::PACAYA, id1);
         set_instance_id(Path::new("/tmp"), ProofType::Sgx, &fork_ids)?;
         Ok(vec![id0, id1])
     }

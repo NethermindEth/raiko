@@ -88,24 +88,43 @@ impl From<eyre::Report> for RaikoError {
 pub type RaikoResult<T> = Result<T, RaikoError>;
 
 pub async fn get_guest_data() -> RaikoResult<serde_json::Value> {
-    let mut guest_data_array: Vec<serde_json::Value> = Vec::new();
+    let mut guest_data_object = serde_json::Map::new();
 
     #[cfg(feature = "sp1")]
     {
-        guest_data_array.push(sp1_driver::Sp1Prover::get_guest_data().await?);
+        let sp1_data = sp1_driver::Sp1Prover::get_guest_data().await?;
+        let sp1_map = sp1_data
+            .as_object()
+            .cloned()
+            .expect("sp1 guest data is not an object");
+
+        guest_data_object.extend(sp1_map);
     }
 
     #[cfg(feature = "risc0")]
     {
-        guest_data_array.push(risc0_driver::Risc0Prover::get_guest_data().await?);
+        let risc0_data = risc0_driver::Risc0Prover::get_guest_data().await?;
+
+        let risc0_map = risc0_data
+            .as_object()
+            .cloned()
+            .expect("risc0 guest data is not an object");
+
+        guest_data_object.extend(risc0_map);
     }
 
     #[cfg(feature = "sgx")]
     {
-        guest_data_array.push(sgx_prover::SgxProver::get_guest_data().await?);
+        let sgx_data = sgx_prover::SgxProver::get_guest_data().await?;
+        let sgx_map = sgx_data
+            .as_object()
+            .cloned()
+            .expect("sgx guest data is not an object");
+
+        guest_data_object.extend(sgx_map);
     }
 
-    Ok(serde_json::to_value(guest_data_array)?)
+    Ok(serde_json::Value::Object(guest_data_object))
 }
 
 /// Run the prover driver depending on the proof type.
@@ -563,7 +582,6 @@ pub struct ProofRequestOpt {
     /// To support batch proof generation.
     /// The block numbers and l1 inclusion block numbers for the blocks to aggregate proofs for.
     /// This is used for batch proof generation.
-    #[arg(long, require_equals = true)]
     pub l2_block_numbers: Option<Vec<u64>>,
     #[arg(long, require_equals = true)]
     /// The network to generate the proof for.
