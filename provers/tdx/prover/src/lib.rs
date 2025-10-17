@@ -25,7 +25,7 @@ pub const TDX_PROVER_CODE: u8 = ProofType::Tdx as u8;
 pub const TDX_PROOF_SIZE: usize = 89;
 pub const TDX_AGGREGATION_PROOF_SIZE: usize = 109;
 
-pub const TDX_SOCKET_PATH: &str = "/var/run/tdxd.sock";
+pub const TDX_SOCKET_PATH: &str = "/var/tdxs.sock";
 
 pub struct TdxProver;
 
