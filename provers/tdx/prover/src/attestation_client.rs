@@ -4,16 +4,16 @@ use std::io::{Read, Write};
 use std::os::unix::net::UnixStream;
 
 #[derive(Debug, Serialize)]
-struct Request<T> {
-    method: String,
-    data: T,
+pub struct Request<T> {
+    pub method: String,
+    pub data: T,
 }
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct IssueRequestData {
-    user_data: String,
-    nonce: String,
+pub struct IssueRequestData {
+    pub user_data: String,
+    pub nonce: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -22,41 +22,41 @@ struct MetadataRequestData {}
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct ValidateRequestData {
-    document: String,
-    nonce: String,
+pub struct ValidateRequestData {
+    pub document: String,
+    pub nonce: String,
 }
 
 #[derive(Debug, Deserialize)]
-struct Response<T> {
-    data: Option<T>,
-    error: Option<String>,
+pub struct Response<T> {
+    pub data: Option<T>,
+    pub error: Option<String>,
 }
 
-type IssueResponse = Response<IssueResponseData>;
-type MetadataResponse = Response<MetadataResponseData>;
-type ValidateResponse = Response<ValidateResponseData>;
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct IssueResponseData {
-    document: String,
-}
+pub type IssueResponse = Response<IssueResponseData>;
+pub type MetadataResponse = Response<MetadataResponseData>;
+pub type ValidateResponse = Response<ValidateResponseData>;
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct MetadataResponseData {
-    issuer_type: String,
-    user_data: String,
-    nonce: String,
-    metadata: serde_json::Value,
+pub struct IssueResponseData {
+    pub document: String,
 }
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct ValidateResponseData {
-    user_data: String,
-    valid: bool,
+pub struct MetadataResponseData {
+    pub issuer_type: String,
+    pub user_data: String,
+    pub nonce: String,
+    pub metadata: serde_json::Value,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ValidateResponseData {
+    pub user_data: String,
+    pub valid: bool,
 }
 
 impl<T> Response<T> {

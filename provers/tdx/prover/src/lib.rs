@@ -226,7 +226,10 @@ impl TdxProver {
 
 async fn get_tdx_guest_data() -> Result<serde_json::Value, String> {
     if !config::bootstrap_exists().map_err(|e| format!("Failed to check bootstrap existence: {}", e))? {
-        return Err("Bootstrap data does not exist. Please bootstrap the TDX prover first.".to_string());
+        info!("Bootstrap data not found, bootstrapping TDX prover");
+        TdxProver::bootstrap()
+            .await
+            .map_err(|e| format!("Failed to bootstrap TDX prover: {}", e))?;
     }
 
     let bootstrap_data = config::read_bootstrap()
