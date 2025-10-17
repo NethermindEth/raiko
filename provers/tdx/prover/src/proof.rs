@@ -142,7 +142,7 @@ pub fn generate_tdx_quote_from_public_key(
     generate_tdx_quote(&B256::from_slice(&padded_data))
 }
 
-pub fn get_tdx_metadata() -> Result<serde_json::Value> {
+pub fn get_tdx_metadata() -> Result<attestation_client::MetadataResponseData> {
     attestation_client::metadata(TDX_SOCKET_PATH)
 }
 

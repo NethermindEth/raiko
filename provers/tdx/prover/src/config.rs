@@ -88,6 +88,7 @@ pub fn read_bootstrap() -> Result<BootstrapData> {
 pub fn write_bootstrap(issuer_type: &str, quote: &Vec<u8>, public_key: &Address, nonce: &Vec<u8>, metadata: serde_json::Value) -> Result<()> {
     let config_dir = get_config_dir()?;
     let bootstrap_file = config_dir.join("bootstrap.json");
+
     let bootstrap_data = BootstrapData {
         issuer_type: issuer_type.to_string(),
         public_key: public_key.to_string(),

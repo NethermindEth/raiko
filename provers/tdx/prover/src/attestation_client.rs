@@ -114,7 +114,7 @@ pub fn issue_attestation(socket_path: &str, user_data: &[u8], nonce: &[u8]) -> R
     hex::decode(&data.document).context("Failed to decode attestation document from hex")
 }
 
-pub fn metadata(socket_path: &str) -> Result<serde_json::Value> {
+pub fn metadata(socket_path: &str) -> Result<MetadataResponseData> {
     let metadata_data = MetadataRequestData {};
 
     let request = Request {
@@ -150,7 +150,7 @@ pub fn metadata(socket_path: &str) -> Result<serde_json::Value> {
 
     let data = response.into_result()?;
     
-    Ok(data.metadata)
+    Ok(data)
 }
 
 pub fn validate_document(

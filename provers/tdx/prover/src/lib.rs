@@ -63,7 +63,7 @@ impl Prover for TdxProver {
         let mut instance_hash = None;
 
         if tdx_config.bootstrap {
-            let quote_data = TdxProver::bootstrap(self.proof_type)
+            let quote_data = TdxProver::bootstrap()
                 .await
                 .map_err(|e| ProverError::GuestError(e.to_string()))?;
             quote = Some(hex::encode(&quote_data));
@@ -107,7 +107,7 @@ impl Prover for TdxProver {
         let mut instance_hash = None;
 
         if tdx_config.bootstrap {
-            let quote_data = TdxProver::bootstrap(self.proof_type)
+            let quote_data = TdxProver::bootstrap()
                 .await
                 .map_err(|e| ProverError::GuestError(e.to_string()))?;
             quote = Some(hex::encode(&quote_data));
@@ -153,7 +153,7 @@ impl Prover for TdxProver {
         let mut aggregation_hash = None;
 
         if tdx_config.bootstrap {
-            let quote_data = TdxProver::bootstrap(self.proof_type)
+            let quote_data = TdxProver::bootstrap()
                 .await
                 .map_err(|e| ProverError::GuestError(e.to_string()))?;
             quote = Some(hex::encode(&quote_data));
@@ -194,7 +194,7 @@ impl Prover for TdxProver {
 }
 
 impl TdxProver {
-    pub async fn bootstrap(proof_type: ProofType) -> Result<Vec<u8>> {
+    pub async fn bootstrap() -> Result<Vec<u8>> {
         info!("Bootstrapping TDX prover");
 
         if config::bootstrap_exists()? {
@@ -217,13 +217,8 @@ impl TdxProver {
         info!("TDX quote generated (length: {} bytes)", quote.len());
 
         let metadata = proof::get_tdx_metadata()?;
-        let issuer_type = match proof_type {
-            ProofType::Tdx => "tdx",
-            ProofType::AzureTdx => "azure",
-            _ => return Err(anyhow::anyhow!("Invalid proof type for TDX prover: {:?}", proof_type)),
-        };
 
-        config::write_bootstrap(issuer_type, &quote, &public_key, &nonce, metadata)?;
+        config::write_bootstrap(&metadata.issuer_type, &quote, &public_key, &nonce, metadata.metadata)?;
 
         Ok(quote)
     }
