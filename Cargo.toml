@@ -68,7 +68,7 @@ reth-revm = { git = "https://github.com/paradigmxyz/reth.git", tag = "v1.6.0", d
 reth-provider = { git = "https://github.com/paradigmxyz/reth.git", tag = "v1.6.0", default-features = false }
 reth-storage-api = { git = "https://github.com/paradigmxyz/reth.git", tag = "v1.6.0", default-features = false }
 # taiko-reth = { git = "https://github.com/TatsujinLabs/alethia-reth", branch = "main" }
-taiko-reth = { git = "https://github.com/NethermindEth/alethia-reth.git", branch = "feat/feature-gates", default-features = false, features = [
+taiko-reth = { git = "https://github.com/NethermindEth/alethia-reth.git", branch = "feat/precompiles", default-features = false, features = [
     "serde",
 ] }
 

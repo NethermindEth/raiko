@@ -47,6 +47,7 @@ use taiko_reth::chainspec::TAIKO_MAINNET;
 use taiko_reth::consensus::validation::TaikoBeaconConsensus;
 use taiko_reth::evm::config::TaikoEvmConfig;
 use taiko_reth::evm::factory::TaikoEvmFactory;
+use taiko_reth::evm::precompiles::l1sload::set_l1_storage_value;
 use taiko_reth::evm::spec::TaikoSpecId;
 use tracing::{debug, info};
 
@@ -258,13 +259,13 @@ fn verify_and_populate_l1sload_cache(
             );
         }
 
-        // TODO: Populate REVM L1SLOAD cache with verified value
-        // set_l1_storage_value(
-        //     proof.contract_address,
-        //     proof.storage_key,
-        //     proof.block_number,
-        //     proof.value,
-        // );
+        // Populate L1SLOAD cache with verified value
+        set_l1_storage_value(
+            proof.contract_address,
+            proof.storage_key,
+            proof.block_number,
+            proof.value,
+        );
 
         info!(
             "Verified and cached L1SLOAD: contract={:?}, key={:?}, block={:?}, value={:?}",
