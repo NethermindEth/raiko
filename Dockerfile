@@ -76,6 +76,7 @@ COPY --from=build-gaiko /opt/gaiko/gaiko ./bin/
 COPY --from=builder /opt/raiko/docker/entrypoint.sh ./bin/
 COPY --from=builder /opt/raiko/provers/sgx/config/sgx-guest.docker.manifest.template ./provers/sgx/config/sgx-guest.local.manifest.template
 # copy to /etc/raiko, but if self register mode, the mounted one will overwrite it.
+COPY --from=builder /opt/raiko/host/config/config.devnet.json /etc/raiko/config.devnet.json
 COPY --from=builder /opt/raiko/host/config/config.sgx.json /etc/raiko/config.sgx.json
 COPY --from=builder /opt/raiko/host/config/chain_spec_list_default.json /etc/raiko/chain_spec_list_default.json
 COPY --from=builder /opt/raiko/target/release/sgx-guest ./bin/
