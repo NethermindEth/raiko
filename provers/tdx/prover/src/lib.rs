@@ -192,14 +192,14 @@ impl TdxProver {
         info!("Generated public key: {}", hex::encode(public_key));
 
         let (quote, nonce) =
-            proof::generate_tdx_quote_from_public_key(&public_key, TDX_SOCKET_PATH)?;
+            proof::generate_tdx_quote_from_public_key(&public_key)?;
         info!(
             "Bootstrap complete. Public key address: {}",
             hex::encode(public_key)
         );
         info!("TDX quote generated (length: {} bytes)", quote.len());
 
-        let metadata = attestation_client::metadata(TDX_SOCKET_PATH)?;
+        let metadata = proof::get_tdx_metadata()?;
 
         config::write_bootstrap(&quote, &public_key, &nonce, metadata)?;
 
