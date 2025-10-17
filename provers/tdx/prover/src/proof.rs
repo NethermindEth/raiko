@@ -220,7 +220,6 @@ pub struct ProveAggregationData {
 
 pub fn prove_aggregation(
     input: &AggregationGuestInput,
-    tdx_config: &TdxConfig,
 ) -> Result<ProveAggregationData> {
     let private_key = load_private_key()?;
     let new_instance = get_address_from_private_key(&private_key)?;

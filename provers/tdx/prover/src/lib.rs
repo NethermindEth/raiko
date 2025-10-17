@@ -1,6 +1,6 @@
 #![cfg(feature = "enable")]
 
-use anyhow::{anyhow, Result};
+use anyhow::Result;
 use raiko_lib::{
     consts::SpecId,
     input::{
@@ -70,7 +70,8 @@ impl Prover for TdxProver {
         }
 
         if tdx_config.prove {
-            config::validate_issuer_type(self.proof_type)?;
+            config::validate_issuer_type(self.proof_type)
+                .map_err(|e| ProverError::GuestError(e.to_string()))?;
 
             let prove_data = proof::prove(&input, &tdx_config)
                 .map_err(|e| ProverError::GuestError(e.to_string()))?;
@@ -113,7 +114,8 @@ impl Prover for TdxProver {
         }
 
         if tdx_config.prove {
-            config::validate_issuer_type(self.proof_type)?;
+            config::validate_issuer_type(self.proof_type)
+                .map_err(|e| ProverError::GuestError(e.to_string()))?;
 
             let prove_data = proof::prove_batch(&input, &tdx_config)
                 .map_err(|e| ProverError::GuestError(e.to_string()))?;
@@ -158,9 +160,10 @@ impl Prover for TdxProver {
         }
 
         if tdx_config.prove {
-            config::validate_issuer_type(self.proof_type)?;
+            config::validate_issuer_type(self.proof_type)
+                .map_err(|e| ProverError::GuestError(e.to_string()))?;
 
-            let aggregation_data = proof::prove_aggregation(&input, &tdx_config)
+            let aggregation_data = proof::prove_aggregation(&input)
                 .map_err(|e| ProverError::GuestError(e.to_string()))?;
 
             proof = Some(hex::encode(&aggregation_data.proof));
@@ -190,6 +193,7 @@ impl Prover for TdxProver {
     }
 }
 
+impl TdxProver {
     pub async fn bootstrap(proof_type: ProofType) -> Result<Vec<u8>> {
         info!("Bootstrapping TDX prover");
 
@@ -212,7 +216,7 @@ impl Prover for TdxProver {
         );
         info!("TDX quote generated (length: {} bytes)", quote.len());
 
-        let mut metadata = proof::get_tdx_metadata()?;
+        let metadata = proof::get_tdx_metadata()?;
         let issuer_type = match proof_type {
             ProofType::Tdx => "tdx",
             ProofType::AzureTdx => "azure",
