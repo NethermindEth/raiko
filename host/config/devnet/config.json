@@ -10,8 +10,10 @@
         "instance_id": 0
     },
     "tdx": {
-        "instance_id": 0,
-        "socket_path": "/var/run/tdxd.sock"
+        "instance_id": 0
+    },
+    "azure_tdx": {
+        "instance_id": 0
     },
     "risc0": {
         "bonsai": true,

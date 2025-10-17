@@ -16,7 +16,15 @@
       "ONTAKE": 0,
       "PACAYA": 0
     },
-    "socket_path": "/var/run/tdxd.sock",
+    "bootstrap": false,
+    "prove": true
+  },
+  "azure_tdx": {
+    "instance_ids": {
+      "HEKLA": 0,
+      "ONTAKE": 0,
+      "PACAYA": 0
+    },
     "bootstrap": false,
     "prove": true
   },

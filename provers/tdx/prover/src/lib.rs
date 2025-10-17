@@ -25,13 +25,14 @@ pub const TDX_PROVER_CODE: u8 = ProofType::Tdx as u8;
 pub const TDX_PROOF_SIZE: usize = 89;
 pub const TDX_AGGREGATION_PROOF_SIZE: usize = 109;
 
+pub const TDX_SOCKET_PATH: &str = "/var/run/tdxd.sock";
+
 pub struct TdxProver;
 
 #[serde_as]
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct TdxConfig {
     pub instance_ids: HashMap<SpecId, u32>,
-    pub socket_path: String,
     pub bootstrap: bool,
     pub prove: bool,
 }
@@ -54,7 +55,7 @@ impl Prover for TdxProver {
         let mut instance_hash = None;
 
         if tdx_config.bootstrap {
-            let quote_data = TdxProver::bootstrap(&tdx_config)
+            let quote_data = TdxProver::bootstrap()
                 .await
                 .map_err(|e| ProverError::GuestError(e.to_string()))?;
             quote = Some(hex::encode(&quote_data));
@@ -95,7 +96,7 @@ impl Prover for TdxProver {
         let mut instance_hash = None;
 
         if tdx_config.bootstrap {
-            let quote_data = TdxProver::bootstrap(&tdx_config)
+            let quote_data = TdxProver::bootstrap()
                 .await
                 .map_err(|e| ProverError::GuestError(e.to_string()))?;
             quote = Some(hex::encode(&quote_data));
@@ -138,7 +139,7 @@ impl Prover for TdxProver {
         let mut aggregation_hash = None;
 
         if tdx_config.bootstrap {
-            let quote_data = TdxProver::bootstrap(&tdx_config)
+            let quote_data = TdxProver::bootstrap()
                 .await
                 .map_err(|e| ProverError::GuestError(e.to_string()))?;
             quote = Some(hex::encode(&quote_data));
@@ -171,12 +172,12 @@ impl Prover for TdxProver {
     }
 
     async fn get_guest_data() -> ProverResult<serde_json::Value> {
-        get_tdx_guest_data().map_err(|e| ProverError::GuestError(e))
+        get_tdx_guest_data().await.map_err(|e| ProverError::GuestError(e))
     }
 }
 
 impl TdxProver {
-    pub async fn bootstrap(tdx_config: &TdxConfig) -> Result<Vec<u8>> {
+    pub async fn bootstrap() -> Result<Vec<u8>> {
         info!("Bootstrapping TDX prover");
 
         if config::bootstrap_exists()? {
@@ -191,14 +192,14 @@ impl TdxProver {
         info!("Generated public key: {}", hex::encode(public_key));
 
         let (quote, nonce) =
-            proof::generate_tdx_quote_from_public_key(&public_key, &tdx_config.socket_path)?;
+            proof::generate_tdx_quote_from_public_key(&public_key, TDX_SOCKET_PATH)?;
         info!(
             "Bootstrap complete. Public key address: {}",
             hex::encode(public_key)
         );
         info!("TDX quote generated (length: {} bytes)", quote.len());
 
-        let metadata = attestation_client::metadata(&tdx_config.socket_path)?;
+        let metadata = attestation_client::metadata(TDX_SOCKET_PATH)?;
 
         config::write_bootstrap(&quote, &public_key, &nonce, metadata)?;
 
@@ -206,9 +207,12 @@ impl TdxProver {
     }
 }
 
-fn get_tdx_guest_data() -> Result<serde_json::Value, String> {
+async fn get_tdx_guest_data() -> Result<serde_json::Value, String> {
     if !config::bootstrap_exists().map_err(|e| format!("Failed to check bootstrap existence: {}", e))? {
-        return Err("Bootstrap data does not exist yet".to_string());
+        info!("Bootstrap data does not exist, bootstrapping TDX prover");
+        
+        TdxProver::bootstrap().await
+            .map_err(|e| format!("Failed to bootstrap TDX prover: {}", e))?;
     }
 
     let bootstrap_data = config::read_bootstrap()

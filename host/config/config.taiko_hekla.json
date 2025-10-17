@@ -15,8 +15,14 @@
       "HEKLA": 123456,
       "ONTAKE": 123456,
       "PACAYA": 123456
-    },
-    "socket_path": "/var/run/tdxd.sock"
+    }
+  },
+  "azure_tdx": {
+    "instance_ids": {
+      "HEKLA": 123456,
+      "ONTAKE": 123456,
+      "PACAYA": 123456
+    }
   },
   "risc0": {
     "bonsai": true,
