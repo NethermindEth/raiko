@@ -17,13 +17,6 @@
       "PACAYA": 123456
     }
   },
-  "azure_tdx": {
-    "instance_ids": {
-      "HEKLA": 123456,
-      "ONTAKE": 123456,
-      "PACAYA": 123456
-    }
-  },
   "risc0": {
     "bonsai": true,
     "snark": true,

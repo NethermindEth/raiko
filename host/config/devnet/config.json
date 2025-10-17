@@ -12,9 +12,6 @@
     "tdx": {
         "instance_id": 0
     },
-    "azure_tdx": {
-        "instance_id": 0
-    },
     "risc0": {
         "bonsai": true,
         "snark": true,

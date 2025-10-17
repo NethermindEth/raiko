@@ -1,7 +1,7 @@
 use std::{fs, path::PathBuf};
 
 use anyhow::{anyhow, Context, Result};
-use raiko_lib::primitives::Address;
+use raiko_lib::{primitives::Address, proof_type::ProofType};
 use serde::{Serialize, Deserialize};
 
 use crate::TdxConfig;
@@ -70,6 +70,7 @@ pub fn load_private_key() -> Result<secp256k1::SecretKey> {
 #[derive(Serialize, Deserialize, Debug)]
 #[serde(rename_all = "camelCase")]
 pub struct BootstrapData {
+    pub issuer_type: String,
     pub public_key: String,
     pub quote: String,
     pub nonce: String,
@@ -84,15 +85,36 @@ pub fn read_bootstrap() -> Result<BootstrapData> {
     Ok(bootstrap_data)
 }
 
-pub fn write_bootstrap(quote: &Vec<u8>, public_key: &Address, nonce: &Vec<u8>, metadata: serde_json::Value) -> Result<()> {
+pub fn write_bootstrap(issuer_type: &str, quote: &Vec<u8>, public_key: &Address, nonce: &Vec<u8>, metadata: serde_json::Value) -> Result<()> {
     let config_dir = get_config_dir()?;
     let bootstrap_file = config_dir.join("bootstrap.json");
     let bootstrap_data = BootstrapData {
+        issuer_type: issuer_type.to_string(),
         public_key: public_key.to_string(),
         quote: hex::encode(quote),
         nonce: hex::encode(nonce),
         metadata,
     };
     fs::write(&bootstrap_file, serde_json::to_string_pretty(&bootstrap_data)?)?;
+    Ok(())
+}
+
+pub fn validate_issuer_type(proof_type: ProofType) -> Result<()> {
+    let bootstrap_data = read_bootstrap()?;
+    let expected_issuer = match proof_type {
+        ProofType::Tdx => "tdx",
+        ProofType::AzureTdx => "azure",
+        _ => return Err(anyhow!("Invalid proof type for TDX prover: {:?}", proof_type)),
+    };
+
+    if bootstrap_data.issuer_type != expected_issuer {
+        return Err(anyhow!(
+            "Bootstrap issuer type '{}' does not match expected '{}' for proof type {:?}",
+            bootstrap_data.issuer_type,
+            expected_issuer,
+            proof_type
+        ));
+    }
+
     Ok(())
 }

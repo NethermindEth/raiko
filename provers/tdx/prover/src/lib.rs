@@ -1,6 +1,6 @@
 #![cfg(feature = "enable")]
 
-use anyhow::Result;
+use anyhow::{anyhow, Result};
 use raiko_lib::{
     consts::SpecId,
     input::{
@@ -27,7 +27,9 @@ pub const TDX_AGGREGATION_PROOF_SIZE: usize = 109;
 
 pub const TDX_SOCKET_PATH: &str = "/var/tdxs.sock";
 
-pub struct TdxProver;
+pub struct TdxProver {
+    proof_type: ProofType,
+}
 
 #[serde_as]
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -35,6 +37,12 @@ pub struct TdxConfig {
     pub instance_ids: HashMap<SpecId, u32>,
     pub bootstrap: bool,
     pub prove: bool,
+}
+
+impl TdxProver {
+    pub fn new(proof_type: ProofType) -> Self {
+        Self { proof_type }
+    }
 }
 
 impl Prover for TdxProver {
@@ -55,13 +63,15 @@ impl Prover for TdxProver {
         let mut instance_hash = None;
 
         if tdx_config.bootstrap {
-            let quote_data = TdxProver::bootstrap()
+            let quote_data = TdxProver::bootstrap(self.proof_type)
                 .await
                 .map_err(|e| ProverError::GuestError(e.to_string()))?;
             quote = Some(hex::encode(&quote_data));
         }
 
         if tdx_config.prove {
+            config::validate_issuer_type(self.proof_type)?;
+
             let prove_data = proof::prove(&input, &tdx_config)
                 .map_err(|e| ProverError::GuestError(e.to_string()))?;
 
@@ -96,13 +106,15 @@ impl Prover for TdxProver {
         let mut instance_hash = None;
 
         if tdx_config.bootstrap {
-            let quote_data = TdxProver::bootstrap()
+            let quote_data = TdxProver::bootstrap(self.proof_type)
                 .await
                 .map_err(|e| ProverError::GuestError(e.to_string()))?;
             quote = Some(hex::encode(&quote_data));
         }
 
         if tdx_config.prove {
+            config::validate_issuer_type(self.proof_type)?;
+
             let prove_data = proof::prove_batch(&input, &tdx_config)
                 .map_err(|e| ProverError::GuestError(e.to_string()))?;
             proof = Some(hex::encode(&prove_data.proof));
@@ -139,13 +151,15 @@ impl Prover for TdxProver {
         let mut aggregation_hash = None;
 
         if tdx_config.bootstrap {
-            let quote_data = TdxProver::bootstrap()
+            let quote_data = TdxProver::bootstrap(self.proof_type)
                 .await
                 .map_err(|e| ProverError::GuestError(e.to_string()))?;
             quote = Some(hex::encode(&quote_data));
         }
 
         if tdx_config.prove {
+            config::validate_issuer_type(self.proof_type)?;
+
             let aggregation_data = proof::prove_aggregation(&input, &tdx_config)
                 .map_err(|e| ProverError::GuestError(e.to_string()))?;
 
@@ -176,8 +190,7 @@ impl Prover for TdxProver {
     }
 }
 
-impl TdxProver {
-    pub async fn bootstrap() -> Result<Vec<u8>> {
+    pub async fn bootstrap(proof_type: ProofType) -> Result<Vec<u8>> {
         info!("Bootstrapping TDX prover");
 
         if config::bootstrap_exists()? {
@@ -199,9 +212,14 @@ impl TdxProver {
         );
         info!("TDX quote generated (length: {} bytes)", quote.len());
 
-        let metadata = proof::get_tdx_metadata()?;
+        let mut metadata = proof::get_tdx_metadata()?;
+        let issuer_type = match proof_type {
+            ProofType::Tdx => "tdx",
+            ProofType::AzureTdx => "azure",
+            _ => return Err(anyhow::anyhow!("Invalid proof type for TDX prover: {:?}", proof_type)),
+        };
 
-        config::write_bootstrap(&quote, &public_key, &nonce, metadata)?;
+        config::write_bootstrap(issuer_type, &quote, &public_key, &nonce, metadata)?;
 
         Ok(quote)
     }
@@ -209,16 +227,14 @@ impl TdxProver {
 
 async fn get_tdx_guest_data() -> Result<serde_json::Value, String> {
     if !config::bootstrap_exists().map_err(|e| format!("Failed to check bootstrap existence: {}", e))? {
-        info!("Bootstrap data does not exist, bootstrapping TDX prover");
-        
-        TdxProver::bootstrap().await
-            .map_err(|e| format!("Failed to bootstrap TDX prover: {}", e))?;
+        return Err("Bootstrap data does not exist. Please bootstrap the TDX prover first.".to_string());
     }
 
     let bootstrap_data = config::read_bootstrap()
         .map_err(|e| format!("Failed to read bootstrap data for guest data: {}", e))?;
 
     Ok(json!({
+        "issuer_type": bootstrap_data.issuer_type,
         "public_key": bootstrap_data.public_key,
         "quote": bootstrap_data.quote,
         "nonce": bootstrap_data.nonce,

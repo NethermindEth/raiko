@@ -110,11 +110,6 @@ pub async fn get_guest_data() -> RaikoResult<serde_json::Value> {
         guest_data_array.push(tdx_prover::TdxProver::get_guest_data().await?);
     }
 
-    #[cfg(feature = "azure_tdx")]
-    {
-        guest_data_array.push(azure_tdx_prover::AzureTdxProver::get_guest_data().await?);
-    }
-
     Ok(serde_json::to_value(guest_data_array)?)
 }
 
@@ -161,7 +156,7 @@ pub async fn run_prover(
         }
         ProofType::Tdx | ProofType::AzureTdx => {
             #[cfg(feature = "tdx")]
-            return tdx_prover::TdxProver
+            return tdx_prover::TdxProver::new(proof_type)
                 .run(input.clone(), output, config, store)
                 .await
                 .map_err(|e| e.into());
@@ -213,7 +208,7 @@ pub async fn run_batch_prover(
         }
         ProofType::Tdx | ProofType::AzureTdx => {
             #[cfg(feature = "tdx")]
-            return tdx_prover::TdxProver
+            return tdx_prover::TdxProver::new(proof_type)
                 .batch_run(input.clone(), output, config, store)
                 .await
                 .map_err(|e| e.into());
@@ -265,7 +260,7 @@ pub async fn aggregate_proofs(
         }
         ProofType::Tdx | ProofType::AzureTdx => {
             #[cfg(feature = "tdx")]
-            return tdx_prover::TdxProver
+            return tdx_prover::TdxProver::new(proof_type)
                 .aggregate(input.clone(), output, config, store)
                 .await
                 .map_err(|e| e.into());
@@ -316,7 +311,7 @@ pub async fn cancel_proof(
         }
         ProofType::Tdx | ProofType::AzureTdx => {
             #[cfg(feature = "tdx")]
-            return tdx_prover::TdxProver
+            return tdx_prover::TdxProver::new(proof_type)
                 .cancel(proof_key, read)
                 .await
                 .map_err(|e| e.into());
@@ -516,7 +511,6 @@ impl<S: ::std::hash::BuildHasher + ::std::default::Default> From<ProverSpecificO
             ("sp1", value.sp1.clone()),
             ("risc0", value.risc0.clone()),
             ("tdx", value.tdx.clone()),
-            ("azure_tdx", value.azure_tdx.clone()),
         ]
         .into_iter()
         .filter_map(|(name, value)| value.map(|v| (name.to_string(), v)))

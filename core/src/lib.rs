@@ -437,16 +437,6 @@ mod tests {
                 }
             },
         );
-        prover_args.insert(
-            "azure_tdx".to_string(),
-            json! {
-                {
-                    "instance_id": 121,
-                    "bootstrap": enable_aggregation,
-                    "prove": true,
-                }
-            },
-        );
         prover_args
     }
 
