@@ -521,7 +521,13 @@ mod test {
             0000000000000000000000000000000000000000000000000000000000000000\
             0000000000000000000000000000000000000000000000000000000000000000\
             00000000000000000000000000000000";
-        let blob_str = format!("{:0<262144}", valid_blob_str);
+
+        let mut blob_str = String::with_capacity(262_144);
+        blob_str.push_str(&valid_blob_str);
+        if blob_str.len() < 262_144 {
+            blob_str.extend(std::iter::repeat('0').take(262_144 - blob_str.len()));
+        }
+
         let dec_blob = blob_to_bytes(&blob_str);
         println!("dec blob tx len: {:?}", dec_blob.len());
         let txs = decode_transactions(&dec_blob);

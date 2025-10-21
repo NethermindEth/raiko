@@ -1,19 +1,8 @@
 [
     {
-        "name": "surge_dev_l1",
-        "chain_id": 3151908,
-        "max_spec_id": "CANCUN",
-        "hard_forks": {
-            "FRONTIER": {
-                "Block": 0
-            },
-            "SHANGHAI": {
-                "Timestamp": 0
-            },
-            "CANCUN": {
-                "Timestamp": 0
-            }
-        },
+        "name": "hoodi",
+        "chain_id": 560048,
+        "hard_forks": { },
         "eip_1559_constants": {
             "base_fee_change_denominator": "0x8",
             "base_fee_max_increase_denominator": "0x8",
@@ -22,55 +11,41 @@
         },
         "l1_contract": null,
         "l2_contract": null,
-        "rpc": "http://185.3.95.99:32002",
-        "beacon_rpc": "http://185.3.95.99:33001",
-        "verifier_address_forks": {
-            "FRONTIER": {
-                "SGX": null,
-                "SP1": null,
-                "RISC0": null
-            }
-        },
-        "genesis_time": 1738063712,
+        "rpc": "https://l1-rpc-internal.staging.surge.wtf",
+        "beacon_rpc": "https://l1-beacon-internal.staging.surge.wtf",
+        "verifier_address_forks": {},
+        "genesis_time": 1742213400,
         "seconds_per_slot": 12,
         "is_taiko": false
     },
     {
         "name": "surge_dev",
         "chain_id": 763374,
-        "max_spec_id": "PACAYA",
         "hard_forks": {
-            "HEKLA": {
-                "Block": 0
-            },
-            "ONTAKE": {
-                "Block": 1
-            },
-            "PACAYA": {
-                "Block": 1
-            },
-            "CANCUN": "TBD"
-        },
+			      "ONTAKE": {
+			        "Block": 1
+			      },
+			      "PACAYA": {
+			        "Block": 1
+			      }
+		    },
         "eip_1559_constants": {
             "base_fee_change_denominator": "0x8",
             "base_fee_max_increase_denominator": "0x8",
             "base_fee_max_decrease_denominator": "0x8",
             "elasticity_multiplier": "0x2"
         },
-        "l1_contract": "0xa3c616dd54F6BB35a736cD6968c8EF7176faCACc",
+        "l1_contract": "0xA6f38572271f6e251BA8d7a1992ded1d1f05f3bd",
         "l2_contract": "0x7633740000000000000000000000000000010001",
-        "rpc": "http://185.3.95.99:8547",
+        "rpc": "https://l2-rpc.staging.surge.wtf",
         "beacon_rpc": null,
         "verifier_address_forks": {
-            "HEKLA": {
-                "SGX": "0x0000000000000000000000000000000000000000",
-                "SP1": "0xb239879B1f9Cd1B72b16Bab768D29Ea3293282Af",
-                "RISC0": "0x86A0679C7987B5BA9600affA994B78D0660088ff"
-            },
             "ONTAKE": {
-                "SGX": "0x0000000000000000000000000000000000000000",
-                "SP1": "0xb239879B1f9Cd1B72b16Bab768D29Ea3293282Af",
-                "RISC0": "0x86A0679C7987B5BA9600affA994B78D0660088ff"
+                "SGX": "0x82689c09B5F47592311A13cDB66caF912d78F496",
+                "SP1": "0x839D50BD8c20B660ED26bcF3Ed7366fC0D4000cf",
+                "RISC0": "0x2EDB2d4aec06A25A3b715D5Dcbf63A1d021952DE",
+                "TDX": "0x0000000000000000000000000000000000000000",
+                "AZURE_TDX": "0x0000000000000000000000000000000000000000"
             }
         },
         "genesis_time": 0,

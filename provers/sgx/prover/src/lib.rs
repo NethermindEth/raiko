@@ -9,7 +9,7 @@ use std::{
 
 use once_cell::sync::Lazy;
 use raiko_lib::{
-    consts::SpecId,
+    consts::TaikoSpecId,
     input::{
         AggregationGuestInput, AggregationGuestOutput, GuestBatchInput, GuestBatchOutput,
         GuestInput, GuestOutput,
@@ -30,70 +30,91 @@ use tracing::debug;
 // to register the instance id
 mod sgx_register_utils;
 
-static SGX_GUEST_DATA: Lazy<Result<Value, String>> = Lazy::new(|| {
-    fn read_bootstrap_quote() -> Result<Vec<u8>, String> {
-        // Get home directory and construct path to bootstrap.json
-        let home_dir =
-            std::env::var("HOME").map_err(|_| "HOME environment variable not set".to_string())?;
+fn read_bootstrap_quote(bootstrap_file_name: String) -> Result<Vec<u8>, String> {
+    // Get home directory and construct path to bootstrap.json
+    let home_dir =
+        std::env::var("HOME").map_err(|_| "HOME environment variable not set".to_string())?;
 
-        let bootstrap_path = PathBuf::from(home_dir)
-            .join(".config")
-            .join("raiko")
-            .join("config")
-            .join("bootstrap.json");
+    let bootstrap_path = PathBuf::from(home_dir)
+        .join(".config")
+        .join("raiko")
+        .join("config")
+        .join(&bootstrap_file_name);
 
-        // Read and parse bootstrap.json
-        let bootstrap_content = fs::read_to_string(&bootstrap_path).map_err(|e| {
-            format!(
-                "Failed to read bootstrap.json from {}: {}",
-                bootstrap_path.display(),
-                e
-            )
-        })?;
+    // Read and parse bootstrap.json
+    let bootstrap_content = fs::read_to_string(&bootstrap_path).map_err(|e| {
+        format!(
+            "Failed to read bootstrap.json from {}: {}",
+            bootstrap_path.display(),
+            e
+        )
+    })?;
 
-        let bootstrap_data: serde_json::Value = serde_json::from_str(&bootstrap_content)
-            .map_err(|e| format!("Failed to parse bootstrap.json: {}", e))?;
+    let bootstrap_data: serde_json::Value = serde_json::from_str(&bootstrap_content)
+        .map_err(|e| format!("Failed to parse bootstrap.json: {}", e))?;
 
-        // Extract quote field
-        let quote_hex = bootstrap_data["quote"]
-            .as_str()
-            .ok_or_else(|| "Missing or invalid 'quote' field in bootstrap.json".to_string())?;
+    // Extract quote field
+    let quote_hex = bootstrap_data["quote"].as_str().ok_or_else(|| {
+        format!(
+            "Missing or invalid 'quote' field in {}",
+            bootstrap_file_name
+        )
+    })?;
 
-        // Decode hex string to bytes
-        let quote = hex::decode(quote_hex)
-            .map_err(|e| format!("Failed to decode quote hex string: {}", e))?;
+    // Decode hex string to bytes (handle both 0x prefixed and non-prefixed)
+    let quote_hex_clean = if quote_hex.starts_with("0x") || quote_hex.starts_with("0X") {
+        &quote_hex[2..]
+    } else {
+        quote_hex
+    };
+    let quote = hex::decode(quote_hex_clean)
+        .map_err(|e| format!("Failed to decode quote hex string: {}", e))?;
 
-        if quote.len() < 432 {
-            return Err("SGX quote too short".to_string());
-        }
-
-        Ok(quote)
+    if quote.len() < 432 {
+        return Err("SGX quote too short".to_string());
     }
 
-    match read_bootstrap_quote() {
-        Ok(quote) => {
-            // Extract MR_ENCLAVE (32 bytes at offset 112-144)
-            let mr_enclave = hex::encode(&quote[112..144]);
+    Ok(quote)
+}
 
-            // Extract MR_SIGNER (32 bytes at offset 176-208)
-            let mr_signer = hex::encode(&quote[176..208]);
+static SGX_RETH_GUEST_DATA: Lazy<Result<Value, String>> = Lazy::new(|| {
+    let quote = read_bootstrap_quote("bootstrap.json".to_string())?;
+    // Extract MR_ENCLAVE (32 bytes at offset 112-144)
+    let mr_enclave = hex::encode(&quote[112..144]);
 
-            let quote_hex = hex::encode(&quote);
+    // Extract MR_SIGNER (32 bytes at offset 176-208)
+    let mr_signer = hex::encode(&quote[176..208]);
 
-            Ok(json!({
-                "mr_enclave": mr_enclave,
-                "mr_signer": mr_signer,
-                "quote": quote_hex
-            }))
-        }
-        Err(e) => Err(e),
-    }
+    let quote_hex = hex::encode(&quote);
+
+    Ok(json!({
+            "mr_enclave": mr_enclave,
+            "mr_signer": mr_signer,
+            "quote": quote_hex
+    }))
+});
+
+static SGX_GETH_GUEST_DATA: Lazy<Result<Value, String>> = Lazy::new(|| {
+    let quote = read_bootstrap_quote("bootstrap.gaiko.json".to_string())?;
+    // Extract MR_ENCLAVE (32 bytes at offset 112-144)
+    let mr_enclave = hex::encode(&quote[112..144]);
+
+    // Extract MR_SIGNER (32 bytes at offset 176-208)
+    let mr_signer = hex::encode(&quote[176..208]);
+
+    let quote_hex = hex::encode(&quote);
+
+    Ok(json!({
+            "mr_enclave": mr_enclave,
+            "mr_signer": mr_signer,
+            "quote": quote_hex
+    }))
 });
 
 #[serde_as]
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct SgxParam {
-    pub instance_ids: HashMap<SpecId, u64>,
+    pub instance_ids: HashMap<TaikoSpecId, u64>,
     pub setup: bool,
     pub bootstrap: bool,
     pub prove: bool,
@@ -169,10 +190,25 @@ impl SgxProver {
 
 impl Prover for SgxProver {
     async fn get_guest_data() -> ProverResult<serde_json::Value> {
-        match SGX_GUEST_DATA.as_ref() {
-            Ok(value) => Ok(value.clone()),
-            Err(e) => Err(ProverError::GuestError(e.clone())),
+        let sgx_reth_guest_data = SGX_RETH_GUEST_DATA
+            .as_ref()
+            .map_err(|e| ProverError::GuestError(e.clone()))?;
+
+        let mut json = json!({
+            "sgx_reth": sgx_reth_guest_data,
+        });
+
+        if std::env::var("SGXGETH").unwrap_or_default() == "true" {
+            let sgx_geth_guest_data = SGX_GETH_GUEST_DATA
+                .as_ref()
+                .map_err(|e| ProverError::GuestError(e.clone()))?;
+
+            json.as_object_mut()
+                .unwrap()
+                .insert("sgx_geth".to_string(), sgx_geth_guest_data.clone());
         }
+
+        Ok(json)
     }
     async fn run(
         &self,

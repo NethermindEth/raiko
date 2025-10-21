@@ -32,7 +32,7 @@ pub fn recover_signer_unchecked(sig: &[u8; 65], msg: &B256) -> Result<Address> {
 
     let sig = RecoverableSignature::from_compact(
         &sig[0..64],
-        RecoveryId::from_i32((sig[64] as i32) - 27)?,
+        RecoveryId::try_from(sig[64] as i32 - 27)?,
     )?;
 
     let secp = secp256k1::Secp256k1::new();

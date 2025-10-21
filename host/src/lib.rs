@@ -44,8 +44,7 @@ pub struct Opts {
     #[serde(default = "Opts::default_max_log")]
     pub max_log: usize,
 
-    #[arg(long, require_equals = true, default_value = "host/config/config.json")]
-    #[serde(default = "Opts::default_config_path")]
+    #[arg(long, require_equals = true)]
     /// Path to a config file that includes sufficient json args to request
     /// a proof of specified type. Curl json-rpc overrides its contents
     pub config_path: PathBuf,
@@ -91,7 +90,16 @@ pub struct Opts {
         default_value = "{}",
         help = "e.g. {\"Sp1\":0.1,\"Risc0\":0.2}"
     )]
-    pub ballot: String,
+    pub ballot_zk: String,
+
+    /// Ballot config in json format. If not provided, '{}' will be used.
+    #[arg(
+        long,
+        require_equals = true,
+        default_value = "{}",
+        help = "e.g. {\"Sp1\":0.1,\"Risc0\":0.2}"
+    )]
+    pub ballot_sgx: String,
 }
 
 impl Opts {
@@ -105,10 +113,6 @@ impl Opts {
 
     fn default_max_log() -> usize {
         16
-    }
-
-    fn default_config_path() -> PathBuf {
-        PathBuf::from("host/config/config.json")
     }
 
     fn default_log_level() -> String {
@@ -169,9 +173,17 @@ pub fn parse_chain_specs(opts: &Opts) -> SupportedChainSpecs {
     }
 }
 
-pub fn parse_ballot(opts: &Opts) -> Ballot {
+pub fn parse_ballot_zk(opts: &Opts) -> Ballot {
     let probs: BTreeMap<ProofType, f64> =
-        serde_json::from_str(&opts.ballot).expect("Failed to parse ballot config");
+        serde_json::from_str(&opts.ballot_zk).expect("Failed to parse ballot config");
+    let ballot = Ballot::new(probs).expect("Failed to create ballot");
+    ballot.validate().expect("Failed to validate ballot");
+    ballot
+}
+
+pub fn parse_ballot_sgx(opts: &Opts) -> Ballot {
+    let probs: BTreeMap<ProofType, f64> =
+        serde_json::from_str(&opts.ballot_sgx).expect("Failed to parse ballot config");
     let ballot = Ballot::new(probs).expect("Failed to create ballot");
     ballot.validate().expect("Failed to validate ballot");
     ballot

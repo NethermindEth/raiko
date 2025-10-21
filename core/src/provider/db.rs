@@ -1,9 +1,10 @@
-use alloy_primitives::{Address, Bytes, U256};
+use alloy_primitives::{Address, Bytes, B256, U256};
 use raiko_lib::{builder::OptimisticDatabase, consts::ChainSpec, mem_db::MemDb};
-use reth_primitives::{Header, B256};
-use reth_provider::ProviderError;
+use reth_primitives::Header;
+use reth_provider::{errors::db::DatabaseError, ProviderError};
 use reth_revm::{
-    primitives::{Account, AccountInfo, Bytecode, HashMap},
+    primitives::HashMap,
+    state::{Account, AccountInfo, Bytecode},
     Database, DatabaseCommit,
 };
 use std::{collections::HashSet, mem::take};
@@ -16,6 +17,7 @@ use crate::{
 };
 use tracing::{info, trace};
 
+#[derive(Clone, Debug)]
 pub struct ProviderDb<'a, BDP: BlockDataProvider> {
     pub provider: &'a BDP,
     pub block_number: u64,
@@ -204,10 +206,10 @@ impl<'a, BDP: BlockDataProvider> Database for ProviderDb<'a, BDP> {
             self.async_executor
                 .block_on(self.provider.get_accounts(self.block_number, &[address]))
         })
-        .map_err(|e| ProviderError::RPC(e.to_string()))?
+        .map_err(|e| DatabaseError::Other(e.to_string()))?
         .first()
         .cloned()
-        .ok_or(ProviderError::RPC("No account".to_owned()))?;
+        .ok_or(DatabaseError::Other("No account".to_owned()))?;
 
         // Insert the account into the initial database.
         self.initial_db
@@ -249,10 +251,10 @@ impl<'a, BDP: BlockDataProvider> Database for ProviderDb<'a, BDP> {
                     .get_storage_values(self.block_number, &[(address, index)]),
             )
         })
-        .map_err(|e| ProviderError::RPC(e.to_string()))?
+        .map_err(|e| DatabaseError::Other(e.to_string()))?
         .first()
         .copied()
-        .ok_or(ProviderError::RPC("No storage value".to_owned()))?;
+        .ok_or(DatabaseError::Other("No storage value".to_owned()))?;
         self.initial_db
             .insert_account_storage(&address, index, value);
         Ok(value)
@@ -281,9 +283,9 @@ impl<'a, BDP: BlockDataProvider> Database for ProviderDb<'a, BDP> {
             self.async_executor
                 .block_on(self.provider.get_blocks(&[(block_number, false)]))
         })
-        .map_err(|e| ProviderError::RPC(e.to_string()))?
+        .map_err(|e| DatabaseError::Other(e.to_string()))?
         .first()
-        .ok_or(ProviderError::RPC("No block".to_owned()))?
+        .ok_or(DatabaseError::Other("No block".to_owned()))?
         .header
         .hash;
         self.initial_db.insert_block_hash(block_number, block_hash);

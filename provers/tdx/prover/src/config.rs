@@ -100,22 +100,23 @@ pub fn write_bootstrap(issuer_type: &str, quote: &Vec<u8>, public_key: &Address,
     Ok(())
 }
 
-pub fn validate_issuer_type(proof_type: ProofType) -> Result<()> {
+pub fn get_issuer_type() -> Result<ProofType> {
     let bootstrap_data = read_bootstrap()?;
-    let expected_issuer = match proof_type {
-        ProofType::Tdx => "tdx",
-        ProofType::AzureTdx => "azure",
-        _ => return Err(anyhow!("Invalid proof type for TDX prover: {:?}", proof_type)),
+    let proof_type = match bootstrap_data.issuer_type {
+        "tdx" => ProofType::Tdx,
+        "azure" => ProofType::AzureTdx,
+        _ => return Err(anyhow!("Invalid issuer type: {}", bootstrap_data.issuer_type)),
     };
+    Ok(proof_type)
+}
 
-    if bootstrap_data.issuer_type != expected_issuer {
-        return Err(anyhow!(
-            "Bootstrap issuer type '{}' does not match expected '{}' for proof type {:?}",
-            bootstrap_data.issuer_type,
+pub fn validate_issuer_type(proof_type: ProofType) -> Result<()> {
+    let expected_issuer = get_issuer_type()?;
+    if expected_issuer != proof_type {
+        return Err(anyhow!("Bootstrap issuer type '{}' does not match expected '{}'",
             expected_issuer,
-            proof_type
+            proof_type,
         ));
     }
-
     Ok(())
 }

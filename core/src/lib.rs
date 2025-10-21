@@ -522,7 +522,7 @@ mod tests {
         // Unfortunately that also means that kzg is not getting fully verified by CI.
         let block_number = 20;
         let chain_specs = SupportedChainSpecs::merge_from_file(
-            "../host/config/chain_spec_list_devnet.json".into(),
+            "../host/config/devnet/chain_spec_list.json".into(),
         )
         .unwrap();
         let taiko_chain_spec = chain_specs.get_chain_spec(&network).unwrap();

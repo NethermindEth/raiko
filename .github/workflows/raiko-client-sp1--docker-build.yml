@@ -1,4 +1,4 @@
-name: "[Nethermind] raiko Client SP1 - Docker build and push"
+name: "[Nethermind] Raiko Client SP1 - Docker build and push"
 
 on:
   workflow_dispatch:
@@ -7,117 +7,132 @@ on:
     tags:
       - "v*-surge"
     paths:
-      - "provers/sp1/**"
+      - "**"
       - "!docs/**"
+      - "!img/**"
+      - "!**/*.json"
       - "!**/README.md"
+      - "!docker/**"
+      - "!.github/**"
+      - "host/config/chain_spec_list_default.json"
+      - "!provers/sgx/**"
+      - "!provers/risc0/**"
 
 env:
   DOCKER_REGISTRY: nethermind.jfrog.io
-  DOCKER_USERNAME: modular
-  DOCKER_REPOSITORY_DEV: modular-oci-local-dev/raiko-client-sp1
-  DOCKER_REPOSITORY_STAGING: modular-oci-local-staging/raiko-client-sp1
+  DOCKER_REPOSITORY_STAGING: core-oci-local-staging/raiko-zk
+  DOCKER_REPOSITORY_PROD: core-oci-local-prod/raiko-zk
 
 jobs:
   build:
     name: Build and push docker image
-    runs-on: ${{ matrix.os }}
+    runs-on: [self-hosted, linux, x64]  # Custom runner labels
     if: github.repository == 'NethermindEth/raiko'
     strategy:
       matrix:
         include:
-          - os: ubuntu-latest
-            platform: linux/amd64
+          - platform: linux/amd64
+            short: amd64
+
+    outputs:
+      digest-amd64: ${{ steps.digest.outputs.amd64 }}
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v3
-
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
       - uses: docker/login-action@v3
         with:
           registry: ${{ env.DOCKER_REGISTRY }}
-          username: ${{ env.DOCKER_USERNAME }}
-          password: ${{ secrets.ARTIFACTORY_MODULAR_TOKEN_DEVELOPER }}
+          username: ${{ secrets.ARTIFACTORY_CORE_USERNAME }}
+          password: ${{ secrets.ARTIFACTORY_CORE_TOKEN_DEVELOPER }}
 
-      - name: Docker meta
-        id: meta
+      - name: Determine build tags
+        id: build-tags
+        run: |
+          if [[ "${{ github.ref }}" == refs/tags/* ]]; then
+            VERSION=${GITHUB_REF#refs/tags/}
+            # Remove -surge suffix if present
+            BASE_VERSION=${VERSION%-surge}
+            echo "tag_list=type=raw,value=latest,type=raw,value=$BASE_VERSION" >> $GITHUB_OUTPUT
+          else
+            echo "tag_list=type=raw,value=latest" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Docker meta for staging
+        id: meta-staging
         uses: docker/metadata-action@v5
         with:
-          images: ${{ env.DOCKER_REGISTRY }}/${{ env.DOCKER_REPOSITORY_DEV }}
-          tags: type=raw,value=temp-${{ matrix.os }}
+          images: ${{ env.DOCKER_REGISTRY }}/${{ env.DOCKER_REPOSITORY_STAGING }}
+          tags: ${{ steps.build-tags.outputs.tag_list }}
 
-      - name: Build and push by digest
+      - name: Build and push with tags
         id: build
         uses: docker/build-push-action@v5
         with:
-          platforms: ${{ matrix.platform }}
           context: .
           file: ./Dockerfile.zk
+          platforms: ${{ matrix.platform }}
           push: true
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
+          tags: ${{ steps.meta-staging.outputs.tags }}
+          labels: ${{ steps.meta-staging.outputs.labels }}
+
+      - name: Set digest output
+        id: digest
+        run: |
+          echo "amd64=${{ env.DOCKER_REGISTRY }}/${{ env.DOCKER_REPOSITORY_STAGING }}@${{ steps.build.outputs.digest }}" >> $GITHUB_OUTPUT
 
   merge:
-    runs-on: ubuntu-latest
-    needs:
-      - build
+    name: Create manifest and promote to Production
+    runs-on: [self-hosted, linux, x64]  # Custom runner
+    needs: build
     steps:
-      - uses: docker/login-action@v3
-        with:
-          registry: ${{ env.DOCKER_REGISTRY }}
-          username: ${{ env.DOCKER_USERNAME }}
-          password: ${{ secrets.ARTIFACTORY_MODULAR_TOKEN_DEVELOPER }}
+      - name: Setup ORAS
+        uses: oras-project/setup-oras@v1
 
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+      - name: Check ORAS version
+        run: oras version
 
-      - name: Docker meta
-        id: meta
-        uses: docker/metadata-action@v5
-        with:
-          images: ${{ env.DOCKER_REGISTRY }}/${{ env.DOCKER_REPOSITORY_DEV }}
-          tags: |
-            type=raw,value=latest
-            type=ref,event=branch
-            type=ref,event=pr
-            type=ref,event=tag
-            type=sha
-
-      - name: Create manifest list and push
-        run: |
-          docker buildx imagetools create $(jq -cr '.tags | map("-t " + .) | join(" ")' <<< "$DOCKER_METADATA_OUTPUT_JSON") \
-            ${{ env.DOCKER_REGISTRY }}/${{ env.DOCKER_REPOSITORY_DEV }}:temp-ubuntu-latest \
- 
-      - uses: oras-project/setup-oras@v1
-      - run: oras version
-      - name: Login to registry with oras
+      - name: Login to registry with ORAS
         run: |
           oras login ${{ env.DOCKER_REGISTRY }} \
-            -u ${{ env.DOCKER_USERNAME }} \
-            -p ${{ secrets.ARTIFACTORY_MODULAR_TOKEN_DEVELOPER }}
+            -u ${{ secrets.ARTIFACTORY_CORE_USERNAME }} \
+            -p ${{ secrets.ARTIFACTORY_CORE_TOKEN_DEVELOPER }}
 
-      - name: Promote to Staging
+      - name: Determine tags to promote
+        id: promote-tags
         run: |
-          echo "${{ steps.meta.outputs.tags }}" | while IFS= read -r tag; do
+          if [[ "${{ github.ref }}" == refs/tags/* ]]; then
+            VERSION=${GITHUB_REF#refs/tags/}
+            BASE_VERSION=${VERSION%-surge}
+            echo "TAGS=latest $BASE_VERSION" >> $GITHUB_ENV
+          else
+            echo "TAGS=latest" >> $GITHUB_ENV
+          fi
+
+      - name: Promote to PROD
+        run: |
+          for tag in $TAGS; do
             echo "Current tag: $tag"
-            tag=$(echo "$tag" | xargs)
-            tag_suffix="${tag##*:}"
-            source_image="${DOCKER_REGISTRY}/${DOCKER_REPOSITORY_DEV}:${tag_suffix}"
-            staging_image="${DOCKER_REGISTRY}/${DOCKER_REPOSITORY_STAGING}:${tag_suffix}"
-            echo "Promoting ${source_image} to ${staging_image}"
-            oras cp -r "${source_image}" "${staging_image}"
+            source_image="${DOCKER_REGISTRY}/${DOCKER_REPOSITORY_STAGING}:${tag}"
+            prod_image="${DOCKER_REGISTRY}/${DOCKER_REPOSITORY_PROD}:${tag}"
+            echo "Promoting ${source_image} to ${prod_image}"
+            oras cp -r "${source_image}" "${prod_image}"
           done
 
       - name: Summary
         run: |
-          echo "## Docker build completed :green_circle:" >> $GITHUB_STEP_SUMMARY
+          echo "## SP1 Docker build completed ✅" >> $GITHUB_STEP_SUMMARY
           echo "### Tags" >> $GITHUB_STEP_SUMMARY
-          echo "${{ steps.meta.outputs.tags }}" | while IFS= read -r TAG; do
-            echo "- $TAG" >> $GITHUB_STEP_SUMMARY
+          for tag in $TAGS; do
+            echo "- $tag" >> $GITHUB_STEP_SUMMARY
           done
           echo "### Notes" >> $GITHUB_STEP_SUMMARY
-          echo "- The images have also been pushed to ${DOCKER_REPOSITORY_STAGING} repo" >> $GITHUB_STEP_SUMMARY
+          echo "- The images have been pushed to ${DOCKER_REPOSITORY_STAGING} repo" >> $GITHUB_STEP_SUMMARY
+          echo "- **STAGING Repository**: ${{ env.DOCKER_REGISTRY }}/${{ env.DOCKER_REPOSITORY_STAGING }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **PROD Repository**: ${{ env.DOCKER_REGISTRY }}/${{ env.DOCKER_REPOSITORY_PROD }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Platforms**: linux/amd64" >> $GITHUB_STEP_SUMMARY
+          echo "- **Commit**: ${{ github.sha }}" >> $GITHUB_STEP_SUMMARY

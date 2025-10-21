@@ -28,4 +28,3 @@ pub fn main() {
         input.block_inputs,
     ));
 }
-

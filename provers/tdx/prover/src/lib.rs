@@ -2,7 +2,7 @@
 
 use anyhow::Result;
 use raiko_lib::{
-    consts::SpecId,
+    consts::TaikoSpecId,
     input::{
         AggregationGuestInput, AggregationGuestOutput, GuestBatchInput, GuestBatchOutput,
         GuestInput, GuestOutput,
@@ -34,7 +34,7 @@ pub struct TdxProver {
 #[serde_as]
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct TdxConfig {
-    pub instance_ids: HashMap<SpecId, u32>,
+    pub instance_ids: HashMap<TaikoSpecId, u32>,
     pub bootstrap: bool,
     pub prove: bool,
 }
@@ -189,7 +189,16 @@ impl Prover for TdxProver {
     }
 
     async fn get_guest_data() -> ProverResult<serde_json::Value> {
-        get_tdx_guest_data().await.map_err(|e| ProverError::GuestError(e))
+        let guest_data = get_tdx_guest_data()
+            .await
+            .map_err(|e| ProverError::GuestError(e))?;
+
+        let issuer_type = config::get_issuer_type()?;
+        let key = issuer_type.to_string();
+
+        Ok(json!({
+            key: guest_data
+        }))
     }
 }
 

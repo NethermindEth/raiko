@@ -1,17 +1,21 @@
 use core::{fmt::Debug, str::FromStr};
+use std::collections::HashMap;
 
 use alloy_consensus::serde_bincode_compat;
+use alloy_primitives::Address;
+use alloy_primitives::Bytes;
+use alloy_primitives::B256;
+use alloy_primitives::U256;
 use anyhow::{anyhow, Error, Result};
 use ontake::BlockProposedV2;
 use pacaya::{BatchInfo, BatchProposed};
-use reth_primitives::{
-    revm_primitives::{Address, Bytes, HashMap, B256, U256},
-    Block, Header, TransactionSigned,
-};
-use reth_taiko_consensus::{ProtocolBaseFeeConfig, ANCHOR_GAS_LIMIT, ANCHOR_V3_GAS_LIMIT};
+use reth_primitives::{Block, Header, TransactionSigned};
 use serde::{Deserialize, Serialize};
 use serde_with::serde_as;
 
+use crate::anchor::ProtocolBaseFeeConfig;
+use crate::anchor::ANCHOR_GAS_LIMIT;
+use crate::anchor::ANCHOR_V3_GAS_LIMIT;
 #[cfg(not(feature = "std"))]
 use crate::no_std::*;
 use crate::{
@@ -29,7 +33,7 @@ pub type StorageEntry = (MptNode, Vec<U256>);
 #[serde_as]
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
 pub struct GuestInput {
-    #[serde_as(as = "BincodeCompactBlock")]
+    #[serde_as(as = "BincodeCompactBlock<TransactionSigned, Header>")]
     /// Reth block
     pub block: Block,
     /// The network to generate the proof for
@@ -225,6 +229,7 @@ pub struct TaikoGuestInput {
     /// header
     pub l1_header: Header,
     pub tx_data: Vec<u8>,
+    #[serde_as(as = "Option<serde_bincode_compat::EthereumTxEnvelope>")]
     pub anchor_tx: Option<TransactionSigned>,
     pub block_proposed: BlockProposedFork,
     pub prover_data: TaikoProverData,

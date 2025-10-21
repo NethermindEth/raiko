@@ -6,12 +6,11 @@ use alloy_sol_types::SolValue;
 use anyhow::{ensure, Result};
 use pretty_assertions::Comparison;
 use reth_primitives::{Block, Header};
-use reth_taiko_consensus::{decode_anchor_pacaya, ANCHOR_GAS_LIMIT};
 
 #[cfg(not(feature = "std"))]
 use crate::no_std::*;
 use crate::{
-    consts::SupportedChainSpecs,
+    anchor::{decode_anchor_pacaya, ANCHOR_GAS_LIMIT},
     input::{
         ontake::{BlockMetadataV2, BlockProposedV2},
         pacaya::{BatchInfo, BatchMetadata, BlockParams, Transition as PacayaTransition},
@@ -414,42 +413,6 @@ impl ProtocolInstance {
             TxHash::from(keccak(input.taiko.tx_data.as_slice()))
         };
 
-        // If the passed in chain spec contains a known chain id, the chain spec NEEDS to match the
-        // one we expect, because the prover could otherwise just fill in any values.
-        // The chain id is used because that is the value that is put onchain,
-        // and so all other chain data needs to be derived from it.
-        // For unknown chain ids we just skip this check so that tests using test data can still pass.
-        // TODO: we should probably split things up in critical and non-critical parts
-        // in the chain spec itself so we don't have to manually all the ones we have to care about.
-        if let Some(verified_chain_spec) =
-            SupportedChainSpecs::default().get_chain_spec_with_chain_id(input.chain_spec.chain_id)
-        {
-            ensure!(
-                input.chain_spec.max_spec_id == verified_chain_spec.max_spec_id,
-                "unexpected max_spec_id"
-            );
-            ensure!(
-                input.chain_spec.hard_forks == verified_chain_spec.hard_forks,
-                "unexpected hard_forks"
-            );
-            ensure!(
-                input.chain_spec.eip_1559_constants == verified_chain_spec.eip_1559_constants,
-                "unexpected eip_1559_constants"
-            );
-            ensure!(
-                input.chain_spec.l1_contract == verified_chain_spec.l1_contract,
-                "unexpected l1_contract"
-            );
-            ensure!(
-                input.chain_spec.l2_contract == verified_chain_spec.l2_contract,
-                "unexpected l2_contract"
-            );
-            ensure!(
-                input.chain_spec.is_taiko == verified_chain_spec.is_taiko,
-                "unexpected eip_1559_constants"
-            );
-        }
-
         let verifier_address = input
             .chain_spec
             .get_fork_verifier_address(input.taiko.block_proposed.block_number(), proof_type)
@@ -501,44 +464,6 @@ impl ProtocolInstance {
     ) -> Result<Self> {
         // verify blob usage, either by commitment or proof equality.
         verify_batch_mode_blob_usage(batch_input, proof_type)?;
-
-        for input in &batch_input.inputs {
-            // If the passed in chain spec contains a known chain id, the chain spec NEEDS to match the
-            // one we expect, because the prover could otherwise just fill in any values.
-            // The chain id is used because that is the value that is put onchain,
-            // and so all other chain data needs to be derived from it.
-            // For unknown chain ids we just skip this check so that tests using test data can still pass.
-            // TODO: we should probably split things up in critical and non-critical parts
-            // in the chain spec itself so we don't have to manually all the ones we have to care about.
-            if let Some(verified_chain_spec) = SupportedChainSpecs::default()
-                .get_chain_spec_with_chain_id(input.chain_spec.chain_id)
-            {
-                ensure!(
-                    input.chain_spec.max_spec_id == verified_chain_spec.max_spec_id,
-                    "unexpected max_spec_id"
-                );
-                ensure!(
-                    input.chain_spec.hard_forks == verified_chain_spec.hard_forks,
-                    "unexpected hard_forks"
-                );
-                ensure!(
-                    input.chain_spec.eip_1559_constants == verified_chain_spec.eip_1559_constants,
-                    "unexpected eip_1559_constants"
-                );
-                ensure!(
-                    input.chain_spec.l1_contract == verified_chain_spec.l1_contract,
-                    "unexpected l1_contract"
-                );
-                ensure!(
-                    input.chain_spec.l2_contract == verified_chain_spec.l2_contract,
-                    "unexpected l2_contract"
-                );
-                ensure!(
-                    input.chain_spec.is_taiko == verified_chain_spec.is_taiko,
-                    "unexpected is_taiko"
-                );
-            }
-        }
 
         // todo: move chain_spec into the batch input
         let input = &batch_input.inputs[0];
@@ -778,10 +703,9 @@ mod tests {
     fn test_eip712_pi_hash() {
         let input = "10d008bd000000000000000000000000000000000000000000000000000000000000004900000000000000000000000000000000000000000000000000000000000000400000000000000000000000000000000000000000000000000000000000000340689c98d83627e8749504eb6effbc2b08408183f11211bbf8bd281727b16255e6b3f8ee61d80cd7d30cdde9aa49acac0b82264a6b0f992139398e95636e501fd80189249f72753bd6c715511cc61facdec4781d4ecb1d028dafdff4a0827d7d53302e31382e302d64657600000000000000000000000000000000000000000000569e75fc77c1a856f6daaf9e69d8a9566ca34aa47f9133711ce065a571af0cfd00000000000000000000000016700100000000000000000000000000000100010000000000000000000000000000000000000000000000000000000000000049000000000000000000000000000000000000000000000000000000000e4e1c000000000000000000000000000000000000000000000000000000000065f94010000000000000000000000000000000000000000000000000000000000000036000000000000000000000000000000000000000000000000000000000000000640000000000000000000000000000000000000000000000000000000000000001fdbdc45da60168ddf29b246eb9e0a2e612a670f671c6d3aafdfdac21f86b4bca0000000000000000000000003c44cdddb6a900fa2b585dd299e03d12fa4293bcaf73b06ee94a454236314610c55e053df3af4402081df52c9ff2692349a6b497bc17a6706bc1cf4c363e800d2133d0d143363871d9c17b8fc5cf6d3cfd585bc80730a40cf8d8186241d45e19785c117956de919999d50e473aaa794b8fd4097000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000260000000000000000000000000000000000000000000000000000000000000006400000000000000000000000000000000000000000000000000000000000000400000000000000000000000000000000000000000000000000000000000000064ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff00000000000000000000000000000000000000000000000000000000";
         let input_data = hex::decode(input).unwrap();
-        let proveBlockCall { blockId: _, input } =
-            proveBlockCall::abi_decode(&input_data, false).unwrap();
+        let proveBlockCall { blockId: _, input } = proveBlockCall::abi_decode(&input_data).unwrap();
         let (meta, trans, _proof) =
-            <(BlockMetadata, Transition, TierProof)>::abi_decode_params(&input, false).unwrap();
+            <(BlockMetadata, Transition, TierProof)>::abi_decode_params(&input).unwrap();
         let meta_hash: B256 = keccak::keccak(meta.abi_encode()).into();
         let proof_of_equivalence = ([0u8; 32], [0u8; 32]);
 
