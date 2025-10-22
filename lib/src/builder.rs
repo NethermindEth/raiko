@@ -7,20 +7,32 @@ use crate::primitives::keccak::keccak;
 use crate::primitives::mpt::StateAccount;
 use crate::utils::{generate_transactions, generate_transactions_for_batch_blocks};
 use crate::{
-    consts::{ChainSpec, MAX_BLOCK_HASH_AGE},
+    consts::MAX_BLOCK_HASH_AGE,
     guest_mem_forget,
     input::{GuestBatchInput, GuestInput},
     mem_db::{AccountState, DbAccount, MemDb},
     CycleTracker,
 };
+use alethia_reth_block::config::TaikoEvmConfig;
+use alethia_reth_chainspec::hardfork::TaikoHardfork;
+use alethia_reth_chainspec::reth_chainspec::ChainHardforks;
+use alethia_reth_chainspec::reth_chainspec::ChainSpec;
+use alethia_reth_chainspec::reth_chainspec::EthereumHardfork;
+use alethia_reth_chainspec::reth_chainspec::ForkCondition;
+use alethia_reth_chainspec::reth_chainspec::Hardfork;
+use alethia_reth_chainspec::reth_chainspec::Hardforks;
+use alethia_reth_chainspec::spec::TaikoChainSpec;
+use alethia_reth_chainspec::TAIKO_DEVNET;
+use alethia_reth_chainspec::TAIKO_MAINNET;
+use alethia_reth_consensus::validation::TaikoBeaconConsensus;
+use alethia_reth_evm::factory::TaikoEvmFactory;
+use alethia_reth_evm::spec::TaikoSpecId;
 use alloy_primitives::map::HashMap;
 use alloy_primitives::Address;
 use alloy_primitives::Bytes;
 use alloy_primitives::B256;
 use alloy_primitives::U256;
 use anyhow::{bail, ensure, Result};
-use reth_chainspec::Hardfork;
-use reth_chainspec::{ChainHardforks, EthereumHardfork, ForkCondition, Hardforks};
 use reth_consensus::{Consensus, HeaderValidator};
 use reth_ethereum_consensus::validate_block_post_execution;
 use reth_evm::block::BlockExecutionResult;
@@ -38,18 +50,10 @@ use revm::state::AccountStatus;
 use revm::state::Bytecode;
 use revm::state::EvmStorageSlot;
 use revm::DatabaseCommit;
-use taiko_reth::chainspec::hardfork::TaikoHardfork;
-use taiko_reth::chainspec::spec::TaikoChainSpec;
-use taiko_reth::chainspec::TAIKO_DEVNET;
-use taiko_reth::chainspec::TAIKO_MAINNET;
-use taiko_reth::consensus::validation::TaikoBeaconConsensus;
-use taiko_reth::evm::config::TaikoEvmConfig;
-use taiko_reth::evm::factory::TaikoEvmFactory;
-use taiko_reth::evm::spec::TaikoSpecId;
 use tracing::{debug, info};
 
 /// Surge dev list of hardforks.
-pub static SURGE_DEV_HARDFORKS: LazyLock<reth_chainspec::ChainHardforks> = LazyLock::new(|| {
+pub static SURGE_DEV_HARDFORKS: LazyLock<ChainHardforks> = LazyLock::new(|| {
     ChainHardforks::new(vec![
         (EthereumHardfork::Frontier.boxed(), ForkCondition::Block(0)),
         (EthereumHardfork::Homestead.boxed(), ForkCondition::Block(0)),
@@ -93,7 +97,7 @@ pub static SURGE_DEV_HARDFORKS: LazyLock<reth_chainspec::ChainHardforks> = LazyL
     ])
 });
 
-pub static SURGE_TEST_HARDFORKS: LazyLock<reth_chainspec::ChainHardforks> = LazyLock::new(|| {
+pub static SURGE_TEST_HARDFORKS: LazyLock<ChainHardforks> = LazyLock::new(|| {
     ChainHardforks::new(vec![
         (EthereumHardfork::Frontier.boxed(), ForkCondition::Block(0)),
         (EthereumHardfork::Homestead.boxed(), ForkCondition::Block(0)),
@@ -137,7 +141,7 @@ pub static SURGE_TEST_HARDFORKS: LazyLock<reth_chainspec::ChainHardforks> = Lazy
     ])
 });
 
-pub static SURGE_STAGE_HARDFORKS: LazyLock<reth_chainspec::ChainHardforks> = LazyLock::new(|| {
+pub static SURGE_STAGE_HARDFORKS: LazyLock<ChainHardforks> = LazyLock::new(|| {
     ChainHardforks::new(vec![
         (EthereumHardfork::Frontier.boxed(), ForkCondition::Block(0)),
         (EthereumHardfork::Homestead.boxed(), ForkCondition::Block(0)),
@@ -184,7 +188,7 @@ pub static SURGE_STAGE_HARDFORKS: LazyLock<reth_chainspec::ChainHardforks> = Laz
 pub static SURGE_DEV: LazyLock<Arc<TaikoChainSpec>> = LazyLock::new(|| {
     let hardforks = SURGE_DEV_HARDFORKS.clone();
     TaikoChainSpec {
-        inner: reth_chainspec::ChainSpec {
+        inner: ChainSpec {
             chain: 763374.into(), // TODO: make this dynamic based on the chain spec
             paris_block_and_final_difficulty: None,
             hardforks,
@@ -198,7 +202,7 @@ pub static SURGE_DEV: LazyLock<Arc<TaikoChainSpec>> = LazyLock::new(|| {
 pub static SURGE_STAGE: LazyLock<Arc<TaikoChainSpec>> = LazyLock::new(|| {
     let hardforks = SURGE_STAGE_HARDFORKS.clone();
     TaikoChainSpec {
-        inner: reth_chainspec::ChainSpec {
+        inner: ChainSpec {
             chain: 763373.into(), // TODO: make this dynamic based on the chain spec
             paris_block_and_final_difficulty: None,
             hardforks,
@@ -212,7 +216,7 @@ pub static SURGE_STAGE: LazyLock<Arc<TaikoChainSpec>> = LazyLock::new(|| {
 pub static SURGE_TEST: LazyLock<Arc<TaikoChainSpec>> = LazyLock::new(|| {
     let hardforks = SURGE_TEST_HARDFORKS.clone();
     TaikoChainSpec {
-        inner: reth_chainspec::ChainSpec {
+        inner: ChainSpec {
             chain: 763375.into(), // TODO: make this dynamic based on the chain spec
             paris_block_and_final_difficulty: None,
             hardforks,
@@ -226,7 +230,7 @@ pub static SURGE_TEST: LazyLock<Arc<TaikoChainSpec>> = LazyLock::new(|| {
 pub static SURGE_MAINNET: LazyLock<Arc<TaikoChainSpec>> = LazyLock::new(|| {
     let hardforks = SURGE_STAGE_HARDFORKS.clone();
     TaikoChainSpec {
-        inner: reth_chainspec::ChainSpec {
+        inner: ChainSpec {
             chain: 763374.into(), // TODO: make this dynamic based on the chain spec
             paris_block_and_final_difficulty: None,
             hardforks,
@@ -334,7 +338,7 @@ pub trait OptimisticDatabase {
 /// A generic builder for building a block.
 #[derive(Clone, Debug)]
 pub struct RethBlockBuilder<DB> {
-    pub chain_spec: ChainSpec,
+    pub chain_spec: crate::consts::ChainSpec,
     pub input: GuestInput,
     pub db: Option<DB>,
 }

@@ -12,7 +12,7 @@ use serde_json::Value;
 use std::path::PathBuf;
 use std::{collections::HashMap, env::var};
 
-pub use taiko_reth::evm::spec::TaikoSpecId;
+pub use alethia_reth_evm::spec::TaikoSpecId;
 
 #[cfg(not(feature = "std"))]
 use crate::no_std::*;
