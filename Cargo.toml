@@ -68,10 +68,10 @@ reth-revm = { git = "https://github.com/paradigmxyz/reth.git", tag = "v1.7.0", d
 reth-provider = { git = "https://github.com/paradigmxyz/reth.git", tag = "v1.7.0", default-features = false }
 reth-storage-api = { git = "https://github.com/paradigmxyz/reth.git", tag = "v1.7.0", default-features = false }
 
-alethia-reth-block = { path = "../tatsujin-taiko-reth/crates/block" }
-alethia-reth-chainspec = { path = "../tatsujin-taiko-reth/crates/chainspec" }
-alethia-reth-consensus = { path = "../tatsujin-taiko-reth/crates/consensus" }
-alethia-reth-evm = { path = "../tatsujin-taiko-reth/crates/evm", features = [
+alethia-reth-block = { git = "https://github.com/NethermindEth/alethia-reth.git", branch = "feat/raiko-support" }
+alethia-reth-chainspec = { git = "https://github.com/NethermindEth/alethia-reth.git", branch = "feat/raiko-support" }
+alethia-reth-consensus = { git = "https://github.com/NethermindEth/alethia-reth.git", branch = "feat/raiko-support" }
+alethia-reth-evm = { git = "https://github.com/NethermindEth/alethia-reth.git", branch = "feat/raiko-support", features = [
     "serde",
 ] }
 
