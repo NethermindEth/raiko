@@ -193,7 +193,8 @@ impl Prover for TdxProver {
             .await
             .map_err(|e| ProverError::GuestError(e))?;
 
-        let issuer_type = config::get_issuer_type()?;
+        let issuer_type = config::get_issuer_type()
+            .map_err(|e| ProverError::GuestError(e.to_string()))?;
         let key = issuer_type.to_string();
 
         Ok(json!({

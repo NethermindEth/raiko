@@ -102,7 +102,7 @@ pub fn write_bootstrap(issuer_type: &str, quote: &Vec<u8>, public_key: &Address,
 
 pub fn get_issuer_type() -> Result<ProofType> {
     let bootstrap_data = read_bootstrap()?;
-    let proof_type = match bootstrap_data.issuer_type {
+    let proof_type = match bootstrap_data.issuer_type.as_str() {
         "tdx" => ProofType::Tdx,
         "azure" => ProofType::AzureTdx,
         _ => return Err(anyhow!("Invalid issuer type: {}", bootstrap_data.issuer_type)),

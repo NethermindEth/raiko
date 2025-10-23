@@ -19,7 +19,7 @@ pub fn sign_message(private_key: &secp256k1::SecretKey, message: &B256) -> Resul
     let (recovery_id, sig_bytes) = sig.serialize_compact();
     let mut signature = [0u8; 65];
     signature[..64].copy_from_slice(&sig_bytes);
-    signature[64] = recovery_id.to_i32() as u8 + 27; // Add 27 for Ethereum compatibility
+    signature[64] = Into::<i32>::into(recovery_id) as u8 + 27; // Add 27 for Ethereum compatibility
 
     Ok(signature)
 }
