@@ -2,18 +2,7 @@
   {
     "name": "surge_dev_l1",
     "chain_id": 3151908,
-    "max_spec_id": "CANCUN",
-    "hard_forks": {
-      "FRONTIER": {
-        "Block": 0
-      },
-      "SHANGHAI": {
-        "Timestamp": 0
-      },
-      "CANCUN": {
-        "Timestamp": 0
-      }
-    },
+    "hard_forks": {},
     "eip_1559_constants": {
       "base_fee_change_denominator": "0x8",
       "base_fee_max_increase_denominator": "0x8",
@@ -24,13 +13,7 @@
     "l2_contract": null,
     "rpc": "http://devnet-two.surge.wtf/l1-rpc",
     "beacon_rpc": "http://devnet-two.surge.wtf/l1-beacon",
-    "verifier_address_forks": {
-      "FRONTIER": {
-        "SGX": null,
-        "SP1": null,
-        "RISC0": null
-      }
-    },
+    "verifier_address_forks": {},
     "genesis_time": 1759098726,
     "seconds_per_slot": 12,
     "is_taiko": false
@@ -38,18 +21,13 @@
   {
     "name": "surge_dev",
     "chain_id": 763374,
-    "max_spec_id": "PACAYA",
     "hard_forks": {
-      "HEKLA": {
-        "Block": 0
-      },
       "ONTAKE": {
         "Block": 1
       },
       "PACAYA": {
         "Block": 1
-      },
-      "CANCUN": "TBD"
+      }
     },
     "eip_1559_constants": {
       "base_fee_change_denominator": "0x8",
@@ -62,11 +40,6 @@
     "rpc": "http://devnet-two.surge.wtf/l2-rpc",
     "beacon_rpc": null,
     "verifier_address_forks": {
-      "HEKLA": {
-        "SGX": "0xd0c3a782EeFB3597438116985493Cf6e08e7D8Db",
-        "SP1": "0x6BB4A6e70dC89F36282332fEc3f83757D1D05B4A",
-        "RISC0": "0x73b7C5e802D97E66a7E7360CA3E9323De3277D61"
-      },
       "ONTAKE": {
         "SGX": "0xd0c3a782EeFB3597438116985493Cf6e08e7D8Db",
         "SP1": "0x6BB4A6e70dC89F36282332fEc3f83757D1D05B4A",
