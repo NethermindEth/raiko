@@ -13,6 +13,7 @@ use crate::{
     mem_db::{AccountState, DbAccount, MemDb},
     CycleTracker,
 };
+use alloy_consensus::Transaction;
 use alloy_primitives::map::HashMap;
 use alloy_primitives::Address;
 use alloy_primitives::Bytes;
@@ -608,6 +609,9 @@ impl<DB: Database<Error = ProviderError> + DatabaseCommit + OptimisticDatabase +
         optimistic: bool,
     ) -> Result<()> {
         info!("execute_transactions: start");
+        info!("=== EXECUTE_TRANSACTIONS START ===");
+        info!("Number of transactions to execute: {}", pool_txs.len());
+        info!("Optimistic mode: {}", optimistic);
         // Get the chain spec
         let chain_spec = &self.input.chain_spec;
         let chain_spec = match chain_spec.name.as_str() {
@@ -721,8 +725,98 @@ impl<DB: Database<Error = ProviderError> + DatabaseCommit + OptimisticDatabase +
             info!("execute_transactions: validate_block_pre_execution done");
             // Validates the gas used, the receipts root and the logs bloom
 
-            validate_block_post_execution(&recovered_block, &chain_spec, &receipts, &requests)?;
-            info!("execute_transactions: validate_block_post_execution done");
+            // Debug: Log comprehensive gas calculation details
+            let block_gas_used = sealed_header.gas_used;
+            info!("=== COMPREHENSIVE GAS DEBUG INFO ===");
+            info!("Block header gas_used: {}", block_gas_used);
+            info!("Number of receipts: {}", receipts.len());
+            info!("Number of transactions: {}", receipts.len());
+
+            // Log detailed receipt information
+            for (i, receipt) in receipts.iter().enumerate() {
+                info!(
+                    "Receipt {}: success={}, logs_count={}",
+                    i,
+                    receipt.success,
+                    receipt.logs.len()
+                );
+            }
+
+            // Log transaction details
+            info!("=== TRANSACTION DETAILS ===");
+            for (i, tx) in recovered_block.body().transactions.iter().enumerate() {
+                info!(
+                    "Transaction {}: gas_limit={}, gas_price={:?}, value={:?}",
+                    i,
+                    tx.gas_limit(),
+                    tx.gas_price(),
+                    tx.value()
+                );
+
+                if let Some(to_address) = tx.to() {
+                    info!(
+                        "  Transaction {} to: 0x{}",
+                        i,
+                        hex::encode(to_address.as_slice())
+                    );
+                    if tx.input().len() > 0 {
+                        info!("  Transaction {} input_len: {}", i, tx.input().len());
+                    }
+                }
+            }
+
+            // Log block execution summary
+            info!("=== BLOCK EXECUTION SUMMARY ===");
+            info!(
+                "Total transactions: {}",
+                recovered_block.body().transactions.len()
+            );
+            info!("Total receipts: {}", receipts.len());
+            info!("Block header gas_used: {}", block_gas_used);
+
+            // Log individual transaction gas usage
+            for (i, receipt) in receipts.iter().enumerate() {
+                info!(
+                    "Transaction {} receipt: success={}, logs_count={}",
+                    i,
+                    receipt.success,
+                    receipt.logs.len()
+                );
+            }
+
+            // Log final gas values before validation
+            info!("=== FINAL GAS VALUES BEFORE VALIDATION ===");
+            info!("Block header gas_used: {}", block_gas_used);
+            info!("Number of receipts: {}", receipts.len());
+
+            // Log individual transaction gas usage for debugging
+            let mut gas_spent_by_tx = Vec::new();
+            for (i, receipt) in receipts.iter().enumerate() {
+                info!(
+                    "Transaction {} receipt: success={}, logs_count={}",
+                    i,
+                    receipt.success,
+                    receipt.logs.len()
+                );
+                gas_spent_by_tx.push((i, 0)); // Placeholder for now
+            }
+            info!("Gas spent by each transaction: {:?}", gas_spent_by_tx);
+
+            info!("About to call validate_block_post_execution...");
+            match validate_block_post_execution(&recovered_block, &chain_spec, &receipts, &requests)
+            {
+                Ok(_) => {
+                    info!("execute_transactions: validate_block_post_execution done");
+                }
+                Err(e) => {
+                    info!("validate_block_post_execution failed: {:?}", e);
+                    info!("Final gas values at failure:");
+                    info!("  Block header gas_used: {}", block_gas_used);
+                    info!("  Number of receipts: {}", receipts.len());
+                    info!("  Gas spent by each transaction: {:?}", gas_spent_by_tx);
+                    return Err(e.into());
+                }
+            }
         }
 
         // Apply DB change
