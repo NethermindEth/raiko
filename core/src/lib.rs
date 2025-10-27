@@ -4,7 +4,7 @@ use alloy_primitives::Address;
 use alloy_rpc_types::EIP1186AccountProofResponse;
 use interfaces::{cancel_proof, run_batch_prover, run_prover};
 use raiko_lib::{
-    builder::{create_mem_db, RethBlockBuilder},
+    builder::{create_mem_db, verify_and_populate_l1sload_cache, RethBlockBuilder},
     consts::ChainSpec,
     input::{GuestBatchInput, GuestBatchOutput, GuestInput, GuestOutput, TaikoProverData},
     protocol_instance::ProtocolInstance,
@@ -180,6 +180,19 @@ impl Raiko {
         input: &GuestInput,
     ) -> RaikoResult<Block> {
         let db = create_mem_db(&mut input.clone()).unwrap();
+
+        // If there are L1SLOAD proofs, populate the L1SLOAD cache before executing
+        // the transactions.
+        if !input.l1_storage_proofs.is_empty() {
+            let anchor_state_root = input.taiko.l1_header.state_root;
+            info!(
+                "single_output_for_batch: Populating L1SLOAD cache with {} proofs",
+                input.l1_storage_proofs.len()
+            );
+            verify_and_populate_l1sload_cache(&input.l1_storage_proofs, anchor_state_root)
+                .expect("Failed to verify and populate L1SLOAD cache for batch block");
+        }
+
         let mut builder = RethBlockBuilder::new(input, db);
 
         let mut pool_txs = vec![input.taiko.anchor_tx.clone().unwrap()];

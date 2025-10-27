@@ -15,10 +15,7 @@ use crate::{
 };
 use alloy_consensus::Transaction;
 use alloy_primitives::map::HashMap;
-use alloy_primitives::Address;
-use alloy_primitives::Bytes;
-use alloy_primitives::B256;
-use alloy_primitives::U256;
+use alloy_primitives::{Address, Bytes, B256, U256};
 use alloy_rlp::{Buf, Decodable, Header as RlpHeader};
 use alloy_trie::{proof::verify_proof, Nibbles};
 use anyhow::{bail, ensure, Context, Result};
@@ -243,7 +240,7 @@ pub static SURGE_MAINNET: LazyLock<Arc<TaikoChainSpec>> = LazyLock::new(|| {
 
 /// Verify and populate L1SLOAD cache with storage values before EVM execution
 /// This must be called before any EVM execution to ensure L1SLOAD precompile has access to L1 data
-fn verify_and_populate_l1sload_cache(
+pub fn verify_and_populate_l1sload_cache(
     l1_storage_proofs: &[L1StorageProof],
     anchor_state_root: B256,
 ) -> Result<()> {
