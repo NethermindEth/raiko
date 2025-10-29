@@ -3,9 +3,14 @@
 # Any error will result in failure
 set -e
 
+# Global configuration paths with defaults
+CONFIG_PATH=${CONFIG_PATH:-host/config/devnet/config.json}
+CHAIN_SPEC_PATH=${CHAIN_SPEC_PATH:-host/config/devnet/chain_spec_list.json}
+
 #TOOLCHAIN_RISC0=+nightly-2024-12-20
 #TOOLCHAIN_SP1=+nightly-2024-12-20
 #TOOLCHAIN_SGX=+nightly-2024-12-20
+
 
 check_toolchain() {
     local TOOLCHAIN=$1
@@ -80,6 +85,15 @@ if [ "$1" == "sgx" ]; then
         if [ -z "${TEST}" ]; then
             echo "Building SGX prover"
             cargo ${TOOLCHAIN_SGX} build ${FLAGS} --features sgx
+            
+            # Extract MRENCLAVE after successful build
+            echo "Extracting MRENCLAVE from SGX build..."
+            # Check multiple indicators that we're in a container/CI environment
+            if [ -f "/.dockerenv" ] || [ -n "${DOCKER_BUILDKIT}" ] || [ -n "${CI}" ] || [ ! -f ".env" ] || grep -q docker /proc/1/cgroup 2>/dev/null; then
+                echo "Container/CI build detected, skipping MRENCLAVE .env update (will be handled by publish-image.sh)"
+            else
+                ./script/update_imageid.sh sgx
+            fi
         else
             echo "Building SGX tests"
             cargo ${TOOLCHAIN_SGX} test ${FLAGS} -p raiko-host -p sgx-prover --features "sgx enable" --no-run
@@ -87,7 +101,7 @@ if [ "$1" == "sgx" ]; then
     else
         if [ -z "${TEST}" ]; then
             echo "Running SGX prover"
-            cargo ${TOOLCHAIN_SGX} run ${FLAGS} --features sgx
+            cargo ${TOOLCHAIN_SGX} run ${FLAGS} --features sgx -- --config-path=${CONFIG_PATH} --chain-spec-path=${CHAIN_SPEC_PATH}
         else
             echo "Running SGX tests"
             cargo ${TOOLCHAIN_SGX} test ${FLAGS} -p raiko-host -p sgx-prover --features "sgx enable"
@@ -112,7 +126,16 @@ if [ "$1" == "risc0" ]; then
     elif [ -z "${RUN}" ]; then
         if [ -z "${TEST}" ]; then
             echo "Building Risc0 prover"
-            cargo ${TOOLCHAIN_RISC0} run --bin risc0-builder
+            cargo ${TOOLCHAIN_RISC0} run --bin risc0-builder 2>&1 | tee /tmp/risc0_build_output.txt
+            # Skip updating .env during Docker builds (no .env file exists in container)  
+            # The publish-image.sh script will update the local .env file after the build
+            # Check multiple indicators that we're in a container/CI environment
+            if [ -f "/.dockerenv" ] || [ -n "${DOCKER_BUILDKIT}" ] || [ -n "${CI}" ] || [ ! -f ".env" ] || grep -q docker /proc/1/cgroup 2>/dev/null; then
+                echo "Container/CI build detected, skipping .env update (will be handled by publish-image.sh)"
+            else
+                echo "Updating environment with new RISC0 image IDs..."
+                ./script/update_imageid.sh risc0
+            fi
         else
             echo "Building test elfs for Risc0 prover"
             cargo ${TOOLCHAIN_RISC0} run --bin risc0-builder --features test,bench
@@ -123,7 +146,7 @@ if [ "$1" == "risc0" ]; then
     else
         if [ -z "${TEST}" ]; then
             echo "Running Risc0 prover"
-            cargo ${TOOLCHAIN_RISC0} run ${FLAGS} --features risc0
+            cargo ${TOOLCHAIN_RISC0} run ${FLAGS} --features risc0 -- --config-path=${CONFIG_PATH} --chain-spec-path=${CHAIN_SPEC_PATH}
         else
             echo "Running Risc0 tests"
             cargo ${TOOLCHAIN_RISC0} test ${FLAGS} --lib risc0-driver --features risc0  -- run_unittest_elf
@@ -144,7 +167,16 @@ if [ "$1" == "sp1" ]; then
     elif [ -z "${RUN}" ]; then
         if [ -z "${TEST}" ]; then
             echo "Building Sp1 prover"
-            cargo ${TOOLCHAIN_SP1} run --bin sp1-builder
+            cargo ${TOOLCHAIN_SP1} run --bin sp1-builder 2>&1 | tee /tmp/sp1_build_output.txt
+            # Skip updating .env during Docker builds (no .env file exists in container)
+            # The publish-image.sh script will update the local .env file after the build
+            # Check multiple indicators that we're in a container/CI environment
+            if [ -f "/.dockerenv" ] || [ -n "${DOCKER_BUILDKIT}" ] || [ -n "${CI}" ] || [ ! -f ".env" ] || grep -q docker /proc/1/cgroup 2>/dev/null; then
+                echo "Container/CI build detected, skipping .env update (will be handled by publish-image.sh)"
+            else
+                echo "Updating environment with new SP1 VK hashes..."
+                ./script/update_imageid.sh sp1
+            fi
         else
             echo "Building test elfs for Sp1 prover"
             cargo ${TOOLCHAIN_SP1} run --bin sp1-builder --features test,bench
@@ -156,7 +188,7 @@ if [ "$1" == "sp1" ]; then
     else
         if [ -z "${TEST}" ]; then
             echo "Running Sp1 prover"
-            cargo ${TOOLCHAIN_SP1} run ${FLAGS} --features sp1
+            cargo ${TOOLCHAIN_SP1} run ${FLAGS} --features sp1 -- --config-path=${CONFIG_PATH} --chain-spec-path=${CHAIN_SPEC_PATH}
         else
             echo "Running Sp1 unit tests"
             # cargo ${TOOLCHAIN_SP1} test ${FLAGS} --lib sp1-driver --features sp1 -- run_unittest_elf

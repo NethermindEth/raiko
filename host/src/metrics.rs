@@ -2,8 +2,8 @@ use std::time::Duration;
 
 use lazy_static::lazy_static;
 use prometheus::{
-    labels, register_histogram_vec, register_int_counter_vec, register_int_gauge, HistogramVec,
-    IntCounterVec, IntGauge,
+    labels, register_counter_vec, register_histogram_vec, register_int_counter_vec,
+    register_int_gauge, CounterVec, HistogramVec, IntCounterVec, IntGauge,
 };
 use raiko_lib::proof_type::ProofType;
 
@@ -59,6 +59,22 @@ lazy_static! {
     pub static ref CONCURRENT_REQUESTS: IntGauge = register_int_gauge!(
         "concurrent_requests",
         "number of requests currently being processed"
+    )
+    .unwrap();
+
+    /// overall preconfimer proof generation time for each
+    pub static ref PRECONFIRMER_PROOF_COST_COUNTER: CounterVec = register_counter_vec!(
+            "preconfimer_proof_gen_time_counter",
+            "sum of preconfimer proof generation time",
+            &["preconfirmer"],
+        )
+        .unwrap();
+
+    /// 1 proof generation time
+    pub static ref SINGLE_PROOF_GEN_TIME: CounterVec = register_counter_vec!(
+        "single_proof_gen_time_gauge",
+        "accumulated time cost of one single proof generation",
+        &["aggregate", "proof_type", "batch_desc"],
     )
     .unwrap();
 }
@@ -166,4 +182,26 @@ pub fn observe_total_time(block_id: u64, time: Duration, success: bool) {
         "success" => &success,
     };
     TOTAL_TIME.with(&labels).observe(duration_to_f64(time));
+}
+
+pub fn accumulate_caller_proof_time_cost(caller: &str, duration: Duration) {
+    PRECONFIRMER_PROOF_COST_COUNTER
+        .with_label_values(&[caller])
+        .inc_by(duration_to_f64(duration));
+}
+
+pub fn accumulate_single_proof_gen_time(
+    aggregate: bool,
+    proof_type: &ProofType,
+    batch_desc: &str,
+    duration: Duration,
+) {
+    let proof_type = proof_type.to_string();
+    SINGLE_PROOF_GEN_TIME
+        .with_label_values(&[
+            if aggregate { "aggregate" } else { "single" },
+            proof_type.as_str(),
+            batch_desc,
+        ])
+        .inc_by(duration_to_f64(duration));
 }

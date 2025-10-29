@@ -631,7 +631,7 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread")]
-    async fn test_prove_block_taiko_mainnet() {
+    async fn test_prove_pacaya_batch_taiko_mainnet() {
         let proof_type = get_proof_type_from_env();
         // Skip test on SP1 for now because it's too slow on CI
         if !(is_ci() && proof_type == ProofType::Sp1) {
@@ -643,15 +643,10 @@ mod tests {
             let l1_chain_spec = SupportedChainSpecs::default()
                 .get_chain_spec(&l1_network)
                 .unwrap();
-            let block_number = get_recent_block_num(&taiko_chain_spec).await;
-            println!(
-                "test_prove_block_taiko_mainnet in block_number: {}",
-                block_number
-            );
             let proof_request = ProofRequest {
-                block_number,
-                batch_id: 0,
-                l1_inclusion_block_number: 0,
+                block_number: 0,
+                batch_id: 1291375,
+                l1_inclusion_block_number: 23028666,
                 l2_block_numbers: Vec::new(),
                 network,
                 graffiti: B256::ZERO,
@@ -662,7 +657,7 @@ mod tests {
                 prover_args: test_proof_params(false),
                 gpu_number: Some(0),
             };
-            prove_block(l1_chain_spec, taiko_chain_spec, proof_request).await;
+            batch_prove_block(l1_chain_spec, taiko_chain_spec, proof_request).await;
         }
     }
 

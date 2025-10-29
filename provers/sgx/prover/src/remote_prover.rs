@@ -1,5 +1,6 @@
 #![cfg(feature = "enable")]
 
+use crate::{SgxParam, SgxResponse};
 use raiko_lib::{
     input::{
         AggregationGuestInput, AggregationGuestOutput, GuestBatchInput, GuestBatchOutput,
@@ -10,8 +11,7 @@ use raiko_lib::{
 };
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
-
-use crate::{SgxParam, SgxResponse};
+use tokio::time::Duration;
 
 #[derive(Default, Clone, Serialize, Deserialize)]
 pub struct RemoteSgxResponse {
@@ -103,8 +103,6 @@ impl Prover for RemoteSgxProver {
             unimplemented!("SGX bootstrap not implemented for aggregation request");
         };
 
-        println!("input: {:?}", input);
-
         let sgx_proof = aggregate(&self.remote_prover_url, input.clone(), self.proof_type).await?;
         Ok(sgx_proof.into())
     }
@@ -148,46 +146,6 @@ impl Prover for RemoteSgxProver {
         }
 
         sgx_proof.map(|r| r.into())
-    }
-}
-
-pub async fn check_bootstrap(
-    remote_sgx_url: &str,
-    _proof_type: ProofType,
-) -> ProverResult<(), ProverError> {
-    // post to remote sgx provider/bootstrap
-    let client: Client = Client::new();
-    let remote_post_url = format!("{}/check", remote_sgx_url);
-    let response = client
-        .post(remote_post_url)
-        .header("Content-Type", "application/json")
-        .send()
-        .await
-        .map_err(|e| ProverError::GuestError(format!("Failed to send request: {e}")))?;
-
-    if response.status().is_success() {
-        let response_text = response
-            .text()
-            .await
-            .map_err(|e| ProverError::GuestError(format!("Failed to read response: {e}")))?;
-        tracing::info!("Response: {}", response_text);
-        let sgx_proof: RemoteSgxResponse = serde_json::from_str(&response_text)
-            .map_err(|e| ProverError::GuestError(format!("Failed to parse response: {e}")))?;
-        if sgx_proof.status == "success" {
-            Ok(())
-        } else {
-            tracing::error!("Request failed with status: {}", sgx_proof.status);
-            Err(ProverError::GuestError(format!(
-                "Failed to read error response: {}",
-                sgx_proof.message
-            )))
-        }
-    } else {
-        tracing::error!("Request failed with status: {}", response.status());
-        Err(ProverError::GuestError(format!(
-            "Failed to read error response: {}",
-            response.status()
-        )))
     }
 }
 
@@ -281,6 +239,7 @@ async fn batch_prove(
         .post(post_url)
         .header("Content-Type", "application/json")
         .body(json_input)
+        .timeout(Duration::from_secs(200))
         .send()
         .await
         .map_err(|e| ProverError::GuestError(format!("Failed to send request: {e}")))?;
@@ -343,6 +302,7 @@ async fn aggregate(
         .post(post_url)
         .header("Content-Type", "application/json")
         .body(json_input)
+        .timeout(Duration::from_secs(200))
         .send()
         .await
         .map_err(|e| ProverError::GuestError(format!("Failed to send request: {e}")))?;

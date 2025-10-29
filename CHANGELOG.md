@@ -1,5 +1,71 @@
 # Changelog
 
+## [1.12.0](https://github.com/taikoxyz/raiko/compare/v1.10.0...v1.12.0) (2025-10-09)
+
+
+### Features
+
+* add image ID to request key ([#608](https://github.com/taikoxyz/raiko/issues/608)) ([7a9a900](https://github.com/taikoxyz/raiko/commit/7a9a900f25bf8fdcad96e5df14ad107fad4f2244))
+* add tolba support ([#629](https://github.com/taikoxyz/raiko/issues/629)) ([abd1246](https://github.com/taikoxyz/raiko/commit/abd1246d6cdd4683bf3e5837a2a3dfeeb3ec5540))
+* enable "embedded" feature for sp1 ([#619](https://github.com/taikoxyz/raiko/issues/619)) ([1f69c40](https://github.com/taikoxyz/raiko/commit/1f69c405cf2973be81c3057d960df9025d131292))
+* release v1.10.4 ([#623](https://github.com/taikoxyz/raiko/issues/623)) ([eebee8c](https://github.com/taikoxyz/raiko/commit/eebee8c953d5acb8fe2d97098e6cf2079b31a6b6))
+
+
+### Bug Fixes
+
+* extracting sp1 vk hash error ([#617](https://github.com/taikoxyz/raiko/issues/617)) ([e2fafd8](https://github.com/taikoxyz/raiko/commit/e2fafd8387d4882df79a7fb1b17a17680bedc5f7))
+* **raiko:** give gramine enclave more memory ([#615](https://github.com/taikoxyz/raiko/issues/615)) ([eb0563a](https://github.com/taikoxyz/raiko/commit/eb0563af89aa75779a85647a7ad1fca1ec7d7040))
+
+## [1.10.0](https://github.com/taikoxyz/raiko/compare/v1.9.0...v1.10.0) (2025-08-06)
+
+
+### Features
+
+* add a maximum queue size limit ([#607](https://github.com/taikoxyz/raiko/issues/607)) ([2ef2f86](https://github.com/taikoxyz/raiko/commit/2ef2f86340ddb23bdef613353b97ebf0b6e1310d))
+* add medium priority queue ([#596](https://github.com/taikoxyz/raiko/issues/596)) ([f00b405](https://github.com/taikoxyz/raiko/commit/f00b4051cf2a7e0dd1ec74e24b991ef7bd372d1c))
+* add priority queue (update) ([#592](https://github.com/taikoxyz/raiko/issues/592)) ([7d895cc](https://github.com/taikoxyz/raiko/commit/7d895cc55272fbb84c070d5ed63a7a80d63e3fa4))
+* **raiko:** add billing log ([#597](https://github.com/taikoxyz/raiko/issues/597)) ([4fb87f8](https://github.com/taikoxyz/raiko/commit/4fb87f83bff2097ef2f388bb30060ae339e3b2da))
+* **raiko:** make lru size configurable ([#590](https://github.com/taikoxyz/raiko/issues/590)) ([6710b96](https://github.com/taikoxyz/raiko/commit/6710b96b1e5bda98e626b1b03f22afa509c29093))
+* **raiko:** refine billing metrics ([#612](https://github.com/taikoxyz/raiko/issues/612)) ([6fea2ec](https://github.com/taikoxyz/raiko/commit/6fea2ec2140c20a2f747310774de56322b380b7c))
+* **raiko:** update risc0 to v2.1.0 ([#584](https://github.com/taikoxyz/raiko/issues/584)) ([a2051c9](https://github.com/taikoxyz/raiko/commit/a2051c9f653d7f7f3a7d9a071cf3ec45888388d9))
+* **raiko:** update risc0 to v2.2.0  ([#600](https://github.com/taikoxyz/raiko/issues/600)) ([86d21bd](https://github.com/taikoxyz/raiko/commit/86d21bdb57bd2709a08b42389cb61d5e65c625ba))
+
+
+### Bug Fixes
+
+* metrics log issue and recover the successfully proved log info. ([#602](https://github.com/taikoxyz/raiko/issues/602)) ([0a7625e](https://github.com/taikoxyz/raiko/commit/0a7625e0803c446e473d7fb36f63efee7a09a07e))
+* **raiko:** code clean, remove useless units. ([#588](https://github.com/taikoxyz/raiko/issues/588)) ([388a542](https://github.com/taikoxyz/raiko/commit/388a5422c1e6e757f1758b89e447ddb8a6f7107e))
+* **raiko:** fix docker compose file ([#587](https://github.com/taikoxyz/raiko/issues/587)) ([88c58ed](https://github.com/taikoxyz/raiko/commit/88c58ede2cfd9b3fcf4bd6f4401afa03032c06ae))
+* **raiko:** move health & metrics to public entrypoint and update ratelimit ([#604](https://github.com/taikoxyz/raiko/issues/604)) ([f065b39](https://github.com/taikoxyz/raiko/commit/f065b393fd1cd897cdb68f04b2baa9ffb5f041a8))
+
+## [1.9.0](https://github.com/taikoxyz/raiko/compare/v1.9.0-rc.1...v1.9.0) (2025-06-10)
+
+
+### Features
+
+* **pre-release:** v1.9.0-rc.1 ([#580](https://github.com/taikoxyz/raiko/issues/580)) ([fd21666](https://github.com/taikoxyz/raiko/commit/fd216663ec84385ee4456c673366535c82712bdb))
+* **raiko:** update deploy script ([#581](https://github.com/taikoxyz/raiko/issues/581)) ([6f11b79](https://github.com/taikoxyz/raiko/commit/6f11b793201a8da3b054c8316c7e39f9332667f1))
+
+
+### Bug Fixes
+
+* **raiko:** add timeout to sgx server ([#585](https://github.com/taikoxyz/raiko/issues/585)) ([0518a8a](https://github.com/taikoxyz/raiko/commit/0518a8ac3ce5e6504075c310d53085d0aa150015))
+
+## [1.8.0](https://github.com/taikoxyz/raiko/compare/v1.7.0...v1.8.0) (2025-05-16)
+
+
+### Features
+
+* **raiko:** compress redis entry to optimize db storage ([#561](https://github.com/taikoxyz/raiko/issues/561)) ([a7248bb](https://github.com/taikoxyz/raiko/commit/a7248bb79323bfb51c9d832a52c5a0fb7cad5428))
+* **raiko:** enable sgx web service ([#550](https://github.com/taikoxyz/raiko/issues/550)) ([f6e14a5](https://github.com/taikoxyz/raiko/commit/f6e14a5add5aadf7a20e413eb6ef099046595b51))
+* **raiko:** support parallel prefetch ([#557](https://github.com/taikoxyz/raiko/issues/557)) ([ffb25e3](https://github.com/taikoxyz/raiko/commit/ffb25e30d1e596d4ea8a650cac1a8285df8da2fc))
+* **raiko:** update docker compose for raiko sgx server ([#559](https://github.com/taikoxyz/raiko/issues/559)) ([70c0304](https://github.com/taikoxyz/raiko/commit/70c03043b815b05c56877781da7792672d4e899c))
+* **raiko:** support mainnet pacaya fork with prerelease-v1.8.0 ([#563](https://github.com/taikoxyz/raiko/pull/563))
+
+### Bug Fixes
+
+* use memfd instead of pipe in stdin to avoid deadlock in ego ([#560](https://github.com/taikoxyz/raiko/issues/560)) ([b703d9a](https://github.com/taikoxyz/raiko/commit/b703d9ae0389b5777639374a677dff69d4a75e51))
+
 ## [1.7.0](https://github.com/taikoxyz/raiko/compare/v1.6.1...v1.7.0) (2025-04-08)
 
 

@@ -2,7 +2,9 @@ use crate::{
     interfaces::HostResult,
     server::{
         api::v3::{ProofResponse, Status},
+        auth::AuthenticatedApiKey,
         handler::prove_many,
+        metrics::{record_batch_request_in, record_batch_request_out},
         prove_aggregation,
         utils::{
             draw_for_sgx_any_batch_request, draw_for_zk_any_batch_request, is_sgx_any_request,
@@ -10,7 +12,7 @@ use crate::{
         },
     },
 };
-use axum::{extract::State, routing::post, Json, Router};
+use axum::{extract::State, routing::post, Extension, Json, Router};
 use raiko_core::{
     interfaces::{BatchMetadata, BatchProofRequest, BatchProofRequestOpt, RaikoError},
     merge,
@@ -19,7 +21,7 @@ use raiko_lib::{proof_type::ProofType, prover::Proof};
 use raiko_reqactor::Actor;
 use raiko_reqpool::{
     AggregationRequestEntity, AggregationRequestKey, BatchGuestInputRequestEntity,
-    BatchGuestInputRequestKey, BatchProofRequestEntity, BatchProofRequestKey,
+    BatchProofRequestEntity, ImageId, RequestKey,
 };
 use raiko_tasks::TaskStatus;
 use serde_json::Value;
@@ -42,11 +44,13 @@ use utoipa::OpenApi;
 /// - risc0 - uses the risc0 prover
 async fn batch_handler(
     State(actor): State<Actor>,
+    Extension(authenticated_key): Extension<AuthenticatedApiKey>,
     Json(batch_request_opt): Json<Value>,
 ) -> HostResult<Status> {
     tracing::debug!(
-        "Received batch request: {}",
-        serde_json::to_string(&batch_request_opt)?
+        "Incoming batch request: {} from {}",
+        serde_json::to_string(&batch_request_opt)?,
+        authenticated_key.name
     );
 
     let batch_request = {
@@ -110,12 +114,21 @@ async fn batch_handler(
 
         batch_request
     };
+    record_batch_request_in(&authenticated_key.name, &batch_request);
     tracing::info!(
-        "IN Batch request: {}",
-        serde_json::to_string(&batch_request)?
+        "Accepted {}'s batch request: {}",
+        authenticated_key.name,
+        serde_json::to_string(&batch_request)?,
     );
 
     let chain_id = actor.get_chain_spec(&batch_request.network)?.chain_id;
+
+    // Create image ID based on proof type for provers
+    let image_id = ImageId::from_proof_type_and_request_type(
+        &batch_request.proof_type,
+        batch_request.aggregate,
+    );
+
     let mut sub_input_request_keys = Vec::with_capacity(batch_request.batches.len());
     let mut sub_input_request_entities = Vec::with_capacity(batch_request.batches.len());
     let mut sub_request_keys = Vec::with_capacity(batch_request.batches.len());
@@ -126,12 +139,18 @@ async fn batch_handler(
         l1_inclusion_block_number,
     } in batch_request.batches.iter()
     {
+        // Create input request key without image ID
         let input_request_key =
-            BatchGuestInputRequestKey::new(chain_id, *batch_id, *l1_inclusion_block_number);
-        let request_key = BatchProofRequestKey::new_with_input_key(
-            input_request_key.clone(),
+            RequestKey::batch_guest_input(chain_id, *batch_id, *l1_inclusion_block_number);
+
+        // Create proof request key with image ID
+        let request_key = RequestKey::batch_proof_with_image_id(
+            chain_id,
+            *batch_id,
+            *l1_inclusion_block_number,
             batch_request.proof_type,
             batch_request.prover.to_string(),
+            image_id.clone(),
         );
 
         let input_request_entity = BatchGuestInputRequestEntity::new(
@@ -159,12 +178,16 @@ async fn batch_handler(
     let result = if batch_request.aggregate {
         prove_aggregation(
             &actor,
-            AggregationRequestKey::new(batch_request.proof_type, sub_batch_ids.clone()).into(),
+            AggregationRequestKey::new_with_image_id(
+                batch_request.proof_type,
+                sub_batch_ids.clone(),
+                image_id.clone(),
+            ),
             AggregationRequestEntity::new(
                 sub_batch_ids,
                 vec![],
                 batch_request.proof_type,
-                batch_request.prover_args,
+                batch_request.prover_args.clone(),
             )
             .into(),
             sub_request_keys,
@@ -235,6 +258,13 @@ async fn batch_handler(
         }
     };
     tracing::debug!("Batch proof result: {}", serde_json::to_string(&result)?);
+
+    if let Ok(raiko_reqpool::Status::Success { .. }) = &result {
+        record_batch_request_out(&authenticated_key.name, &batch_request, true);
+    } else {
+        record_batch_request_out(&authenticated_key.name, &batch_request, false);
+    }
+
     Ok(to_v3_status(
         batch_request.proof_type,
         Some(batch_request.batches.first().unwrap().batch_id),

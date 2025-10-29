@@ -26,28 +26,28 @@ async fn pause(State(actor): State<Actor>) -> HostResult<&'static str> {
 
 async fn set_ballot_zk(
     State(actor): State<Actor>,
-    Json(probs): Json<BTreeMap<ProofType, f64>>,
+    Json(probs): Json<BTreeMap<ProofType, (f64, u64)>>,
 ) -> HostResult<&'static str> {
     let ballot = Ballot::new(probs).map_err(|e| anyhow::anyhow!(e))?;
-    actor.set_ballot_zk(ballot);
+    actor.set_ballot_zk(ballot).await;
     Ok("Ballot set successfully")
 }
 
 async fn get_ballot_zk(State(actor): State<Actor>) -> Response {
-    let ballot = actor.get_ballot_zk().probabilities().to_owned();
+    let ballot = actor.get_ballot_zk().await.probabilities().to_owned();
     Json(ballot).into_response()
 }
 
 async fn set_ballot_sgx(
     State(actor): State<Actor>,
-    Json(probs): Json<BTreeMap<ProofType, f64>>,
+    Json(probs): Json<BTreeMap<ProofType, (f64, u64)>>,
 ) -> HostResult<&'static str> {
     let ballot = Ballot::new(probs).map_err(|e| anyhow::anyhow!(e))?;
-    actor.set_ballot_sgx(ballot);
+    actor.set_ballot_sgx(ballot).await;
     Ok("Ballot set successfully")
 }
 
 async fn get_ballot_sgx(State(actor): State<Actor>) -> Response {
-    let ballot = actor.get_ballot_sgx().probabilities().to_owned();
+    let ballot = actor.get_ballot_sgx().await.probabilities().to_owned();
     Json(ballot).into_response()
 }

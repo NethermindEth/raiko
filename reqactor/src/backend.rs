@@ -1,15 +1,18 @@
+use std::{collections::VecDeque, sync::Arc};
+
 use base64::{engine::general_purpose, Engine as _};
 use bincode;
+
 use raiko_core::{
     interfaces::{aggregate_proofs, ProofRequest},
     preflight::parse_l1_batch_proposal_tx_for_pacaya_fork,
     provider::rpc::RpcBlockDataProvider,
     Raiko,
 };
-use raiko_lib::proof_type::ProofType;
 use raiko_lib::{
     consts::SupportedChainSpecs,
     input::{AggregationGuestInput, AggregationGuestOutput, GuestBatchInput, GuestInput},
+    proof_type::ProofType,
     prover::{IdWrite, Proof},
     utils::{zlib_compress_data, zlib_decompress_data},
 };
@@ -18,341 +21,28 @@ use raiko_reqpool::{
     GuestInputRequestEntity, RequestEntity, RequestKey, SingleProofRequestEntity, Status,
     StatusWithContext,
 };
-use std::time::Duration;
-use std::{collections::VecDeque, sync::Arc};
-use tokio::sync::{
-    mpsc::{self, Receiver, Sender},
-    oneshot, Mutex, Semaphore,
-};
+use tokio::sync::{mpsc, Mutex, Notify, Semaphore};
 use tracing::{debug, trace};
 
-use crate::{Action, Pool};
+use crate::queue::Queue;
+use crate::Pool;
 
-/// Backend runs in the background, and handles the actions from the actor.
-#[derive(Clone)]
-pub(crate) struct Backend {
-    pool: Pool,
-    chain_specs: SupportedChainSpecs,
-    internal_tx: Sender<RequestKey>,
-    proving_semaphore: Arc<Semaphore>,
-    available_gpus: Arc<Mutex<VecDeque<u32>>>,
+// Struct that holds available GPU numbers
+#[derive(Debug)]
+pub(crate) struct AvailableGpus {
+    inner: Mutex<VecDeque<u32>>,
 }
 
-// TODO: load pool and notify internal channel
-impl Backend {
-    /// Run the backend in background.
-    ///
-    /// The returned channel sender is used to send actions to the actor, and the actor will
-    /// act on the actions and send responses back.
-    pub async fn serve_in_background(
-        pool: Pool,
-        chain_specs: SupportedChainSpecs,
-        pause_rx: Receiver<()>,
-        action_rx: Receiver<(Action, oneshot::Sender<Result<StatusWithContext, String>>)>,
-        max_proving_concurrency: usize,
-    ) {
-        let channel_size = 1024;
-        let (internal_tx, internal_rx) = mpsc::channel::<RequestKey>(channel_size);
-
-        let available_gpus: Arc<Mutex<VecDeque<u32>>> = Arc::new(Mutex::new(VecDeque::from(
+impl AvailableGpus {
+    pub fn new(max_proving_concurrency: usize) -> Self {
+        let available_gpus: Mutex<VecDeque<u32>> = Mutex::new(VecDeque::from(
             (0..max_proving_concurrency)
                 .map(|x| x as u32)
                 .collect::<Vec<u32>>(),
-        )));
-        tokio::spawn(async move {
-            Backend {
-                pool,
-                chain_specs,
-                internal_tx,
-                proving_semaphore: Arc::new(Semaphore::new(max_proving_concurrency)),
-                available_gpus,
-            }
-            .serve(action_rx, internal_rx, pause_rx)
-            .await;
-        });
-    }
+        ));
 
-    // There are three incoming channels:
-    // 1. action_rx: actions from the external Actor
-    // 2. internal_rx: internal signals from the backend itself
-    // 3. pause_rx: pause signal from the external Actor
-    async fn serve(
-        mut self,
-        mut action_rx: Receiver<(Action, oneshot::Sender<Result<StatusWithContext, String>>)>,
-        mut internal_rx: Receiver<RequestKey>,
-        mut pause_rx: Receiver<()>,
-    ) {
-        loop {
-            tokio::select! {
-                Some((action, resp_tx)) = action_rx.recv() => {
-                    let request_key = action.request_key().clone();
-                    let response = self.handle_external_action(action.clone()).await;
-
-                    // Signal the request key to the internal channel, to move on to the next step, whatever the result is
-                    //
-                    // NOTE: Why signal whatever the result is? It's for fault tolerance, to ensure the request will be
-                    // handled even when something unexpected happens.
-                    self.ensure_internal_signal(request_key).await;
-
-                    // When the client side is closed, the response channel is closed, and sending response to the
-                    // channel will return an error. So we discard the result of sending response to the external actor.
-                    let _discard = resp_tx.send(response.clone());
-                }
-                Some(request_key) = internal_rx.recv() => {
-                    self.handle_internal_signal(request_key.clone()).await;
-                }
-                Some(()) = pause_rx.recv() => {
-                    tracing::info!("Actor Backend received pause-signal, halting");
-                    if let Err(err) = self.halt().await {
-                        tracing::error!("Actor Backend failed to halt: {err:?}");
-                    }
-                }
-                else => {
-                    // All channels are closed, exit the loop
-                    tracing::info!("Actor Backend exited");
-                    break;
-                }
-            }
-        }
-    }
-
-    async fn handle_external_action(
-        &mut self,
-        action: Action,
-    ) -> Result<StatusWithContext, String> {
-        match action {
-            Action::Prove {
-                request_key,
-                request_entity,
-            } => match self.pool.get_status(&request_key) {
-                Ok(None) => {
-                    tracing::debug!("Actor Backend received prove-action {request_key}, and it is not in pool, registering");
-                    self.register(request_key.clone(), request_entity).await
-                }
-                Ok(Some(status)) => match status.status() {
-                    Status::Registered | Status::WorkInProgress | Status::Success { .. } => {
-                        tracing::debug!("Actor Backend received prove-action {request_key}, but it is already {status}, skipping");
-                        Ok(status)
-                    }
-                    Status::Cancelled { .. } => {
-                        tracing::warn!("Actor Backend received prove-action {request_key}, and it is cancelled, re-registering");
-                        self.register(request_key, request_entity).await
-                    }
-                    Status::Failed { .. } => {
-                        tracing::warn!("Actor Backend received prove-action {request_key}, and it is failed, re-registering");
-                        self.register(request_key, request_entity).await
-                    }
-                },
-                Err(err) => {
-                    tracing::error!(
-                        "Actor Backend failed to get status of prove-action {request_key}: {err:?}"
-                    );
-                    Err(err)
-                }
-            },
-            Action::Cancel { request_key } => match self.pool.get_status(&request_key) {
-                Ok(None) => {
-                    tracing::warn!("Actor Backend received cancel-action {request_key}, but it is not in pool, skipping");
-                    Err("request is not in pool".to_string())
-                }
-                Ok(Some(status)) => match status.status() {
-                    Status::Registered | Status::WorkInProgress => {
-                        tracing::debug!("Actor Backend received cancel-action {request_key}, and it is {status}, cancelling");
-                        self.cancel(request_key, status).await
-                    }
-
-                    Status::Failed { .. } | Status::Cancelled { .. } | Status::Success { .. } => {
-                        tracing::debug!("Actor Backend received cancel-action {request_key}, but it is already {status}, skipping");
-                        Ok(status)
-                    }
-                },
-                Err(err) => {
-                    tracing::error!(
-                        "Actor Backend failed to get status of cancel-action {request_key}: {err:?}"
-                    );
-                    Err(err)
-                }
-            },
-        }
-    }
-
-    // Check the request status and then move on to the next step accordingly.
-    async fn handle_internal_signal(&mut self, request_key: RequestKey) {
-        match self.pool.get(&request_key) {
-            Ok(Some((request_entity, status))) => match status.status() {
-                Status::Registered => match request_entity {
-                    RequestEntity::SingleProof(entity) => {
-                        tracing::debug!("Actor Backend received internal signal {request_key}, status: {status}, proving single proof");
-                        self.prove_single(request_key.clone(), entity).await;
-                        self.ensure_internal_signal(request_key).await;
-                    }
-                    RequestEntity::Aggregation(entity) => {
-                        tracing::debug!("Actor Backend received internal signal {request_key}, status: {status}, proving aggregation proof");
-                        self.prove_aggregation(request_key.clone(), entity).await;
-                        self.ensure_internal_signal(request_key).await;
-                    }
-                    RequestEntity::BatchProof(entity) => {
-                        tracing::debug!("Actor Backend received internal signal {request_key}, status: {status}, proving batch proof");
-                        self.prove_batch(request_key.clone(), entity).await;
-                        self.ensure_internal_signal(request_key).await;
-                    }
-                    RequestEntity::GuestInput(entity) => {
-                        tracing::debug!("Actor Backend received internal signal {request_key}, status: {status}, proving single proof");
-                        self.generate_guest_input(request_key.clone(), entity).await;
-                        self.ensure_internal_signal(request_key).await;
-                    }
-                    RequestEntity::BatchGuestInput(entity) => {
-                        tracing::debug!("Actor Backend received internal signal {request_key}, status: {status}, proving single proof");
-                        self.generate_batch_guest_input(request_key.clone(), entity)
-                            .await;
-                        self.ensure_internal_signal(request_key).await;
-                    }
-                },
-                Status::WorkInProgress => {
-                    // Wait for proving completion
-                    tracing::debug!(
-                        "Actor Backend checks a work-in-progress request {request_key}, elapsed: {elapsed:?}",
-                        elapsed = chrono::Utc::now() - status.timestamp(),
-                    );
-                    self.ensure_internal_signal_after(request_key, Duration::from_secs(3))
-                        .await;
-                }
-                Status::Success { .. } | Status::Cancelled { .. } | Status::Failed { .. } => {
-                    tracing::debug!("Actor Backend received internal signal {request_key}, status: {status}, done");
-                }
-            },
-            Ok(None) => {
-                tracing::warn!(
-                    "Actor Backend received internal signal {request_key}, but it is not in pool, skipping"
-                );
-            }
-            Err(err) => {
-                // Fault tolerance: re-enqueue the internal signal after 3 seconds
-                tracing::warn!(
-                    "Actor Backend failed to get status of internal signal {request_key}: {err:?}, performing fault tolerance and retrying later"
-                );
-                self.ensure_internal_signal_after(request_key, Duration::from_secs(3))
-                    .await;
-            }
-        }
-    }
-
-    // Ensure signal the request key to the internal channel.
-    //
-    // Note that this function will retry sending the signal until success.
-    async fn ensure_internal_signal(&mut self, request_key: RequestKey) {
-        let mut ticker = tokio::time::interval(Duration::from_secs(3));
-        let internal_tx = self.internal_tx.clone();
-        tokio::spawn(async move {
-            loop {
-                ticker.tick().await; // first tick is immediate
-                if let Err(err) = internal_tx.send(request_key.clone()).await {
-                    tracing::error!("Actor Backend failed to send internal signal {request_key}: {err:?}, retrying. It should not happen, please issue a bug report");
-                } else {
-                    break;
-                }
-            }
-        });
-    }
-
-    async fn ensure_internal_signal_after(&mut self, request_key: RequestKey, after: Duration) {
-        let mut timer = tokio::time::interval(after);
-        timer.tick().await; // first tick is immediate
-        timer.tick().await;
-        self.ensure_internal_signal(request_key).await
-    }
-
-    // Register a new request to the pool and notify the actor.
-    async fn register(
-        &mut self,
-        request_key: RequestKey,
-        request_entity: RequestEntity,
-    ) -> Result<StatusWithContext, String> {
-        // 1. Register to the pool
-        let status = StatusWithContext::new_registered();
-        if let Err(err) = self
-            .pool
-            .add(request_key.clone(), request_entity, status.clone())
-        {
-            return Err(err);
-        }
-
-        Ok(status)
-    }
-
-    async fn cancel(
-        &mut self,
-        request_key: RequestKey,
-        old_status: StatusWithContext,
-    ) -> Result<StatusWithContext, String> {
-        if old_status.status() != &Status::Registered
-            && old_status.status() != &Status::WorkInProgress
-        {
-            tracing::warn!("Actor Backend received cancel-action {request_key}, but it is not registered or work-in-progress, skipping");
-            return Ok(old_status);
-        }
-
-        // Case: old_status is registered: mark the request as cancelled in the pool and return directly
-        if old_status.status() == &Status::Registered {
-            let status = StatusWithContext::new_cancelled();
-            self.pool.update_status(request_key, status.clone())?;
-            return Ok(status);
-        }
-
-        // Case: old_status is work-in-progress:
-        // 1. Cancel the proving work by the cancel token // TODO: cancel token
-        // 2. Remove the proof id from the pool
-        // 3. Mark the request as cancelled in the pool
-        match &request_key {
-            RequestKey::GuestInput(..) => {
-                let status = StatusWithContext::new_cancelled();
-                self.pool.update_status(request_key, status.clone())?;
-                Ok(status)
-            }
-            RequestKey::SingleProof(key) => {
-                raiko_core::interfaces::cancel_proof(
-                    key.proof_type().clone(),
-                    (
-                        key.chain_id().clone(),
-                        key.block_number().clone(),
-                        key.block_hash().clone(),
-                        *key.proof_type() as u8,
-                    ),
-                    Box::new(&mut self.pool),
-                )
-                .await
-                .or_else(|e| {
-                    if e.to_string().contains("No data for query") {
-                        tracing::warn!("Actor Backend received cancel-action {request_key}, but it is already cancelled or not yet started, skipping");
-                        Ok(())
-                    } else {
-                        tracing::error!(
-                            "Actor Backend received cancel-action {request_key}, but failed to cancel proof: {e:?}"
-                        );
-                        Err(format!("failed to cancel proof: {e:?}"))
-                    }
-                })?;
-
-                // 3. Mark the request as cancelled in the pool
-                let status = StatusWithContext::new_cancelled();
-                self.pool.update_status(request_key, status.clone())?;
-                Ok(status)
-            }
-            RequestKey::Aggregation(..) => {
-                let status = StatusWithContext::new_cancelled();
-                self.pool.update_status(request_key, status.clone())?;
-                Ok(status)
-            }
-            RequestKey::BatchProof(..) => {
-                let status = StatusWithContext::new_cancelled();
-                self.pool.update_status(request_key, status.clone())?;
-                Ok(status)
-            }
-            RequestKey::BatchGuestInput(..) => {
-                let status = StatusWithContext::new_cancelled();
-                self.pool.update_status(request_key, status.clone())?;
-                Ok(status)
-            }
+        Self {
+            inner: available_gpus,
         }
     }
 
@@ -361,8 +51,7 @@ impl Backend {
     async fn get_gpu_number(&self, proof_type: ProofType) -> Option<u32> {
         match proof_type {
             ProofType::Sp1 => {
-                let mut available_gpus = self.available_gpus.lock().await;
-
+                let mut available_gpus = self.inner.lock().await;
                 // We could expect here because semaphore is used to limit the concurrency and
                 // available_gpus.len() == semaphore.available_permits() == max_proving_concurrency
                 let gpu_number = available_gpus
@@ -378,236 +67,179 @@ impl Backend {
     /// Release the GPU number after the proof is generated.
     async fn release_gpu_number(&self, gpu_number: Option<u32>) {
         if let Some(gpu_number) = gpu_number {
-            let mut available_gpus = self.available_gpus.lock().await;
+            let mut available_gpus = self.inner.lock().await;
             available_gpus.push_back(gpu_number);
         }
     }
+}
 
-    async fn generate_guest_input(
-        &mut self,
-        request_key: RequestKey,
-        request_entity: GuestInputRequestEntity,
-    ) {
-        self.prove(request_key.clone(), |mut actor, request_key| async move {
-            do_generate_guest_input(
-                &mut actor.pool,
-                &actor.chain_specs,
-                request_key,
-                request_entity,
-            )
-            .await
-        })
-        .await;
-    }
+/// Backend runs in the background, and handles the actions from the actor.
+#[derive(Clone, Debug)]
+pub(crate) struct Backend {
+    pool: Pool,
+    chain_specs: SupportedChainSpecs,
+    queue: Arc<Mutex<Queue>>,
+    notifier: Arc<Notify>,
+    semaphore: Arc<Semaphore>,
+    available_gpus: Arc<AvailableGpus>,
+}
 
-    async fn generate_batch_guest_input(
-        &mut self,
-        request_key: RequestKey,
-        request_entity: BatchGuestInputRequestEntity,
-    ) {
-        self.prove(request_key.clone(), |mut actor, request_key| async move {
-            do_generate_batch_guest_input(
-                &mut actor.pool,
-                &actor.chain_specs,
-                request_key,
-                request_entity,
-            )
-            .await
-        })
-        .await;
-    }
-
-    async fn prove_single(
-        &mut self,
-        request_key: RequestKey,
-        request_entity: SingleProofRequestEntity,
-    ) {
-        self.prove(request_key.clone(), |mut actor, request_key| async move {
-            // 1. Get the GPU number for the given proof type
-            let gpu_number = actor
-                .get_gpu_number(request_entity.proof_type().clone())
-                .await;
-
-            // 2. Generate the proof
-            let res = do_prove_single(
-                &mut actor.pool,
-                &actor.chain_specs,
-                request_key,
-                request_entity,
-                gpu_number,
-            )
-            .await;
-
-            // 3. Release the GPU number
-            actor.release_gpu_number(gpu_number).await;
-
-            res
-        })
-        .await;
-    }
-
-    async fn prove_aggregation(
-        &mut self,
-        request_key: RequestKey,
-        request_entity: AggregationRequestEntity,
-    ) {
-        self.prove(request_key.clone(), |mut actor, request_key| async move {
-            // 1. Get the GPU number for the given proof type
-            let gpu_number = actor
-                .get_gpu_number(request_entity.proof_type().clone())
-                .await;
-
-            // 2. Aggregate the proofs
-            let res = do_prove_aggregation(
-                &mut actor.pool,
-                request_key.clone(),
-                request_entity,
-                gpu_number,
-            )
-            .await;
-
-            // 3. Release the GPU number
-            actor.release_gpu_number(gpu_number).await;
-
-            res
-        })
-        .await;
-    }
-
-    async fn prove_batch(
-        &mut self,
-        request_key: RequestKey,
-        request_entity: BatchProofRequestEntity,
-    ) {
-        self.prove(request_key.clone(), |mut actor, request_key| async move {
-            // 1. Get the GPU number for the given proof type
-            let gpu_number = actor
-                .get_gpu_number(request_entity.proof_type().clone())
-                .await;
-
-            // 2. Generate the proof
-            let res = do_prove_batch(
-                &mut actor.pool,
-                &actor.chain_specs,
-                request_key.clone(),
-                request_entity,
-                gpu_number,
-            )
-            .await;
-
-            // 3. Release the GPU number
-            actor.release_gpu_number(gpu_number).await;
-
-            res
-        })
-        .await;
-    }
-
-    /// Generic method to handle proving for different types of proofs
-    async fn prove<F, Fut>(&mut self, request_key: RequestKey, prove_fn: F)
-    where
-        F: FnOnce(Backend, RequestKey) -> Fut + Send + 'static,
-        Fut: std::future::Future<Output = Result<Proof, String>> + Send + 'static,
-    {
-        let request_key_ = request_key.clone();
-
-        let pool_status = self
-            .pool
-            .get_status(&request_key)
-            .unwrap()
-            .unwrap()
-            .into_status();
-        if matches!(pool_status, Status::Success { .. } | Status::WorkInProgress) {
-            tracing::warn!("Actor Backend received prove-action {request_key}, but it is not registered, skipping");
-            return;
+impl Backend {
+    pub fn new(
+        pool: Pool,
+        chain_specs: SupportedChainSpecs,
+        max_proving_concurrency: usize,
+        queue: Arc<Mutex<Queue>>,
+        notifier: Arc<Notify>,
+    ) -> Self {
+        Self {
+            pool,
+            chain_specs,
+            queue,
+            notifier,
+            semaphore: Arc::new(Semaphore::new(max_proving_concurrency)),
+            available_gpus: Arc::new(AvailableGpus::new(max_proving_concurrency)),
         }
+    }
 
-        // 1. Update the request status in pool to WorkInProgress
-        if let Err(err) = self
-            .pool
-            .update_status(request_key.clone(), Status::WorkInProgress.into())
-        {
-            tracing::error!(
-                "Actor Backend failed to update status of prove-action {request_key}: {err:?}, status: {status}",
-                status = Status::WorkInProgress,
-            );
-            return;
-        }
+    pub async fn serve_in_background(self) {
+        let (done_tx, mut done_rx) = mpsc::channel(1000);
 
-        // 2. Start the proving work in a separate thread
-        let mut actor = self.clone();
-        let proving_semaphore = self.proving_semaphore.clone();
-        let (semaphore_acquired_tx, semaphore_acquired_rx) = oneshot::channel();
-
-        let handle = tokio::spawn(async move {
-            // Acquire a permit from the semaphore before starting the proving work
-            let _permit = proving_semaphore
-                .acquire()
-                .await
-                .expect("semaphore should not be closed");
-            semaphore_acquired_tx.send(()).unwrap();
-
-            // 2.1. Start the proving work
-            let proven_status = prove_fn(actor.clone(), request_key.clone())
-                .await
-                .map(|proof| Status::Success { proof })
-                .unwrap_or_else(|error| Status::Failed { error });
-
-            match &proven_status {
-                Status::Success { proof } => {
-                    tracing::info!(
-                        "Actor Backend successfully proved {request_key}. Proof: {proof}"
-                    );
-                }
-                Status::Failed { error } => {
-                    tracing::error!("Actor Backend failed to prove {request_key}: {error}");
-                }
-                _ => {}
+        loop {
+            // Handle completed requests
+            while let Ok(request_key) = done_rx.try_recv() {
+                let mut queue = self.queue.lock().await;
+                queue.complete(request_key);
             }
 
-            // 2.2. Update the request status in pool to the resulted status
-            if let Err(err) = actor
-                .pool
-                .update_status(request_key.clone(), proven_status.clone().into())
-            {
-                tracing::error!(
-                    "Actor Backend failed to update status of prove-action {request_key}: {err:?}, status: {proven_status}"
+            // First, acquire a semaphore permit before choosing the next job
+            let permit = match self.semaphore.clone().acquire_owned().await {
+                Ok(permit) => permit,
+                Err(_) => {
+                    tracing::warn!("Semaphore closed; stopping backend loop");
+                    break;
+                }
+            };
+
+            // Then, try to get a request from queue
+            let (request_key, request_entity) = {
+                let mut queue = self.queue.lock().await;
+                if let Some((request_key, request_entity)) = queue.try_next() {
+                    (request_key, request_entity)
+                } else {
+                    drop(queue);
+                    // No requests available, release the permit and wait for work
+                    drop(permit);
+                    // No requests in queue, wait for new requests
+                    self.notifier.notified().await;
+                    continue;
+                }
+            };
+
+            let request_key_ = request_key.clone();
+            let mut pool_ = self.pool.clone();
+            let chain_specs = self.chain_specs.clone();
+
+            let available_gpus = self.available_gpus.clone();
+
+            let handle = tokio::spawn(async move {
+                let _permit = permit;
+
+                // Variable to hold the GPU number, if proving
+                let mut gpu_number = None;
+
+                let result = match request_entity {
+                    RequestEntity::SingleProof(entity) => {
+                        gpu_number = available_gpus
+                            .get_gpu_number(request_key_.proof_type().clone())
+                            .await;
+                        do_prove_single(
+                            &mut pool_,
+                            &chain_specs,
+                            request_key_.clone(),
+                            entity,
+                            gpu_number,
+                        )
+                        .await
+                    }
+                    RequestEntity::Aggregation(entity) => {
+                        gpu_number = available_gpus
+                            .get_gpu_number(request_key_.proof_type().clone())
+                            .await;
+                        do_prove_aggregation(&mut pool_, request_key_.clone(), entity, gpu_number)
+                            .await
+                    }
+                    RequestEntity::BatchProof(entity) => {
+                        gpu_number = available_gpus
+                            .get_gpu_number(request_key_.proof_type().clone())
+                            .await;
+                        do_prove_batch(
+                            &mut pool_,
+                            &chain_specs,
+                            request_key_.clone(),
+                            entity,
+                            gpu_number,
+                        )
+                        .await
+                    }
+                    RequestEntity::GuestInput(entity) => {
+                        do_generate_guest_input(
+                            &mut pool_,
+                            &chain_specs,
+                            request_key_.clone(),
+                            entity,
+                        )
+                        .await
+                    }
+                    RequestEntity::BatchGuestInput(entity) => {
+                        do_generate_batch_guest_input(
+                            &mut pool_,
+                            &chain_specs,
+                            request_key_.clone(),
+                            entity,
+                        )
+                        .await
+                    }
+                };
+
+                // Release the GPU number after proving
+                available_gpus.release_gpu_number(gpu_number).await;
+
+                let status = match result {
+                    Ok(proof) => {
+                        let proof_str = format!("{}", proof);
+                        tracing::info!(
+                            "Actor Backend successfully proved {request_key_}. Proof: {proof_str}"
+                        );
+                        Status::Success { proof }
+                    }
+                    Err(e) => Status::Failed {
+                        error: e.to_string(),
+                    },
+                };
+                let _ = pool_.update_status(
+                    request_key_.clone(),
+                    StatusWithContext::new(status, chrono::Utc::now()),
                 );
-                return;
-            }
-            // The permit is automatically dropped here, releasing the semaphore
-        });
+            });
 
-        // Only set up panic handler if we have a backup request key (for single proofs)
-        let mut pool_ = self.pool.clone();
-        tokio::spawn(async move {
-            if let Err(e) = handle.await {
-                if e.is_panic() {
-                    tracing::error!("Actor Backend panicked while proving: {e:?}");
+            let mut pool_ = self.pool.clone();
+            let done_tx_ = done_tx.clone();
+            let notifier_ = self.notifier.clone();
+
+            tokio::spawn(async move {
+                if let Err(e) = handle.await {
+                    tracing::error!("Actor thread errored while proving {request_key}: {e:?}");
                     let status = Status::Failed {
                         error: e.to_string(),
                     };
-                    if let Err(err) =
-                        pool_.update_status(request_key_.clone(), status.clone().into())
-                    {
-                        tracing::error!(
-                                "Actor Backend failed to update status of prove-action {request_key_}: {err:?}, status: {status}",
-                                status = status,
-                            );
-                    }
-                } else {
-                    tracing::error!("Actor Backend failed to prove: {e:?}");
+                    let _ = pool_.update_status(request_key.clone(), status.clone().into());
                 }
-            }
-        });
 
-        // Wait for the semaphore to be acquired
-        semaphore_acquired_rx.await.unwrap();
-    }
-
-    async fn halt(&mut self) -> Result<(), String> {
-        // TODO: implement halt for pause
-        Ok(())
+                let _res = done_tx_.send(request_key.clone()).await;
+                notifier_.notify_one();
+            });
+        }
     }
 }
 
@@ -929,4 +561,47 @@ async fn do_prove_batch(
         .map_err(|e| format!("failed to generate batch proof: {e:?}"))?;
 
     Ok(proof)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use raiko_lib::consts::SupportedChainSpecs;
+    use raiko_reqpool::memory_pool;
+    use tokio::sync::Mutex;
+
+    fn create_test_pool() -> Pool {
+        memory_pool("test_backend")
+    }
+
+    fn create_test_chain_specs() -> SupportedChainSpecs {
+        SupportedChainSpecs::default()
+    }
+
+    // Mock test for the serve_in_background to test the structure.
+    #[tokio::test]
+    async fn test_serve_in_background() {
+        let pool = create_test_pool();
+        let chain_specs = create_test_chain_specs();
+        let queue = Arc::new(Mutex::new(Queue::new(1000)));
+        let notifier = Arc::new(Notify::new());
+
+        let backend = Backend::new(pool, chain_specs, 1, queue.clone(), notifier.clone());
+
+        let handle = tokio::spawn(async move {
+            tokio::select! {
+                _ = backend.serve_in_background() => {},
+                _ = tokio::time::sleep(tokio::time::Duration::from_millis(10)) => {
+                }
+            }
+        });
+
+        // Notify to wake up the background service
+        notifier.notify_one();
+
+        tokio::time::sleep(tokio::time::Duration::from_millis(20)).await;
+        handle.abort();
+
+        assert!(true);
+    }
 }

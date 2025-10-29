@@ -1,9 +1,14 @@
 use crate::common::Client;
 use raiko_ballot::Ballot;
-use raiko_host::{parse_chain_specs, server::serve, Opts};
+use raiko_host::{
+    parse_chain_specs,
+    server::{auth::ApiKeyStore, serve},
+    Opts,
+};
 use raiko_reqactor::start_actor;
 use raiko_reqpool::memory_pool;
 use rand::Rng;
+use std::sync::Arc;
 
 /// Builder for a test server.
 ///
@@ -46,19 +51,29 @@ impl TestServerBuilder {
         let max_proving_concurrency = opts.concurrency_limit;
 
         let pool = memory_pool(redis_url);
-        let ballot = Ballot::default();
+        let ballot_zk = Ballot::default();
+        let ballot_sgx = Ballot::default();
         let actor = start_actor(
             pool,
-            ballot,
+            ballot_zk,
+            ballot_sgx,
             chain_specs.clone(),
             default_request_config.clone(),
             max_proving_concurrency,
+            1000, // max_queue_size
         )
         .await;
 
         let address_clone = address.clone();
         tokio::spawn(async move {
-            let _ = serve(actor, &address_clone, max_proving_concurrency, None).await;
+            let _ = serve(
+                actor,
+                &address_clone,
+                max_proving_concurrency,
+                None,
+                Some(Arc::new(ApiKeyStore::new("".to_string()))),
+            )
+            .await;
         });
 
         TestServerHandle { address }
