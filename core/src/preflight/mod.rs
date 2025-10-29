@@ -10,6 +10,7 @@ use raiko_lib::{
     builder::RethBlockBuilder,
     consts::ChainSpec,
     input::{BlobProofType, GuestBatchInput, GuestInput, TaikoGuestInput, TaikoProverData},
+    l1_precompiles::{clear_l1sload_cache, populate_l1sload_cache},
     primitives::mpt::proofs_to_tries,
     utils::{generate_transactions, generate_transactions_for_batch_blocks},
     Measurement,
@@ -111,6 +112,9 @@ pub async fn preflight<BDP: BlockDataProvider>(
 
     info!("preflight: parent header done");
 
+    // Clear L1SLOAD cache before collecting L1 storage proofs
+    clear_l1sload_cache();
+
     // Collect L1 storage proofs with anchor block validation.
     let l1_storage_proofs = if taiko_chain_spec.is_taiko() {
         let l1_provider = RpcBlockDataProvider::new(&l1_chain_spec.rpc, 0).await?;
@@ -135,6 +139,11 @@ pub async fn preflight<BDP: BlockDataProvider>(
     } else {
         Vec::new()
     };
+
+    // Populate L1SLOAD cache with storage values before EVM execution
+    if !l1_storage_proofs.is_empty() {
+        populate_l1sload_cache(&l1_storage_proofs);
+    }
 
     info!("preflight: L1 data collection done");
 
@@ -350,6 +359,9 @@ pub async fn batch_preflight<BDP: BlockDataProvider>(
                     blob_proof_type: taiko_guest_batch_input.blob_proof_type.clone(),
                 };
 
+                // Clear L1SLOAD cache before collecting L1 storage proofs
+                clear_l1sload_cache();
+
                 // Collect L1 storage proofs for this specific block's anchor
                 let l1_storage_proofs = if taiko_chain_spec.is_taiko() {
                     // Extract anchor info for this specific block
@@ -372,6 +384,11 @@ pub async fn batch_preflight<BDP: BlockDataProvider>(
                 } else {
                     Vec::new()
                 };
+
+                // Populate L1SLOAD cache with storage values before EVM execution
+                if !l1_storage_proofs.is_empty() {
+                    populate_l1sload_cache(&l1_storage_proofs);
+                }
 
                 // Create the guest input
                 let input = GuestInput {

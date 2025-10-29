@@ -4,9 +4,10 @@ use alloy_primitives::Address;
 use alloy_rpc_types::EIP1186AccountProofResponse;
 use interfaces::{cancel_proof, run_batch_prover, run_prover};
 use raiko_lib::{
-    builder::{create_mem_db, verify_and_populate_l1sload_cache, RethBlockBuilder},
+    builder::{create_mem_db, RethBlockBuilder},
     consts::ChainSpec,
     input::{GuestBatchInput, GuestBatchOutput, GuestInput, GuestOutput, TaikoProverData},
+    l1_precompiles::{clear_l1sload_cache, verify_and_populate_l1sload_proofs},
     protocol_instance::ProtocolInstance,
     prover::{IdStore, IdWrite, Proof, ProofKey},
     utils::{generate_transactions, generate_transactions_for_batch_blocks},
@@ -109,6 +110,20 @@ impl Raiko {
             &input.taiko.tx_data,
             &input.taiko.anchor_tx,
         );
+
+        // If there are L1SLOAD proofs, clear the L1SLOAD cache before executing
+        // the transactions and verify them against the anchor state root.
+        if !input.l1_storage_proofs.is_empty() {
+            clear_l1sload_cache();
+            let anchor_state_root = input.taiko.l1_header.state_root;
+            info!(
+                "get_output: Verifying and populating L1SLOAD proofs with {} proofs",
+                input.l1_storage_proofs.len()
+            );
+            verify_and_populate_l1sload_proofs(&input.l1_storage_proofs, anchor_state_root)
+                .expect("Failed to verify and populate L1SLOAD proofs for batch block");
+        }
+
         builder
             .execute_transactions(pool_tx, false)
             .expect("execute");
@@ -182,15 +197,16 @@ impl Raiko {
         let db = create_mem_db(&mut input.clone()).unwrap();
 
         // If there are L1SLOAD proofs, populate the L1SLOAD cache before executing
-        // the transactions.
+        // the transactions and verify them against the anchor state root.
         if !input.l1_storage_proofs.is_empty() {
+            clear_l1sload_cache();
             let anchor_state_root = input.taiko.l1_header.state_root;
             info!(
-                "single_output_for_batch: Populating L1SLOAD cache with {} proofs",
+                "single_output_for_batch: Verifying and populating L1SLOAD proofs with {} proofs",
                 input.l1_storage_proofs.len()
             );
-            verify_and_populate_l1sload_cache(&input.l1_storage_proofs, anchor_state_root)
-                .expect("Failed to verify and populate L1SLOAD cache for batch block");
+            verify_and_populate_l1sload_proofs(&input.l1_storage_proofs, anchor_state_root)
+                .expect("Failed to verify and populate L1SLOAD proofs for batch block");
         }
 
         let mut builder = RethBlockBuilder::new(input, db);
