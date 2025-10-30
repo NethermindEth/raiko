@@ -108,8 +108,8 @@ jobs:
       - name: Login to Dockerhub registry with ORAS
         run: |
           oras login ${{ env.DOCKER_PUBLIC_REGISTRY }} \
-            -u ${{ secrets.DOCKER_USERNAME }} \
-            -p ${{ secrets.DOCKER_PASSWORD }}
+            -u ${{ secrets.DOCKER_HUB_USERNAME }} \
+            -p ${{ secrets.DOCKER_HUB_PASSWORD }}
 
       - name: Determine tags to promote
         id: promote-tags
