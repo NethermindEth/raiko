@@ -1,0 +1,12 @@
+[package]
+name = "raiko-tdx"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+# Prover module
+tdx-prover = { path = "prover", features = ["enable"] }
+
+[features]
+default = []
+enable = []
