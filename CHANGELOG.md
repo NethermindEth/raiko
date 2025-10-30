@@ -1,5 +1,15 @@
 # Changelog
 
+## [25.0.1-surge](https://github.com/NethermindEth/raiko/compare/v25.0.0-surge...v25.0.1-surge) (2025-10-30)
+
+
+### Bug Fixes
+
+* gh workflow to push image on dockerhub ([d514daf](https://github.com/NethermindEth/raiko/commit/d514daf5c2950dc027002b16807406087e250e6f))
+* gh workflow to push image on dockerhub ([036ebe7](https://github.com/NethermindEth/raiko/commit/036ebe7d5db444dde7699aa567c58691e395dea2))
+* gh workflow to push image on dockerhub ([ba5dbc3](https://github.com/NethermindEth/raiko/commit/ba5dbc3796ce4e5c377ec3d936b49ec33206ff36))
+* gh workflow to push image on dockerhub ([c38243f](https://github.com/NethermindEth/raiko/commit/c38243f1ce0462fd43f1c2186dc38193b1665707))
+
 ## [1.7.0](https://github.com/taikoxyz/raiko/compare/v1.6.1...v1.7.0) (2025-04-08)
 
 
