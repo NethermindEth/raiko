@@ -125,7 +125,7 @@ impl Raiko {
         }
 
         builder
-            .execute_transactions(pool_tx, false)
+            .execute_transactions(pool_tx, false, false)
             .expect("execute");
         let result = builder.finalize();
 
@@ -215,7 +215,7 @@ impl Raiko {
         pool_txs.extend_from_slice(&origin_pool_txs);
 
         builder
-            .execute_transactions(pool_txs, false)
+            .execute_transactions(pool_txs, false, false)
             .expect("execute");
         let result = builder.finalize_block();
 
