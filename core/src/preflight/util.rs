@@ -56,7 +56,7 @@ where
 
         info!("execute_txs: execute_transactions start");
         builder
-            .execute_transactions(pool_txs.clone(), num_iterations + 1 < max_iterations)
+            .execute_transactions(pool_txs.clone(), num_iterations + 1 < max_iterations, true)
             .map_err(|e| {
                 RaikoError::Preflight(format!("Executing transactions in builder failed: {e}"))
             })?;

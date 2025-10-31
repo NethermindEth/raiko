@@ -10,7 +10,7 @@ use reth_evm::{
         BlockExecutorFor, BlockValidationError, CommitChanges, ExecutableTx,
     },
     execute::Executor,
-    ConfigureEvm, Database, EvmFactory, OnStateHook,
+    ConfigureEvm, Database, Evm, EvmFactory, OnStateHook,
 };
 use reth_primitives::{NodePrimitives, RecoveredBlock};
 use reth_revm::{db::states::bundle_state::BundleRetention, State};
@@ -148,6 +148,8 @@ pub struct TaikoWithOptimisticBlockExecutor<F, DB> {
     pub strategy_factory: F,
     pub db: State<DB>,
     pub is_optimistic: bool,
+    /// Whether to enable inspector or not. Useful for turning off for zk execution.
+    pub inspect: bool,
 }
 
 impl<F, DB> TaikoWithOptimisticBlockExecutor<F, DB>
@@ -155,7 +157,7 @@ where
     DB: Database,
 {
     /// Creates a new `BasicBlockExecutor` with the given strategy.
-    pub fn new(strategy_factory: F, db: DB, is_optimistic: bool) -> Self {
+    pub fn new(strategy_factory: F, db: DB, is_optimistic: bool, inspect: bool) -> Self {
         let db = State::builder()
             .with_database(db)
             .with_bundle_update()
@@ -165,6 +167,7 @@ where
             strategy_factory,
             db,
             is_optimistic,
+            inspect,
         }
     }
 }
@@ -213,7 +216,13 @@ where
     ) -> Result<BlockExecutionResult<<Self::Primitives as NodePrimitives>::Receipt>, Self::Error>
     {
         let is_optimistic = self.is_optimistic;
-        let block_executor = self.create_block_executor_with_inspector(block, L1SloadInspector);
+        let inspect = self.inspect;
+
+        // Create block executor with inspector
+        let mut block_executor = self.create_block_executor_with_inspector(block, L1SloadInspector);
+
+        // Enable or disable inspector based on the flag
+        block_executor.evm_mut().set_inspector_enabled(inspect);
 
         let block_executor_with_optimistic =
             BlockExecutorWithOptimistic::new(block_executor, is_optimistic);
@@ -235,7 +244,13 @@ where
         H: OnStateHook + 'static,
     {
         let is_optimistic = self.is_optimistic;
-        let block_executor = self.create_block_executor_with_inspector(block, L1SloadInspector);
+        let inspect = self.inspect;
+
+        // Create block executor with inspector
+        let mut block_executor = self.create_block_executor_with_inspector(block, L1SloadInspector);
+
+        // Enable or disable inspector based on the flag
+        block_executor.evm_mut().set_inspector_enabled(inspect);
 
         let mut block_executor_with_optimistic =
             BlockExecutorWithOptimistic::new(block_executor, is_optimistic);

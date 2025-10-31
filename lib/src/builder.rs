@@ -256,7 +256,7 @@ pub fn calculate_block_header(input: &GuestInput) -> Header {
 
     let cycle_tracker = CycleTracker::start("execute_transactions");
     builder
-        .execute_transactions(pool_tx, false)
+        .execute_transactions(pool_tx, false, false)
         .expect("execute");
     cycle_tracker.end();
 
@@ -291,7 +291,7 @@ pub fn calculate_batch_blocks_final_header(input: &GuestBatchInput) -> Vec<Block
         let mut execute_tx = vec![input.inputs[i].taiko.anchor_tx.clone().unwrap()];
         execute_tx.extend_from_slice(&pool_txs);
         builder
-            .execute_transactions(execute_tx.clone(), false)
+            .execute_transactions(execute_tx.clone(), false, false)
             .expect("execute");
         final_blocks.push(
             builder
@@ -372,6 +372,8 @@ impl<DB: Database<Error = ProviderError> + DatabaseCommit + OptimisticDatabase +
         &mut self,
         pool_txs: Vec<TransactionSigned>,
         optimistic: bool,
+        // Whether to enable inspector or not. Useful for turning off for zk execution.
+        inspect: bool,
     ) -> Result<()> {
         info!("execute_transactions: start");
         // Get the chain spec
@@ -433,6 +435,7 @@ impl<DB: Database<Error = ProviderError> + DatabaseCommit + OptimisticDatabase +
             taiko_evm_config,
             self.db.take().unwrap(),
             optimistic,
+            inspect,
         );
 
         // Recover senders
