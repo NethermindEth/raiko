@@ -1,6 +1,7 @@
 mod action;
 mod actor;
 mod backend;
+mod gpu_semaphore;
 mod queue;
 
 use std::sync::Arc;

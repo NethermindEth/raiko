@@ -1,4 +1,4 @@
-use std::{collections::VecDeque, sync::Arc};
+use std::sync::Arc;
 
 use base64::{engine::general_purpose, Engine as _};
 use bincode;
@@ -12,7 +12,6 @@ use raiko_core::{
 use raiko_lib::{
     consts::SupportedChainSpecs,
     input::{AggregationGuestInput, AggregationGuestOutput, GuestBatchInput, GuestInput},
-    proof_type::ProofType,
     prover::{IdWrite, Proof},
     utils::{zlib_compress_data, zlib_decompress_data},
 };
@@ -21,57 +20,12 @@ use raiko_reqpool::{
     GuestInputRequestEntity, RequestEntity, RequestKey, SingleProofRequestEntity, Status,
     StatusWithContext,
 };
-use tokio::sync::{mpsc, Mutex, Notify, Semaphore};
+use tokio::sync::{mpsc, Mutex, Notify};
 use tracing::{debug, trace};
 
+use crate::gpu_semaphore::GpuSemaphore;
 use crate::queue::Queue;
 use crate::Pool;
-
-// Struct that holds available GPU numbers
-#[derive(Debug)]
-pub(crate) struct AvailableGpus {
-    inner: Mutex<VecDeque<u32>>,
-}
-
-impl AvailableGpus {
-    pub fn new(max_proving_concurrency: usize) -> Self {
-        let available_gpus: Mutex<VecDeque<u32>> = Mutex::new(VecDeque::from(
-            (0..max_proving_concurrency)
-                .map(|x| x as u32)
-                .collect::<Vec<u32>>(),
-        ));
-
-        Self {
-            inner: available_gpus,
-        }
-    }
-
-    /// Get the GPU number for the given proof type.
-    /// Currently, only SP1 proof type is needs GPU number.
-    async fn get_gpu_number(&self, proof_type: ProofType) -> Option<u32> {
-        match proof_type {
-            ProofType::Sp1 => {
-                let mut available_gpus = self.inner.lock().await;
-                // We could expect here because semaphore is used to limit the concurrency and
-                // available_gpus.len() == semaphore.available_permits() == max_proving_concurrency
-                let gpu_number = available_gpus
-                    .pop_front()
-                    .expect("GPU number should be available");
-
-                Some(gpu_number)
-            }
-            _ => None,
-        }
-    }
-
-    /// Release the GPU number after the proof is generated.
-    async fn release_gpu_number(&self, gpu_number: Option<u32>) {
-        if let Some(gpu_number) = gpu_number {
-            let mut available_gpus = self.inner.lock().await;
-            available_gpus.push_back(gpu_number);
-        }
-    }
-}
 
 /// Backend runs in the background, and handles the actions from the actor.
 #[derive(Clone, Debug)]
@@ -80,8 +34,7 @@ pub(crate) struct Backend {
     chain_specs: SupportedChainSpecs,
     queue: Arc<Mutex<Queue>>,
     notifier: Arc<Notify>,
-    semaphore: Arc<Semaphore>,
-    available_gpus: Arc<AvailableGpus>,
+    gpu_semaphore: Arc<GpuSemaphore>,
 }
 
 impl Backend {
@@ -97,8 +50,7 @@ impl Backend {
             chain_specs,
             queue,
             notifier,
-            semaphore: Arc::new(Semaphore::new(max_proving_concurrency)),
-            available_gpus: Arc::new(AvailableGpus::new(max_proving_concurrency)),
+            gpu_semaphore: Arc::new(GpuSemaphore::new(max_proving_concurrency)),
         }
     }
 
@@ -112,24 +64,13 @@ impl Backend {
                 queue.complete(request_key);
             }
 
-            // First, acquire a semaphore permit before choosing the next job
-            let permit = match self.semaphore.clone().acquire_owned().await {
-                Ok(permit) => permit,
-                Err(_) => {
-                    tracing::warn!("Semaphore closed; stopping backend loop");
-                    break;
-                }
-            };
-
-            // Then, try to get a request from queue
+            // Try to get a request from queue first (non-blocking check)
             let (request_key, request_entity) = {
                 let mut queue = self.queue.lock().await;
                 if let Some((request_key, request_entity)) = queue.try_next() {
                     (request_key, request_entity)
                 } else {
                     drop(queue);
-                    // No requests available, release the permit and wait for work
-                    drop(permit);
                     // No requests in queue, wait for new requests
                     self.notifier.notified().await;
                     continue;
@@ -139,46 +80,40 @@ impl Backend {
             let request_key_ = request_key.clone();
             let mut pool_ = self.pool.clone();
             let chain_specs = self.chain_specs.clone();
-
-            let available_gpus = self.available_gpus.clone();
+            let gpu_semaphore = self.gpu_semaphore.clone();
 
             let handle = tokio::spawn(async move {
-                let _permit = permit;
-
-                // Variable to hold the GPU number, if proving
-                let mut gpu_number = None;
+                // Acquire GPU permit (combines semaphore permit + optional GPU number assignment)
+                // This ensures concurrency control and GPU allocation in one step
+                let gpu_permit = gpu_semaphore.acquire().await;
 
                 let result = match request_entity {
                     RequestEntity::SingleProof(entity) => {
-                        gpu_number = available_gpus
-                            .get_gpu_number(request_key_.proof_type().clone())
-                            .await;
                         do_prove_single(
                             &mut pool_,
                             &chain_specs,
                             request_key_.clone(),
                             entity,
-                            gpu_number,
+                            Some(gpu_permit.gpu_number()),
                         )
                         .await
                     }
                     RequestEntity::Aggregation(entity) => {
-                        gpu_number = available_gpus
-                            .get_gpu_number(request_key_.proof_type().clone())
-                            .await;
-                        do_prove_aggregation(&mut pool_, request_key_.clone(), entity, gpu_number)
-                            .await
+                        do_prove_aggregation(
+                            &mut pool_,
+                            request_key_.clone(),
+                            entity,
+                            Some(gpu_permit.gpu_number()),
+                        )
+                        .await
                     }
                     RequestEntity::BatchProof(entity) => {
-                        gpu_number = available_gpus
-                            .get_gpu_number(request_key_.proof_type().clone())
-                            .await;
                         do_prove_batch(
                             &mut pool_,
                             &chain_specs,
                             request_key_.clone(),
                             entity,
-                            gpu_number,
+                            Some(gpu_permit.gpu_number()),
                         )
                         .await
                     }
@@ -201,9 +136,6 @@ impl Backend {
                         .await
                     }
                 };
-
-                // Release the GPU number after proving
-                available_gpus.release_gpu_number(gpu_number).await;
 
                 let status = match result {
                     Ok(proof) => {
