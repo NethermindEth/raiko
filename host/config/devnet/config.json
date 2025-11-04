@@ -42,6 +42,8 @@
 	"native": {
 		"json_guest_input": null
 	},
+	"queue_limit": 1000,
+	"api_keys": "",
 	"ballot_zk": "{\"Sp1\":[1, 0]}",
 	"ballot_sgx": "{\"Sgx\":[1, 0]}"
 }
