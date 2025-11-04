@@ -3,7 +3,7 @@ services:
     build:
       context: ..
       dockerfile: Dockerfile
-    image: nethermind.jfrog.io/core-oci-local-prod/raiko-sgx:latest
+    image: nethermind.jfrog.io/core-oci-local-staging/raiko-sgx:latest
     container_name: raiko-init
     command: --init
     env_file:
@@ -27,7 +27,7 @@ services:
     build:
       context: ..
       dockerfile: Dockerfile
-    image: nethermind.jfrog.io/core-oci-local-prod/raiko-sgx:latest
+    image: nethermind.jfrog.io/core-oci-local-staging/raiko-sgx:latest
     container_name: raiko
     command: --concurrency-limit=1
     env_file:
