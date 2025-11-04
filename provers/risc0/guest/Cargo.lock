@@ -48,8 +48,8 @@ dependencies = [
 
 [[package]]
 name = "alethia-reth-block"
-version = "0.4.0"
-source = "git+https://github.com/NethermindEth/alethia-reth.git?branch=feat%2Fraiko-support#bac014c7011960fb41dbdcbc49522beff49adbc9"
+version = "0.5.0"
+source = "git+https://github.com/NethermindEth/alethia-reth.git?branch=feat%2Fraiko-support#ee3a2ad00f6d3235ef8bcc175cd43b2c6e1e116f"
 dependencies = [
  "alethia-reth-chainspec",
  "alethia-reth-evm",
@@ -76,8 +76,8 @@ dependencies = [
 
 [[package]]
 name = "alethia-reth-chainspec"
-version = "0.4.0"
-source = "git+https://github.com/NethermindEth/alethia-reth.git?branch=feat%2Fraiko-support#bac014c7011960fb41dbdcbc49522beff49adbc9"
+version = "0.5.0"
+source = "git+https://github.com/NethermindEth/alethia-reth.git?branch=feat%2Fraiko-support#ee3a2ad00f6d3235ef8bcc175cd43b2c6e1e116f"
 dependencies = [
  "alloy-chains",
  "alloy-consensus",
@@ -99,8 +99,8 @@ dependencies = [
 
 [[package]]
 name = "alethia-reth-consensus"
-version = "0.4.0"
-source = "git+https://github.com/NethermindEth/alethia-reth.git?branch=feat%2Fraiko-support#bac014c7011960fb41dbdcbc49522beff49adbc9"
+version = "0.5.0"
+source = "git+https://github.com/NethermindEth/alethia-reth.git?branch=feat%2Fraiko-support#ee3a2ad00f6d3235ef8bcc175cd43b2c6e1e116f"
 dependencies = [
  "alethia-reth-chainspec",
  "alethia-reth-evm",
@@ -121,8 +121,8 @@ dependencies = [
 
 [[package]]
 name = "alethia-reth-evm"
-version = "0.4.0"
-source = "git+https://github.com/NethermindEth/alethia-reth.git?branch=feat%2Fraiko-support#bac014c7011960fb41dbdcbc49522beff49adbc9"
+version = "0.5.0"
+source = "git+https://github.com/NethermindEth/alethia-reth.git?branch=feat%2Fraiko-support#ee3a2ad00f6d3235ef8bcc175cd43b2c6e1e116f"
 dependencies = [
  "alloy-evm",
  "alloy-primitives",
@@ -137,8 +137,8 @@ dependencies = [
 
 [[package]]
 name = "alethia-reth-primitives"
-version = "0.4.0"
-source = "git+https://github.com/NethermindEth/alethia-reth.git?branch=feat%2Fraiko-support#bac014c7011960fb41dbdcbc49522beff49adbc9"
+version = "0.5.0"
+source = "git+https://github.com/NethermindEth/alethia-reth.git?branch=feat%2Fraiko-support#ee3a2ad00f6d3235ef8bcc175cd43b2c6e1e116f"
 dependencies = [
  "alethia-reth-chainspec",
  "alloy-primitives",
@@ -4821,9 +4821,9 @@ dependencies = [
 
 [[package]]
 name = "schemars"
-version = "1.0.4"
+version = "1.0.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "82d20c4491bc164fa2f6c5d44565947a52ad80b9505d8e36f8d54c27c739fcd0"
+checksum = "1317c3bf3e7df961da95b0a56a172a02abead31276215a0497241a7624b487ce"
 dependencies = [
  "dyn-clone",
  "ref-cast",
@@ -4986,7 +4986,7 @@ dependencies = [
  "indexmap 1.9.3",
  "indexmap 2.12.0",
  "schemars 0.9.0",
- "schemars 1.0.4",
+ "schemars 1.0.5",
  "serde_core",
  "serde_json",
  "serde_with_macros",
@@ -5423,9 +5423,9 @@ dependencies = [
 
 [[package]]
 name = "tokio-util"
-version = "0.7.16"
+version = "0.7.17"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "14307c986784f72ef81c89db7d9e28d6ac26d16213b109ea501696195e6e3ce5"
+checksum = "2efa149fe76073d6e8fd97ef4f4eca7b67f599660115591483572e406e165594"
 dependencies = [
  "bytes",
  "futures-core",
