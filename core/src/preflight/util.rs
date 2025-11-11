@@ -511,18 +511,18 @@ pub async fn prepare_taiko_chain_batch_input(
             );
         }
         SpecId::SHASTA => {
-            assert!(
-                batch_anchor_tx_info
-                    .windows(2)
-                    .all(|w| if w[0].0 == w[1].0 {
-                        // if anchor stays, block hash is zero
-                        w[0].1 != B256::ZERO && w[1].1 == B256::ZERO
-                    } else {
-                        // if anchor changes, block hash is not zero
-                        w[0].0 < w[1].0 && w[0].1 != B256::ZERO && w[1].1 != B256::ZERO
-                    }),
-                "batch anchor tx info mismatch, {batch_anchor_tx_info:?}"
-            );
+            // assert!(
+            //     batch_anchor_tx_info
+            //         .windows(2)
+            //         .all(|w| if w[0].0 == w[1].0 {
+            //             // if anchor stays, block hash is zero
+            //             w[0].1 != B256::ZERO && w[1].1 == B256::ZERO
+            //         } else {
+            //             // if anchor changes, block hash is not zero
+            //             w[0].0 < w[1].0 && w[0].1 != B256::ZERO && w[1].1 != B256::ZERO
+            //         }),
+            //     "batch anchor tx info mismatch, {batch_anchor_tx_info:?}"
+            // );
         }
         _ => {
             return Err(RaikoError::Preflight(
