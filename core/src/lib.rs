@@ -1,4 +1,4 @@
-use std::{collections::HashMap, env, hint::black_box};
+use std::{collections::HashMap, hint::black_box};
 
 use alloy_primitives::Address;
 use alloy_rpc_types::EIP1186AccountProofResponse;
@@ -45,8 +45,6 @@ impl Raiko {
         taiko_chain_spec: ChainSpec,
         request: ProofRequest,
     ) -> Self {
-        let mut taiko_chain_spec = taiko_chain_spec;
-        apply_chain_spec_overrides(&mut taiko_chain_spec);
         Self {
             l1_chain_spec,
             taiko_chain_spec,
@@ -163,7 +161,8 @@ impl Raiko {
             "Generating {} output for batch id: {}",
             self.request.proof_type, batch_input.taiko.batch_id
         );
-        let pool_txs_list = generate_transactions_for_batch_blocks(&batch_input); let blocks = batch_input.inputs.iter().zip(pool_txs_list).try_fold(
+        let pool_txs_list = generate_transactions_for_batch_blocks(&batch_input);
+        let blocks = batch_input.inputs.iter().zip(pool_txs_list).try_fold(
             Vec::new(),
             |mut acc, input_and_txs| -> RaikoResult<Vec<Block>> {
                 let (input, pool_txs) = input_and_txs;
@@ -277,27 +276,6 @@ impl Raiko {
         read: Box<&mut dyn IdStore>,
     ) -> RaikoResult<()> {
         cancel_proof(self.request.proof_type, proof_key, read).await
-    }
-}
-
-fn apply_chain_spec_overrides(chain_spec: &mut ChainSpec) {
-    if !chain_spec.is_taiko() {
-        return;
-    }
-
-    if chain_spec.shasta_activation_override().is_some() {
-        return;
-    }
-
-    if let Ok(value) = env::var("DEV_SHASTA_TIMESTAMP") {
-        if let Ok(ts) = value.parse::<u64>() {
-            chain_spec.set_shasta_activation_override(Some(ts));
-        } else {
-            warn!(
-                "DEV_SHASTA_TIMESTAMP env value '{}' is invalid, ignoring override",
-                value
-            );
-        }
     }
 }
 
@@ -640,7 +618,7 @@ mod tests {
 
         let proof_request = ProofRequest {
             block_number: 0,
-            batch_id:5361,
+            batch_id: 5361,
             l1_inclusion_block_number: 1584196,
             l2_block_numbers: vec![],
             network,
