@@ -1,14 +1,19 @@
 use std::{fs, path::Path};
 
 use raiko_lib::primitives::{keccak256, Address, Signature, B256};
-use rand_core::OsRng;
+use rand_core::{OsRng, RngCore};
 use secp256k1::{
     ecdsa::{RecoverableSignature, RecoveryId},
     Error, Keypair, Message, PublicKey, SecretKey, SECP256K1,
 };
 
 pub fn generate_key() -> Keypair {
-    Keypair::new_global(&mut OsRng)
+    let mut rng = OsRng;
+    let mut secret_bytes = [0u8; 32];
+    rng.fill_bytes(&mut secret_bytes);
+    let secret_key =
+        SecretKey::from_byte_array(&secret_bytes).expect("Failed to create secret key");
+    Keypair::from_secret_key(&SECP256K1, &secret_key)
 }
 
 /// Recovers the address of the sender using secp256k1 pubkey recovery.

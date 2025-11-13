@@ -2,7 +2,6 @@
 
 use crate::{
     methods::risc0_aggregation::RISC0_AGGREGATION_ELF, methods::risc0_batch::RISC0_BATCH_ELF,
-    methods::risc0_guest::RISC0_GUEST_ELF,
 };
 use alloy_primitives::B256;
 use bonsai::{cancel_proof, maybe_prove};
@@ -26,7 +25,6 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 use serde_with::serde_as;
 use std::fmt::Debug;
-use tracing::debug;
 
 pub mod bonsai;
 pub mod methods;
@@ -73,50 +71,12 @@ pub struct Risc0Prover;
 impl Prover for Risc0Prover {
     async fn run(
         &self,
-        input: GuestInput,
-        output: &GuestOutput,
-        config: &ProverConfig,
-        id_store: Option<&mut dyn IdWrite>,
+        _input: GuestInput,
+        _output: &GuestOutput,
+        _config: &ProverConfig,
+        _id_store: Option<&mut dyn IdWrite>,
     ) -> ProverResult<Proof> {
-        let mut id_store = id_store;
-        let config = Risc0Param::deserialize(config.get("risc0").unwrap()).unwrap();
-        let proof_key = (
-            input.chain_spec.chain_id,
-            input.block.header.number,
-            output.hash,
-            ProofType::Risc0 as u8,
-        );
-
-        debug!("elf code length: {}", RISC0_GUEST_ELF.len());
-        let encoded_input = to_vec(&input).expect("Could not serialize proving input!");
-
-        let (uuid, receipt) = maybe_prove::<GuestInput, B256>(
-            &config,
-            encoded_input,
-            RISC0_GUEST_ELF,
-            &output.hash,
-            (Vec::<Receipt>::new(), Vec::new()),
-            proof_key,
-            &mut id_store,
-        )
-        .await?;
-
-        let proof_gen_result = if config.snark && config.bonsai {
-            bonsai::bonsai_stark_to_snark(uuid, receipt, output.hash, RISC0_GUEST_ELF)
-                .await
-                .map(|r0_response| r0_response.into())
-                .map_err(|e| ProverError::GuestError(e.to_string()))
-        } else {
-            if !config.snark {
-                warn!("proof is not in snark mode, please check.");
-            }
-            bonsai::locally_verify_snark(uuid, receipt, output.hash, RISC0_GUEST_ELF)
-                .await
-                .map(|r0_response| r0_response.into())
-                .map_err(|e| ProverError::GuestError(e.to_string()))
-        };
-
-        proof_gen_result
+        unimplemented!("no block run after pacaya fork")
     }
 
     async fn aggregate(
@@ -167,10 +127,16 @@ impl Prover for Risc0Prover {
         };
 
         let opts = ProverOpts::groth16();
-        let receipt = default_prover()
-            .prove_with_opts(env, RISC0_AGGREGATION_ELF, &opts)
-            .unwrap()
-            .receipt;
+        let receipt = match default_prover().prove_with_opts(env, RISC0_AGGREGATION_ELF, &opts) {
+            Ok(receipt) => receipt.receipt,
+            Err(e) => {
+                tracing::error!("Failed to generate RISC0 aggregation proof: {:?}", e);
+                return Err(ProverError::GuestError(format!(
+                    "RISC0 aggregation proof generation failed: {}",
+                    e
+                )));
+            }
+        };
 
         info!(
             "Generate aggregation receipt journal: {:?}",
@@ -275,8 +241,8 @@ impl Prover for Risc0Prover {
 #[cfg(test)]
 mod test {
     use super::*;
-    use methods::risc0_guest::RISC0_GUEST_ID;
-    use methods::test_risc0_guest::{TEST_RISC0_GUEST_ELF, TEST_RISC0_GUEST_ID};
+    use methods::risc0_batch::RISC0_BATCH_ID;
+    use methods::test_risc0_batch::{TEST_RISC0_BATCH_ELF, TEST_RISC0_BATCH_ID};
     use risc0_zkvm::{default_prover, ExecutorEnv};
 
     #[test]
@@ -284,14 +250,14 @@ mod test {
         std::env::set_var("RISC0_PROVER", "local");
         let env = ExecutorEnv::builder().build().unwrap();
         let prover = default_prover();
-        let receipt = prover.prove(env, TEST_RISC0_GUEST_ELF).unwrap();
-        receipt.receipt.verify(TEST_RISC0_GUEST_ID).unwrap();
+        let receipt = prover.prove(env, TEST_RISC0_BATCH_ELF).unwrap();
+        receipt.receipt.verify(TEST_RISC0_BATCH_ID).unwrap();
     }
 
     #[ignore = "only to print image id for docker image build"]
     #[test]
     fn test_show_risc0_image_id() {
-        let image_id = RISC0_GUEST_ID
+        let image_id = RISC0_BATCH_ID
             .map(|limp| hex::encode(limp.to_le_bytes()))
             .concat();
         println!("RISC0 IMAGE_ID: {}", image_id);

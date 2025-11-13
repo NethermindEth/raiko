@@ -88,6 +88,7 @@ impl From<eyre::Report> for RaikoError {
 pub type RaikoResult<T> = Result<T, RaikoError>;
 
 pub async fn get_guest_data() -> RaikoResult<serde_json::Value> {
+    #[allow(unused_mut)]
     let mut guest_data_object = serde_json::Map::new();
 
     #[cfg(feature = "sp1")]

@@ -14,7 +14,7 @@ use raiko_lib::{
     inplace_print,
     input::{
         ontake::{BlockProposedV2, CalldataTxList},
-        pacaya::{proposeBatchCall, BatchProposed},
+        pacaya::BatchProposed,
         proposeBlockCall, BlobProofType, BlockProposed, BlockProposedFork, TaikoGuestBatchInput,
         TaikoGuestInput, TaikoProverData,
     },
@@ -24,7 +24,7 @@ use raiko_lib::{
 use reth_primitives::{Block as RethBlock, TransactionSigned};
 use serde::{Deserialize, Serialize};
 use std::iter;
-use tracing::{debug, error, info, warn};
+use tracing::{debug, error, info, instrument, warn};
 
 use crate::{
     interfaces::{RaikoError, RaikoResult},
@@ -326,15 +326,14 @@ pub async fn prepare_taiko_chain_batch_input(
     let fork = taiko_chain_spec.active_fork(batch_blocks[0].number, batch_blocks[0].timestamp)?;
     let provider_l1 = RpcBlockDataProvider::new(&l1_chain_spec.rpc, 0).await?;
     // todo: duplicate code with parse_l1_batch_proposal_tx_for_pacaya_fork(), better to make these values fn parameters
-    let (l1_inclusion_height, batch_proposal_tx, batch_proposed_fork) =
-        get_block_proposed_event_by_height(
-            provider_l1.provider(),
-            taiko_chain_spec.clone(),
-            l1_inclusion_block_number,
-            batch_id,
-            fork,
-        )
-        .await?;
+    let (l1_inclusion_height, _, batch_proposed_fork) = get_block_proposed_event_by_height(
+        provider_l1.provider(),
+        taiko_chain_spec.clone(),
+        l1_inclusion_block_number,
+        batch_id,
+        fork,
+    )
+    .await?;
     assert_eq!(l1_inclusion_block_number, l1_inclusion_height);
     let (l1_inclusion_header, l1_state_header) = get_headers(
         &provider_l1,
@@ -366,11 +365,8 @@ pub async fn prepare_taiko_chain_batch_input(
 
         // according to protocol, calldata is mutex with blob
         let (tx_data_from_calldata, blob_tx_buffers_with_proofs) = if blob_hashes.is_empty() {
-            let proposeBatchCall { _txList, .. } =
-                proposeBatchCall::abi_decode(&batch_proposal_tx.input()).map_err(|_| {
-                    RaikoError::Preflight("Could not decode proposeBatchCall".to_owned())
-                })?;
-            (_txList.to_vec(), Vec::new())
+            let tx_list = &batch_proposed.txList;
+            (tx_list.to_vec(), Vec::new())
         } else {
             let blob_tx_buffers = get_batch_tx_data_with_proofs(
                 blob_hashes,
@@ -427,9 +423,38 @@ pub async fn get_tx_blob(
     let beacon_rpc_url: String = chain_spec.beacon_rpc.clone().ok_or_else(|| {
         RaikoError::Preflight("Beacon RPC URL is required for Taiko chains".to_owned())
     })?;
-    info!("get_tx_data: beacon_rpc_url done");
-    let blob = get_blob_data(&beacon_rpc_url, slot_id, blob_hash).await?;
-    info!("get_tx_data: blob done");
+    let blob = get_and_filter_blob_data(&beacon_rpc_url, slot_id, blob_hash).await?;
+    let commitment = eip4844::calc_kzg_proof_commitment(&blob).map_err(|e| anyhow!(e))?;
+    let blob_proof = match blob_proof_type {
+        BlobProofType::KzgVersionedHash => None,
+        BlobProofType::ProofOfEquivalence => {
+            let (x, y) =
+                eip4844::proof_of_equivalence(&blob, &commitment_to_version_hash(&commitment))
+                    .map_err(|e| anyhow!(e))?;
+
+            debug!("x {x:?} y {y:?}");
+            let point = eip4844::calc_kzg_proof_with_point(&blob, ZFr::from_bytes(&x).unwrap());
+            debug!("calc_kzg_proof_with_point {point:?}");
+
+            Some(
+                point
+                    .map(|g1| g1.to_bytes().to_vec())
+                    .map_err(|e| anyhow!(e))?,
+            )
+        }
+    };
+
+    Ok((blob, Some(commitment.to_vec()), blob_proof))
+}
+
+pub async fn filter_tx_blob_beacon_with_proof(
+    blob_hash: B256,
+    blobs: Vec<String>,
+    blob_proof_type: &BlobProofType,
+) -> RaikoResult<(Vec<u8>, Option<Vec<u8>>, Option<Vec<u8>>)> {
+    info!("get tx from hash blob: {blob_hash:?}");
+    // Get the blob data for this block
+    let blob = filter_blob_data_beacon(blobs, blob_hash).await?;
     let commitment = eip4844::calc_kzg_proof_commitment(&blob).map_err(|e| anyhow!(e))?;
     info!("get_tx_data: commitment done");
     let blob_proof = match blob_proof_type {
@@ -465,8 +490,19 @@ pub async fn get_batch_tx_data_with_proofs(
     blob_proof_type: &BlobProofType,
 ) -> RaikoResult<Vec<(Vec<u8>, Option<Vec<u8>>, Option<Vec<u8>>)>> {
     let mut tx_data = Vec::new();
+    let beacon_rpc_url: String = chain_spec.beacon_rpc.clone().ok_or_else(|| {
+        RaikoError::Preflight("Beacon RPC URL is required for Taiko chains".to_owned())
+    })?;
+    let slot_id = block_time_to_block_slot(
+        timestamp,
+        chain_spec.genesis_time,
+        chain_spec.seconds_per_slot,
+    )?;
+    // get blob data once
+    let blob_data = get_blob_data(&beacon_rpc_url, slot_id).await?;
+    let blobs: Vec<String> = blob_data.data.iter().map(|b| b.blob.clone()).collect();
     for hash in blob_hashes {
-        let data = get_tx_blob(hash, timestamp, chain_spec, blob_proof_type).await?;
+        let data = filter_tx_blob_beacon_with_proof(hash, blobs.clone(), blob_proof_type).await?;
         tx_data.push(data);
     }
     Ok(tx_data)
@@ -528,6 +564,7 @@ pub async fn get_calldata_txlist_event(
     bail!("No BlockProposedV2 event found for block {l2_block_number}");
 }
 
+#[derive(Debug)]
 pub enum EventFilterConditioin {
     #[allow(dead_code)]
     Hash(B256),
@@ -535,6 +572,7 @@ pub enum EventFilterConditioin {
     Range((u64, u64)),
 }
 
+#[instrument(skip_all)]
 pub async fn filter_block_proposed_event(
     provider: &RootProvider,
     chain_spec: ChainSpec,
@@ -554,6 +592,11 @@ pub async fn filter_block_proposed_event(
         TaikoSpecId::ONTAKE => BlockProposedV2::SIGNATURE_HASH,
         _ => BlockProposed::SIGNATURE_HASH,
     };
+
+    debug!("filter condition: {:?}", filter_condition);
+    debug!("address: {:?}", l1_address);
+    debug!("fork: {:?}", fork);
+
     // Setup the filter to get the relevant events
     let logs = filter_blockchain_event(provider, || match filter_condition {
         EventFilterConditioin::Hash(block_hash) => Filter::new()
@@ -656,6 +699,8 @@ pub async fn get_block_proposed_event_by_height(
     .await
 }
 
+const MAX_ANCHOR_BLOCK_RANGE: u64 = 96;
+
 pub async fn get_block_proposed_event_by_traversal(
     provider: &RootProvider,
     chain_spec: ChainSpec,
@@ -665,7 +710,10 @@ pub async fn get_block_proposed_event_by_traversal(
 ) -> Result<(u64, AlloyRpcTransaction, BlockProposedFork)> {
     let latest_block_number = provider.get_block_number().await?;
     let range_start = l1_anchor_block_number + 1;
-    let range_end = std::cmp::min(l1_anchor_block_number + 64, latest_block_number);
+    let range_end = std::cmp::min(
+        l1_anchor_block_number + MAX_ANCHOR_BLOCK_RANGE,
+        latest_block_number,
+    );
     info!("traversal proposal event in L1 range: ({range_start}, {range_end})");
     filter_block_proposed_event(
         provider,
@@ -812,11 +860,23 @@ fn calc_blob_versioned_hash(blob_str: &str) -> [u8; 32] {
     commitment_to_version_hash(&commitment.to_bytes()).0
 }
 
-async fn get_blob_data(beacon_rpc_url: &str, block_id: u64, blob_hash: B256) -> Result<Vec<u8>> {
+async fn get_and_filter_blob_data(
+    beacon_rpc_url: &str,
+    block_id: u64,
+    blob_hash: B256,
+) -> Result<Vec<u8>> {
     if beacon_rpc_url.contains("blobscan.com") {
-        get_blob_data_blobscan(beacon_rpc_url, block_id, blob_hash).await
+        get_and_filter_blob_data_by_blobscan(beacon_rpc_url, block_id, blob_hash).await
     } else {
-        get_blob_data_beacon(beacon_rpc_url, block_id, blob_hash).await
+        get_and_filter_blob_data_beacon(beacon_rpc_url, block_id, blob_hash).await
+    }
+}
+
+async fn get_blob_data(beacon_rpc_url: &str, block_id: u64) -> Result<GetBlobsResponse> {
+    if beacon_rpc_url.contains("blobscan.com") {
+        unimplemented!("blobscan.com is not supported yet")
+    } else {
+        get_blob_data_beacon(beacon_rpc_url, block_id).await
     }
 }
 
@@ -844,16 +904,12 @@ struct GetBlobsResponse {
     pub data: Vec<GetBlobData>,
 }
 
-async fn get_blob_data_beacon(
-    beacon_rpc_url: &str,
-    block_id: u64,
-    blob_hash: B256,
-) -> Result<Vec<u8>> {
+async fn get_blob_data_beacon(beacon_rpc_url: &str, block_id: u64) -> Result<GetBlobsResponse> {
     let url = format!(
         "{}/eth/v1/beacon/blob_sidecars/{block_id}",
         beacon_rpc_url.trim_end_matches('/'),
     );
-    info!("Retrieve blob from {url} and expect {blob_hash}.");
+    info!("Retrieve blob from {url}.");
     let response = reqwest::get(url.clone()).await?;
 
     if !response.status().is_success() {
@@ -869,6 +925,16 @@ async fn get_blob_data_beacon(
 
     let blobs = response.json::<GetBlobsResponse>().await?;
     ensure!(!blobs.data.is_empty(), "blob data not available anymore");
+    Ok(blobs)
+}
+
+async fn get_and_filter_blob_data_beacon(
+    beacon_rpc_url: &str,
+    block_id: u64,
+    blob_hash: B256,
+) -> Result<Vec<u8>> {
+    info!("Retrieve blob for {block_id} and expect {blob_hash}.");
+    let blobs = get_blob_data_beacon(beacon_rpc_url, block_id).await?;
     // Get the blob data for the blob storing the tx list
     let tx_blob = blobs
         .data
@@ -886,6 +952,23 @@ async fn get_blob_data_beacon(
     }
 }
 
+async fn filter_blob_data_beacon(blobs: Vec<String>, blob_hash: B256) -> Result<Vec<u8>> {
+    // Get the blob data for the blob storing the tx list
+    let tx_blob = blobs
+        .iter()
+        .find(|blob| {
+            // calculate from plain blob
+            blob_hash == calc_blob_versioned_hash(blob)
+        })
+        .cloned();
+
+    if let Some(tx_blob) = &tx_blob {
+        Ok(blob_to_bytes(tx_blob))
+    } else {
+        Err(anyhow!("couldn't find blob data matching blob hash"))
+    }
+}
+
 // https://api.blobscan.com/#/
 #[derive(Clone, Debug, Deserialize, Serialize)]
 struct BlobScanData {
@@ -893,7 +976,7 @@ struct BlobScanData {
     pub data: String,
 }
 
-async fn get_blob_data_blobscan(
+async fn get_and_filter_blob_data_by_blobscan(
     beacon_rpc_url: &str,
     _block_id: u64,
     blob_hash: B256,

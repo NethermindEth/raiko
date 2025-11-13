@@ -14,7 +14,7 @@ RUN ego-go build -o gaiko-ego ./cmd/gaiko
 COPY gaiko/ego/enclave.json .
 COPY docker/enclave-key.pem private.pem
 RUN ego sign && ego bundle gaiko-ego gaiko
-RUN ego uniqueid gaiko-ego
+RUN ego uniqueid gaiko-ego 2>&1 | tee /tmp/gaiko_uniqueid.log
 RUN ego signerid gaiko-ego
 
 FROM rust:1.88.0 AS chef
@@ -73,6 +73,7 @@ RUN mkdir -p \
     /var/log/raiko
 
 COPY --from=build-gaiko /opt/gaiko/gaiko ./bin/
+COPY --from=build-gaiko /tmp/gaiko_uniqueid.log /tmp/
 COPY --from=builder /opt/raiko/docker/entrypoint.sh ./bin/
 COPY --from=builder /opt/raiko/provers/sgx/config/sgx-guest.docker.manifest.template ./provers/sgx/config/sgx-guest.local.manifest.template
 # copy to /etc/raiko, but if self register mode, the mounted one will overwrite it.
@@ -87,6 +88,10 @@ ARG EDMM=0
 ENV EDMM=${EDMM}
 WORKDIR /opt/raiko/bin
 # Generate manifest template (will be signed at runtime)
-RUN gramine-manifest -Dlog_level=error -Ddirect_mode=0 -Darch_libdir=/lib/x86_64-linux-gnu/ ../provers/sgx/config/sgx-guest.local.manifest.template sgx-guest.manifest
+RUN gramine-manifest -Dlog_level=error -Ddirect_mode=0 -Darch_libdir=/lib/x86_64-linux-gnu/ ../provers/sgx/config/sgx-guest.local.manifest.template sgx-guest.manifest && \
+    gramine-sgx-sign --manifest sgx-guest.manifest --output sgx-guest.manifest.sgx && \
+    gramine-sgx-sigstruct-view "sgx-guest.sig" 2>&1 | tee /tmp/sgx_sigstruct.log
 
+
+WORKDIR /opt/raiko/bin
 ENTRYPOINT [ "/opt/raiko/bin/entrypoint.sh" ]

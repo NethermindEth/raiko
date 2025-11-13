@@ -83,6 +83,20 @@ pub struct Opts {
     #[arg(long, default_value = "false")]
     pub enable_redis_pool: bool,
 
+    #[arg(long, require_equals = true, default_value = "1000")]
+    #[serde(default = "Opts::default_queue_limit")]
+    /// Limit the max number of requests in the queue (including in-progress)
+    pub queue_limit: usize,
+
+    /// supported API keys hashset, now using input for simplicity
+    #[arg(
+        long,
+        require_equals = true,
+        default_value = "", // empty string means no api keys control
+        help = "e.g. {\"AAA\":\"1234567890\",\"BBB\":\"0987654321\"}"
+    )]
+    pub api_keys: String,
+
     /// Ballot config in json format. If not provided, '{}' will be used.
     #[arg(
         long,
@@ -117,6 +131,10 @@ impl Opts {
 
     fn default_log_level() -> String {
         "info".to_string()
+    }
+
+    fn default_queue_limit() -> usize {
+        1000
     }
 
     /// Read the options from a file and merge it with the current options.
@@ -174,16 +192,16 @@ pub fn parse_chain_specs(opts: &Opts) -> SupportedChainSpecs {
 }
 
 pub fn parse_ballot_zk(opts: &Opts) -> Ballot {
-    let probs: BTreeMap<ProofType, f64> =
-        serde_json::from_str(&opts.ballot_zk).expect("Failed to parse ballot config");
+    let probs: BTreeMap<ProofType, (f64, u64)> =
+        serde_json::from_str(&opts.ballot_zk).expect("Failed to parse ballot_zk config");
     let ballot = Ballot::new(probs).expect("Failed to create ballot");
     ballot.validate().expect("Failed to validate ballot");
     ballot
 }
 
 pub fn parse_ballot_sgx(opts: &Opts) -> Ballot {
-    let probs: BTreeMap<ProofType, f64> =
-        serde_json::from_str(&opts.ballot_sgx).expect("Failed to parse ballot config");
+    let probs: BTreeMap<ProofType, (f64, u64)> =
+        serde_json::from_str(&opts.ballot_sgx).expect("Failed to parse ballot_sgx config");
     let ballot = Ballot::new(probs).expect("Failed to create ballot");
     ballot.validate().expect("Failed to validate ballot");
     ballot

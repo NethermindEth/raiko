@@ -13,6 +13,7 @@ use raiko_redis_derive::RedisValue;
 use serde::{Deserialize, Serialize};
 use serde_with::{serde_as, DisplayFromStr};
 use std::collections::HashMap;
+use std::env;
 
 #[derive(RedisValue, PartialEq, Debug, Clone, Deserialize, Serialize, Eq, PartialOrd, Ord)]
 #[serde(rename_all = "snake_case")]
@@ -159,6 +160,8 @@ pub struct SingleProofRequestKey {
     proof_type: ProofType,
     /// The prover of the request
     prover_address: String,
+    /// The image ID for zk provers (optional)
+    image_id: Option<ImageId>,
 }
 
 impl SingleProofRequestKey {
@@ -175,6 +178,25 @@ impl SingleProofRequestKey {
             block_hash,
             proof_type,
             prover_address,
+            image_id: None,
+        }
+    }
+
+    pub fn new_with_image_id(
+        chain_id: ChainId,
+        block_number: u64,
+        block_hash: B256,
+        proof_type: ProofType,
+        prover_address: String,
+        image_id: ImageId,
+    ) -> Self {
+        Self {
+            chain_id,
+            block_number,
+            block_hash,
+            proof_type,
+            prover_address,
+            image_id: Some(image_id.clone()),
         }
     }
 }
@@ -187,6 +209,8 @@ pub struct AggregationRequestKey {
     // TODO add chain_id
     proof_type: ProofType,
     block_numbers: Vec<u64>,
+    /// The image ID for zk provers (optional)
+    image_id: Option<ImageId>,
 }
 
 impl AggregationRequestKey {
@@ -194,6 +218,19 @@ impl AggregationRequestKey {
         Self {
             proof_type,
             block_numbers,
+            image_id: None,
+        }
+    }
+
+    pub fn new_with_image_id(
+        proof_type: ProofType,
+        block_numbers: Vec<u64>,
+        image_id: ImageId,
+    ) -> Self {
+        Self {
+            proof_type,
+            block_numbers,
+            image_id: Some(image_id.clone()),
         }
     }
 }
@@ -231,6 +268,8 @@ pub struct BatchProofRequestKey {
     proof_type: ProofType,
     /// The prover of the request
     prover_address: String,
+    /// The image ID for zk provers (optional)
+    image_id: Option<ImageId>,
 }
 
 impl BatchProofRequestKey {
@@ -243,6 +282,21 @@ impl BatchProofRequestKey {
             guest_input_key,
             proof_type,
             prover_address,
+            image_id: None,
+        }
+    }
+
+    pub fn new_with_input_key_and_image_id(
+        guest_input_key: BatchGuestInputRequestKey,
+        proof_type: ProofType,
+        prover_address: String,
+        image_id: ImageId,
+    ) -> Self {
+        Self {
+            guest_input_key,
+            proof_type,
+            prover_address,
+            image_id: Some(image_id.clone()),
         }
     }
 
@@ -261,6 +315,27 @@ impl BatchProofRequestKey {
             ),
             proof_type,
             prover_address,
+            image_id: None,
+        }
+    }
+
+    pub fn new_with_image_id(
+        chain_id: ChainId,
+        batch_id: u64,
+        l1_inclusion_height: u64,
+        proof_type: ProofType,
+        prover_address: String,
+        image_id: ImageId,
+    ) -> Self {
+        Self {
+            guest_input_key: BatchGuestInputRequestKey::new(
+                chain_id,
+                batch_id,
+                l1_inclusion_height,
+            ),
+            proof_type,
+            prover_address,
+            image_id: Some(image_id.clone()),
         }
     }
 }
@@ -292,6 +367,80 @@ impl From<BatchGuestInputRequestKey> for RequestKey {
 impl From<BatchProofRequestKey> for RequestKey {
     fn from(key: BatchProofRequestKey) -> Self {
         RequestKey::BatchProof(key)
+    }
+}
+
+// Helper functions to create request keys with image IDs
+impl RequestKey {
+    /// Create a SingleProof request key with image ID
+    pub fn single_proof_with_image_id(
+        chain_id: ChainId,
+        block_number: u64,
+        block_hash: B256,
+        proof_type: ProofType,
+        prover_address: String,
+        image_id: ImageId,
+    ) -> Self {
+        RequestKey::SingleProof(SingleProofRequestKey::new_with_image_id(
+            chain_id,
+            block_number,
+            block_hash,
+            proof_type,
+            prover_address,
+            image_id,
+        ))
+    }
+
+    /// Create an Aggregation request key with image ID
+    pub fn aggregation_with_image_id(
+        proof_type: ProofType,
+        block_numbers: Vec<u64>,
+        image_id: ImageId,
+    ) -> Self {
+        RequestKey::Aggregation(AggregationRequestKey::new_with_image_id(
+            proof_type,
+            block_numbers,
+            image_id,
+        ))
+    }
+
+    /// Create a BatchGuestInput request key without image ID
+    pub fn batch_guest_input(chain_id: ChainId, batch_id: u64, l1_inclusion_height: u64) -> Self {
+        RequestKey::BatchGuestInput(BatchGuestInputRequestKey::new(
+            chain_id,
+            batch_id,
+            l1_inclusion_height,
+        ))
+    }
+
+    /// Create a BatchProof request key with image ID
+    pub fn batch_proof_with_image_id(
+        chain_id: ChainId,
+        batch_id: u64,
+        l1_inclusion_height: u64,
+        proof_type: ProofType,
+        prover_address: String,
+        image_id: ImageId,
+    ) -> Self {
+        RequestKey::BatchProof(BatchProofRequestKey::new_with_image_id(
+            chain_id,
+            batch_id,
+            l1_inclusion_height,
+            proof_type,
+            prover_address,
+            image_id,
+        ))
+    }
+
+    /// Get the image ID from the request key if it exists
+    pub fn image_id(&self) -> Option<&ImageId> {
+        match self {
+            RequestKey::GuestInput(_) => None, // GuestInput doesn't have image_id
+            RequestKey::SingleProof(key) => key.image_id.as_ref(),
+            RequestKey::Aggregation(key) => key.image_id.as_ref(),
+            RequestKey::BatchGuestInput(_) => None, // BatchGuestInput doesn't have image_id
+            RequestKey::BatchProof(key) => key.image_id.as_ref(),
+        }
     }
 }
 
@@ -582,3 +731,118 @@ impl std::fmt::Display for StatusWithContext {
         write!(f, "{}", self.status())
     }
 }
+
+/// Trait for reading image IDs for different proof types
+pub trait ImageIdReader {
+    /// Read the image ID from environment variables with fallback to default
+    fn read_image_id(
+        &self,
+        request_type: Option<&str>,
+    ) -> Result<String, Box<dyn std::error::Error>>;
+
+    /// Get the environment variable name for this proof type and request type
+    fn env_var_name(&self, request_type: Option<&str>) -> &'static str;
+
+    /// Get the default value if environment variable is not set
+    fn default_value(&self, request_type: Option<&str>) -> &'static str;
+}
+
+impl ImageIdReader for ProofType {
+    fn read_image_id(
+        &self,
+        request_type: Option<&str>,
+    ) -> Result<String, Box<dyn std::error::Error>> {
+        let env_var = self.env_var_name(request_type);
+        match env::var(env_var) {
+            Ok(value) => Ok(value),
+            Err(_) => Ok(self.default_value(request_type).to_string()),
+        }
+    }
+
+    fn env_var_name(&self, _request_type: Option<&str>) -> &'static str {
+        match self {
+            ProofType::Risc0 => "RISC0_BATCH_ID",
+            ProofType::Sp1 => "SP1_BATCH_VK_HASH",
+            ProofType::Sgx => "SGX_MRENCLAVE",
+            ProofType::SgxGeth => "SGXGETH_MRENCLAVE",
+            _ => panic!("Unsupported proof type for image ID: {:?}", self),
+        }
+    }
+
+    fn default_value(&self, _request_type: Option<&str>) -> &'static str {
+        match self {
+            ProofType::Risc0 | ProofType::Sp1 | ProofType::Sgx | ProofType::SgxGeth => {
+                "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+            }
+            _ => panic!("Unsupported proof type for default value: {:?}", self),
+        }
+    }
+}
+
+/// Image ID struct to hold different IDs for different proof types
+#[derive(
+    PartialEq, Debug, Clone, Deserialize, Serialize, Eq, PartialOrd, Ord, Hash, RedisValue,
+)]
+pub struct ImageId {
+    /// RISC0 batch ID
+    pub risc0_batch_id: Option<String>,
+    /// SP1 batch VK hash
+    pub sp1_batch_vk_hash: Option<String>,
+    /// SGX enclave MRENCLAVE
+    pub sgx_enclave: Option<String>,
+    /// SGX Geth enclave MRENCLAVE
+    pub sgxgeth_enclave: Option<String>,
+}
+
+impl ImageId {
+    pub fn new() -> Self {
+        Self {
+            risc0_batch_id: None,
+            sp1_batch_vk_hash: None,
+            sgx_enclave: None,
+            sgxgeth_enclave: None,
+        }
+    }
+
+    /// Create an ImageId based on the proof type (always uses batch IDs for data lookup)
+    pub fn from_proof_type_and_request_type(proof_type: &ProofType, _is_aggregation: bool) -> Self {
+        let mut image_id = Self::new();
+
+        match proof_type {
+            ProofType::Risc0 => {
+                if let Ok(id) = proof_type.read_image_id(None) {
+                    image_id.risc0_batch_id = Some(id);
+                }
+            }
+            ProofType::Sp1 => {
+                if let Ok(id) = proof_type.read_image_id(None) {
+                    image_id.sp1_batch_vk_hash = Some(id);
+                }
+            }
+            ProofType::Sgx => {
+                if let Ok(mrenclave) = proof_type.read_image_id(None) {
+                    image_id.sgx_enclave = Some(mrenclave);
+                }
+            }
+            ProofType::SgxGeth => {
+                if let Ok(mrenclave) = proof_type.read_image_id(None) {
+                    image_id.sgxgeth_enclave = Some(mrenclave);
+                }
+            }
+            _ => {
+                // For proof type Native, we don't need image IDs
+                // so we leave the ImageId empty
+            }
+        }
+
+        image_id
+    }
+}
+
+impl Default for ImageId {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl_display_using_json_pretty!(ImageId);

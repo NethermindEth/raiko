@@ -43,7 +43,7 @@ docker buildx build . \
 	-f $target_dockerfile \
 	--load \
 	--platform linux/amd64 \
-	-t $image_name:$tag \
+	-t $image_name:latest \
 	$build_flags \
 	--build-arg TARGETPLATFORM=linux/amd64 \
 	--progress=plain \
@@ -55,8 +55,48 @@ if [ $? -ne 0 ]; then
 	exit 1
 fi
 
+# Update local .env file with Docker-generated image IDs for zk builds
+if [ "$proof_type" = "1" ] || [ "$proof_type" = "zk" ]; then
+	echo "Updating local .env file with Docker-generated image IDs..."
+	
+	# Extract RISC0 image IDs from the Docker build log
+	if grep -q "risc0 elf image id:" log.build.$image_name.$tag; then
+		echo "Updating RISC0 image IDs from Docker build log..."
+		./script/update_imageid.sh risc0 log.build.$image_name.$tag
+	else
+		echo "No RISC0 image IDs found in Docker build log"
+	fi
+	
+	# Extract SP1 VK hashes from the Docker build log
+	if grep -q "sp1 elf vk hash_bytes is:" log.build.$image_name.$tag; then
+		echo "Updating SP1 VK hashes from Docker build log..."
+		./script/update_imageid.sh sp1 log.build.$image_name.$tag
+	else
+		echo "No SP1 VK hashes found in Docker build log"
+	fi
+	
+	echo "Local .env file updated with Docker-generated image IDs"
+fi
+
+# Update local .env file with MRENCLAVE values by calling tools directly on container
+if [ "$proof_type" = "0" ] || [ "$proof_type" = "tee" ]; then
+	echo "Extracting MRENCLAVE values by calling tools directly on container..."
+
+	# Extract SGX MRENCLAVE by calling gramine tools directly
+	echo "Extracting SGX MRENCLAVE..."
+	./script/update_imageid.sh sgx_direct "$image_name:latest"
+
+	# Extract SGXGETH MRENCLAVE by calling ego tools directly
+	echo "Extracting SGXGETH MRENCLAVE..."
+	./script/update_imageid.sh sgxgeth_direct "$image_name:latest"
+
+	echo "Local .env file updated with extracted MRENCLAVE values"
+fi
+
+# update latest tag at same time for local docker compose running
 DOCKER_REPOSITORY=us-docker.pkg.dev/evmchain/images
-docker tag $image_name:$tag $DOCKER_REPOSITORY/$image_name:$tag
+docker tag $image_name:latest $DOCKER_REPOSITORY/$image_name:latest
+docker tag $image_name:latest $DOCKER_REPOSITORY/$image_name:$tag
 
 read -p "Do you want to push $image_name:$tag to registry? (y/N) " confirm
 case "$confirm" in

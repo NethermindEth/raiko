@@ -10,11 +10,12 @@ use reth_evm::{
         CommitChanges, ExecutableTx,
     },
     execute::Executor,
-    ConfigureEvm, Database, OnStateHook,
+    ConfigureEvm, Database, Evm, OnStateHook,
 };
 use reth_primitives::{NodePrimitives, RecoveredBlock};
-use reth_revm::{db::states::bundle_state::BundleRetention, State};
-use revm::context::result::ExecutionResult;
+use reth_revm::{
+    context::result::ExecutionResult, db::states::bundle_state::BundleRetention, State,
+};
 use tracing::warn;
 
 /// A wrapper around any [`BlockExecutor`] that adds an `is_optimistic` flag to indicate whether
@@ -107,24 +108,18 @@ where
     fn execute_transaction_with_commit_condition(
         &mut self,
         tx: impl ExecutableTx<Self>,
-        f: impl FnOnce(&ExecutionResult<<Self::Evm as reth_evm::Evm>::HaltReason>) -> CommitChanges,
+        f: impl FnOnce(&ExecutionResult<<Self::Evm as Evm>::HaltReason>) -> CommitChanges,
     ) -> Result<Option<u64>, BlockExecutionError> {
         self.inner.execute_transaction_with_commit_condition(tx, f)
     }
 
     fn finish(
         self,
-    ) -> Result<
-        (
-            Self::Evm,
-            reth_evm::block::BlockExecutionResult<Self::Receipt>,
-        ),
-        BlockExecutionError,
-    > {
+    ) -> Result<(Self::Evm, BlockExecutionResult<Self::Receipt>), BlockExecutionError> {
         self.inner.finish()
     }
 
-    fn set_state_hook(&mut self, hook: Option<Box<dyn reth_evm::OnStateHook>>) {
+    fn set_state_hook(&mut self, hook: Option<Box<dyn OnStateHook>>) {
         self.inner.set_state_hook(hook)
     }
 

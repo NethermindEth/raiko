@@ -11,7 +11,6 @@ reth-evm-ethereum = { workspace = true }
 reth-evm = { workspace = true }
 reth-chainspec = { workspace = true }
 reth-revm = { workspace = true }
-taiko-reth = { workspace = true }
 
 # revm
 revm = { workspace = true }
@@ -69,6 +68,12 @@ reth-ethereum-consensus = { workspace = true }
 reth-storage-api = { workspace = true }
 reth-consensus = { workspace = true }
 
+alethia-reth-consensus = { workspace = true }
+alethia-reth-evm = { workspace = true }
+alethia-reth-chainspec = { workspace = true }
+alethia-reth-block = { workspace = true }
+
+
 [dev-dependencies]
 hex-literal = { workspace = true }
 
@@ -95,4 +100,4 @@ sgx = []
 sp1 = []
 risc0 = []
 sp1-cycle-tracker = []
-preflight = ["taiko-reth/prover"]
+preflight = ["alethia-reth-block/prover"]
