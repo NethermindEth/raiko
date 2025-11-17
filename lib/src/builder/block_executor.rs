@@ -134,7 +134,6 @@ where
 
 /// A generic block executor that uses a [`BlockExecutor`] to
 /// execute blocks.
-#[expect(missing_debug_implementations)]
 pub struct TaikoWithOptimisticBlockExecutor<F, DB> {
     pub strategy_factory: F,
     pub db: State<DB>,

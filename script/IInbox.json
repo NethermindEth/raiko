@@ -1,0 +1,226 @@
+{
+    "abi": [
+        {
+            "type": "function",
+            "name": "getConfig",
+            "inputs": [],
+            "outputs": [
+                {
+                    "name": "config_",
+                    "type": "tuple",
+                    "internalType": "struct IInbox.Config",
+                    "components": [
+                        {
+                            "name": "codec",
+                            "type": "address",
+                            "internalType": "address"
+                        },
+                        {
+                            "name": "bondToken",
+                            "type": "address",
+                            "internalType": "address"
+                        },
+                        {
+                            "name": "signalService",
+                            "type": "address",
+                            "internalType": "address"
+                        },
+                        {
+                            "name": "proofVerifier",
+                            "type": "address",
+                            "internalType": "address"
+                        },
+                        {
+                            "name": "proposerChecker",
+                            "type": "address",
+                            "internalType": "address"
+                        },
+                        {
+                            "name": "provingWindow",
+                            "type": "uint48",
+                            "internalType": "uint48"
+                        },
+                        {
+                            "name": "extendedProvingWindow",
+                            "type": "uint48",
+                            "internalType": "uint48"
+                        },
+                        {
+                            "name": "maxFinalizationCount",
+                            "type": "uint256",
+                            "internalType": "uint256"
+                        },
+                        {
+                            "name": "finalizationGracePeriod",
+                            "type": "uint48",
+                            "internalType": "uint48"
+                        },
+                        {
+                            "name": "ringBufferSize",
+                            "type": "uint256",
+                            "internalType": "uint256"
+                        },
+                        {
+                            "name": "basefeeSharingPctg",
+                            "type": "uint8",
+                            "internalType": "uint8"
+                        },
+                        {
+                            "name": "minForcedInclusionCount",
+                            "type": "uint256",
+                            "internalType": "uint256"
+                        },
+                        {
+                            "name": "forcedInclusionDelay",
+                            "type": "uint16",
+                            "internalType": "uint16"
+                        },
+                        {
+                            "name": "forcedInclusionFeeInGwei",
+                            "type": "uint64",
+                            "internalType": "uint64"
+                        },
+                        {
+                            "name": "minCheckpointDelay",
+                            "type": "uint16",
+                            "internalType": "uint16"
+                        },
+                        {
+                            "name": "permissionlessInclusionMultiplier",
+                            "type": "uint8",
+                            "internalType": "uint8"
+                        },
+                        {
+                            "name": "compositeKeyVersion",
+                            "type": "uint16",
+                            "internalType": "uint16"
+                        }
+                    ]
+                }
+            ],
+            "stateMutability": "view"
+        },
+        {
+            "type": "function",
+            "name": "getProposalHash",
+            "inputs": [
+                {
+                    "name": "_proposalId",
+                    "type": "uint48",
+                    "internalType": "uint48"
+                }
+            ],
+            "outputs": [
+                {
+                    "name": "proposalHash_",
+                    "type": "bytes32",
+                    "internalType": "bytes32"
+                }
+            ],
+            "stateMutability": "view"
+        },
+        {
+            "type": "function",
+            "name": "getTransitionRecordHash",
+            "inputs": [
+                {
+                    "name": "_proposalId",
+                    "type": "uint48",
+                    "internalType": "uint48"
+                },
+                {
+                    "name": "_parentTransitionHash",
+                    "type": "bytes32",
+                    "internalType": "bytes32"
+                }
+            ],
+            "outputs": [
+                {
+                    "name": "finalizationDeadline_",
+                    "type": "uint48",
+                    "internalType": "uint48"
+                },
+                {
+                    "name": "recordHash_",
+                    "type": "bytes26",
+                    "internalType": "bytes26"
+                }
+            ],
+            "stateMutability": "view"
+        },
+        {
+            "type": "function",
+            "name": "propose",
+            "inputs": [
+                {
+                    "name": "_lookahead",
+                    "type": "bytes",
+                    "internalType": "bytes"
+                },
+                {
+                    "name": "_data",
+                    "type": "bytes",
+                    "internalType": "bytes"
+                }
+            ],
+            "outputs": [],
+            "stateMutability": "nonpayable"
+        },
+        {
+            "type": "function",
+            "name": "prove",
+            "inputs": [
+                {
+                    "name": "_data",
+                    "type": "bytes",
+                    "internalType": "bytes"
+                },
+                {
+                    "name": "_proof",
+                    "type": "bytes",
+                    "internalType": "bytes"
+                }
+            ],
+            "outputs": [],
+            "stateMutability": "nonpayable"
+        },
+        {
+            "type": "event",
+            "name": "Proposed",
+            "inputs": [
+                {
+                    "name": "data",
+                    "type": "bytes",
+                    "indexed": false,
+                    "internalType": "bytes"
+                }
+            ],
+            "anonymous": false
+        },
+        {
+            "type": "event",
+            "name": "Proved",
+            "inputs": [
+                {
+                    "name": "data",
+                    "type": "bytes",
+                    "indexed": false,
+                    "internalType": "bytes"
+                }
+            ],
+            "anonymous": false
+        },
+        {
+            "type": "event",
+            "name": "TransitionConflictDetected",
+            "inputs": [],
+            "anonymous": false
+        },
+        {
+            "type": "event",
+            "name": "TransitionDuplicateDetected",
+            "inputs": [],
+            "anonymous": false
+        }
+    ]
+}

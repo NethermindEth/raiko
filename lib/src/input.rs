@@ -12,6 +12,7 @@ use pacaya::{BatchInfo, BatchProposed};
 use reth_primitives::{Block, Header, TransactionSigned};
 use serde::{Deserialize, Serialize};
 use serde_with::serde_as;
+use shasta::ShastaEventData;
 
 use crate::anchor::ProtocolBaseFeeConfig;
 use crate::anchor::ANCHOR_GAS_LIMIT;
@@ -19,7 +20,8 @@ use crate::anchor::ANCHOR_V3_GAS_LIMIT;
 #[cfg(not(feature = "std"))]
 use crate::no_std::*;
 use crate::{
-    consts::ChainSpec, primitives::mpt::MptNode, prover::Proof, utils::zlib_compress_data,
+    consts::ChainSpec, input::shasta::Checkpoint, primitives::mpt::MptNode, prover::Proof,
+    utils::zlib_compress_data,
 };
 use alloy_consensus::serde_bincode_compat::Header as BincodeCompactHeader;
 use reth_primitives::serde_bincode_compat::Block as BincodeCompactBlock;
@@ -54,6 +56,15 @@ pub struct GuestInput {
     pub taiko: TaikoGuestInput,
 }
 
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
+pub struct InputDataSource {
+    pub tx_data_from_calldata: Vec<u8>,
+    pub tx_data_from_blob: Vec<Vec<u8>>,
+    pub blob_commitments: Option<Vec<Vec<u8>>>,
+    pub blob_proofs: Option<Vec<Vec<u8>>>,
+    pub blob_proof_type: BlobProofType,
+}
+
 /// External block input.
 #[serde_as]
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
@@ -64,11 +75,7 @@ pub struct TaikoGuestBatchInput {
     pub batch_proposed: BlockProposedFork,
     pub chain_spec: ChainSpec,
     pub prover_data: TaikoProverData,
-    pub tx_data_from_calldata: Vec<u8>,
-    pub tx_data_from_blob: Vec<Vec<u8>>,
-    pub blob_commitments: Option<Vec<Vec<u8>>>,
-    pub blob_proofs: Option<Vec<Vec<u8>>>,
-    pub blob_proof_type: BlobProofType,
+    pub data_sources: Vec<InputDataSource>,
 }
 
 /// External block input.
@@ -115,6 +122,22 @@ pub struct ZkAggregationGuestInput {
     pub block_inputs: Vec<B256>,
 }
 
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
+pub struct ShastaAggregationGuestInput {
+    /// All block proofs to prove
+    pub proofs: Vec<Proof>,
+    pub chain_id: u64,
+    pub verifier_address: Address,
+}
+
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
+pub struct ShastaRawAggregationGuestInput {
+    /// All block proofs to prove
+    pub proofs: Vec<RawProof>,
+    pub chain_id: u64,
+    pub verifier_address: Address,
+}
+
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 
 pub enum BlockProposedFork {
@@ -123,6 +146,7 @@ pub enum BlockProposedFork {
     Hekla(BlockProposed),
     Ontake(BlockProposedV2),
     Pacaya(BatchProposed),
+    Shasta(ShastaEventData),
 }
 
 impl BlockProposedFork {
@@ -131,6 +155,11 @@ impl BlockProposedFork {
             BlockProposedFork::Hekla(block) => block.meta.blobUsed,
             BlockProposedFork::Ontake(block) => block.meta.blobUsed,
             BlockProposedFork::Pacaya(batch) => batch.info.blobHashes.len() > 0,
+            BlockProposedFork::Shasta(event_data) => event_data
+                .derivation
+                .sources
+                .iter()
+                .all(|source| source.blobSlice.blobHashes.len() > 0),
             _ => false,
         }
     }
@@ -142,15 +171,16 @@ impl BlockProposedFork {
             BlockProposedFork::Pacaya(_batch) => {
                 _batch.info.lastBlockId - (_batch.info.blocks.len() as u64) + 1
             }
+            BlockProposedFork::Shasta(_event_data) => {
+                unimplemented!("can not get block number from shasta proposal")
+            }
             _ => 0,
         }
     }
 
-    pub fn block_timestamp(&self) -> u64 {
+    pub fn batch_timestamp(&self) -> u64 {
         match self {
-            BlockProposedFork::Hekla(block) => block.meta.timestamp,
-            BlockProposedFork::Ontake(block) => block.meta.timestamp,
-            BlockProposedFork::Pacaya(_batch) => 0,
+            BlockProposedFork::Shasta(event_data) => event_data.proposal.timestamp.to(),
             _ => 0,
         }
     }
@@ -171,11 +201,18 @@ impl BlockProposedFork {
                 min_gas_excess: batch.info.baseFeeConfig.minGasExcess,
                 max_gas_issuance_per_block: batch.info.baseFeeConfig.maxGasIssuancePerBlock,
             },
+            BlockProposedFork::Shasta(event_data) => ProtocolBaseFeeConfig {
+                adjustment_quotient: 0,
+                sharing_pctg: event_data.derivation.basefeeSharingPctg,
+                gas_issuance_per_second: 0,
+                min_gas_excess: 0,
+                max_gas_issuance_per_block: 0,
+            },
             _ => ProtocolBaseFeeConfig::default(),
         }
     }
 
-    pub fn blob_tx_slice_param(&self) -> Option<(usize, usize)> {
+    pub fn blob_tx_slice_param(&self, compressed_tx_list_buf: &[u8]) -> Option<(usize, usize)> {
         match self {
             BlockProposedFork::Ontake(block) => Some((
                 block.meta.blobTxListOffset as usize,
@@ -185,6 +222,45 @@ impl BlockProposedFork {
                 batch.info.blobByteOffset as usize,
                 batch.info.blobByteSize as usize,
             )),
+            BlockProposedFork::Shasta(event_data) => {
+                const SHASTA_BLOB_DATA_PREFIX_SIZE: usize = 64;
+                const BLOB_BYTES: usize = 4096 * 32;
+                assert!(
+                    event_data.derivation.sources.len() > 0,
+                    "derivation.sources.length > 0"
+                );
+                assert!(
+                    event_data.derivation.sources[0].blobSlice.blobHashes.len() > 0,
+                    "blobSlice.blobHashes.length > 0"
+                );
+
+                let offset: usize = event_data.derivation.sources[0]
+                    .blobSlice
+                    .offset
+                    .try_into()
+                    .unwrap();
+                let _version = B256::from_slice(&compressed_tx_list_buf[offset..offset + 32]);
+                assert_eq!(_version, B256::with_last_byte(1));
+                assert!(
+                    TryInto::<usize>::try_into(event_data.derivation.sources[0].blobSlice.offset)
+                        .unwrap()
+                        <= BLOB_BYTES * event_data.derivation.sources[0].blobSlice.blobHashes.len()
+                            - SHASTA_BLOB_DATA_PREFIX_SIZE,
+                    "blobSlice.offset <= BLOB_BYTES * blobSlice.blobHashes.length - 64"
+                );
+
+                let size_b256_slice =
+                    B256::from_slice(&compressed_tx_list_buf[offset + 32..offset + 64]);
+                let blob_data_size =
+                    usize::from_be_bytes(size_b256_slice.as_slice()[24..32].try_into().unwrap());
+                assert!(
+                    offset + blob_data_size
+                        <= BLOB_BYTES * event_data.derivation.sources[0].blobSlice.blobHashes.len()
+                            - SHASTA_BLOB_DATA_PREFIX_SIZE,
+                    "blobSlice.size <= BLOB_BYTES * blobSlice.blobHashes.length - 64"
+                );
+                Some((offset + SHASTA_BLOB_DATA_PREFIX_SIZE, blob_data_size))
+            }
             _ => None,
         }
     }
@@ -193,7 +269,7 @@ impl BlockProposedFork {
         match self {
             BlockProposedFork::Hekla(block) => block.meta.blobHash,
             BlockProposedFork::Ontake(block) => block.meta.blobHash,
-            // meaningless for pakaya
+            // meaningless for pacaya and shasta
             _ => B256::default(),
         }
     }
@@ -201,6 +277,9 @@ impl BlockProposedFork {
     pub fn blob_hashes(&self) -> &[B256] {
         match self {
             BlockProposedFork::Pacaya(batch) => &batch.info.blobHashes,
+            BlockProposedFork::Shasta(event_data) => {
+                &event_data.derivation.sources[0].blobSlice.blobHashes
+            }
             _ => &[],
         }
     }
@@ -208,6 +287,7 @@ impl BlockProposedFork {
     pub fn batch_info(&self) -> Option<&BatchInfo> {
         match self {
             BlockProposedFork::Pacaya(batch) => Some(&batch.info),
+            BlockProposedFork::Shasta(_) => unimplemented!("Shasta batch_info implementation"),
             _ => None,
         }
     }
@@ -218,6 +298,20 @@ impl BlockProposedFork {
             BlockProposedFork::Ontake(block) => block.meta.gasLimit as u64 + ANCHOR_GAS_LIMIT,
             BlockProposedFork::Pacaya(batch) => batch.info.gasLimit as u64 + ANCHOR_V3_GAS_LIMIT,
             _ => 0,
+        }
+    }
+
+    pub fn proposer(&self) -> Address {
+        match self {
+            BlockProposedFork::Shasta(event_data) => event_data.proposal.proposer,
+            _ => unimplemented!("proposer is not supported for non-shasta fork"),
+        }
+    }
+
+    pub fn is_shasta(&self) -> bool {
+        match self {
+            BlockProposedFork::Shasta(_) => true,
+            _ => false,
         }
     }
 }
@@ -236,6 +330,10 @@ pub struct TaikoGuestInput {
     pub blob_commitment: Option<Vec<u8>>,
     pub blob_proof: Option<Vec<u8>>,
     pub blob_proof_type: BlobProofType,
+    pub extra_data: Option<(bool, Address)>,
+    /// The timestamp of the grandparent block, used for base fee calculations in shasta
+    /// In raiko, this value is used for consensus validation.
+    pub grandparent_timestamp: Option<u64>,
 }
 
 pub struct ZlibCompressError(pub String);
@@ -286,8 +384,11 @@ impl FromStr for BlobProofType {
 
 #[derive(Clone, Default, Debug, Serialize, Deserialize)]
 pub struct TaikoProverData {
-    pub prover: Address,
+    pub actual_prover: Address,
+    pub designated_prover: Option<Address>,
     pub graffiti: B256,
+    pub parent_transition_hash: Option<B256>,
+    pub checkpoint: Option<Checkpoint>,
 }
 
 #[serde_as]
@@ -317,6 +418,7 @@ pub fn get_input_path(dir: &Path, block_number: u64, network: &str) -> PathBuf {
 mod hekla;
 pub mod ontake;
 pub mod pacaya;
+pub mod shasta;
 
 pub use hekla::*;
 

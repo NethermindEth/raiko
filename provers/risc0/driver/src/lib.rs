@@ -62,6 +62,7 @@ impl From<Risc0Response> for Proof {
             input: Some(value.input),
             uuid: Some(value.uuid),
             kzg_proof: None,
+            extra_data: None,
         }
     }
 }
@@ -235,6 +236,20 @@ impl Prover for Risc0Prover {
                 "block_program_hash": BLOCK_PROGRAM_HASH.to_string(),
             }
         }))
+    }
+
+    async fn shasta_aggregate(
+        &self,
+        input: AggregationGuestInput,
+        output: &AggregationGuestOutput,
+        config: &ProverConfig,
+        store: Option<&mut dyn IdWrite>,
+    ) -> ProverResult<Proof> {
+        todo!()
+    }
+
+    fn proof_type(&self) -> ProofType {
+        ProofType::Risc0
     }
 }
 

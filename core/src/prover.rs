@@ -2,6 +2,7 @@ use std::path::Path;
 
 use raiko_lib::{
     input::{GuestBatchInput, GuestBatchOutput, GuestInput, GuestOutput},
+    libhash::hash_transitions_hash_array_with_metadata,
     proof_type::ProofType,
     protocol_instance::ProtocolInstance,
     prover::{IdStore, IdWrite, Proof, ProofKey, Prover, ProverConfig, ProverError, ProverResult},
@@ -68,6 +69,7 @@ impl Prover for NativeProver {
             quote: None,
             uuid: None,
             kzg_proof: None,
+            extra_data: None,
         })
     }
 
@@ -115,6 +117,7 @@ impl Prover for NativeProver {
             quote: None,
             uuid: None,
             kzg_proof: None,
+            extra_data: None,
         })
     }
 
@@ -132,6 +135,32 @@ impl Prover for NativeProver {
         Ok(Proof {
             ..Default::default()
         })
+    }
+
+    async fn shasta_aggregate(
+        &self,
+        input: raiko_lib::input::ShastaAggregationGuestInput,
+        output: &raiko_lib::input::AggregationGuestOutput,
+        _config: &ProverConfig,
+        _store: Option<&mut dyn IdWrite>,
+    ) -> ProverResult<Proof> {
+        tracing::info!("aggregating shasta proposals: input: {input:?} and output: {output:?}");
+        let aggregated_proving_hash = hash_transitions_hash_array_with_metadata(
+            &input
+                .proofs
+                .iter()
+                .map(|p| p.input.unwrap())
+                .collect::<Vec<_>>(),
+        );
+        tracing::info!("aggregated proving hash: {aggregated_proving_hash:?}");
+
+        Ok(Proof {
+            ..Default::default()
+        })
+    }
+
+    fn proof_type(&self) -> ProofType {
+        ProofType::Native
     }
 }
 

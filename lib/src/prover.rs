@@ -1,10 +1,13 @@
-use alloy_primitives::{ChainId, B256};
+use alloy_primitives::{Address, ChainId, B256};
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
-use crate::input::{
-    AggregationGuestInput, AggregationGuestOutput, GuestBatchInput, GuestBatchOutput, GuestInput,
-    GuestOutput,
+use crate::{
+    input::{
+        AggregationGuestInput, AggregationGuestOutput, GuestBatchInput, GuestBatchOutput,
+        GuestInput, GuestOutput, ShastaAggregationGuestInput,
+    },
+    proof_type::ProofType,
 };
 
 #[derive(thiserror::Error, Debug)]
@@ -28,6 +31,7 @@ impl From<String> for ProverError {
 pub type ProverResult<T, E = ProverError> = core::result::Result<T, E>;
 pub type ProverConfig = serde_json::Value;
 pub type ProofKey = (ChainId, u64, B256, u8);
+pub type ProofExtraData = (ChainId, Address);
 
 #[derive(
     Clone, Debug, Serialize, ToSchema, Deserialize, Default, PartialEq, Eq, PartialOrd, Ord, Hash,
@@ -44,6 +48,8 @@ pub struct Proof {
     pub uuid: Option<String>,
     /// The kzg proof.
     pub kzg_proof: Option<String>,
+    /// the extra data of Proof
+    pub extra_data: Option<ProofExtraData>,
 }
 
 // impl display for proof to easy read log
@@ -113,9 +119,43 @@ pub trait Prover {
         store: Option<&mut dyn IdWrite>,
     ) -> ProverResult<Proof>;
 
+    /// Run the prover for Shasta proposals (delegates to batch_run for now)
+    async fn proposal_run(
+        &self,
+        input: GuestBatchInput,
+        output: &GuestBatchOutput,
+        config: &ProverConfig,
+        store: Option<&mut dyn IdWrite>,
+    ) -> ProverResult<Proof> {
+        // Default implementation delegates to batch_run
+        let mut proof = self.batch_run(input.clone(), output, config, store).await?;
+        let proof_type = self.proof_type();
+        let chain_id = input.taiko.chain_spec.chain_id;
+        let first_block = &input.inputs.first().unwrap().block;
+        let proposal_block_number = first_block.number;
+        let proposal_timestamp = first_block.header.timestamp;
+        let verifier_address = input
+            .taiko
+            .chain_spec
+            .get_fork_verifier_address(proposal_block_number, proposal_timestamp, proof_type)
+            .unwrap_or_default();
+        proof.extra_data = Some((chain_id, verifier_address));
+        Ok(proof)
+    }
+
+    async fn shasta_aggregate(
+        &self,
+        input: ShastaAggregationGuestInput,
+        output: &AggregationGuestOutput,
+        config: &ProverConfig,
+        store: Option<&mut dyn IdWrite>,
+    ) -> ProverResult<Proof>;
+
     async fn cancel(&self, proof_key: ProofKey, read: Box<&mut dyn IdStore>) -> ProverResult<()>;
 
     /// Returns the guest specific data
     /// E.g. Sp1 guest program hashes for aggregation and block proofs.
     async fn get_guest_data() -> ProverResult<serde_json::Value>;
+
+    fn proof_type(&self) -> ProofType;
 }

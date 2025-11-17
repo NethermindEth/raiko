@@ -24,6 +24,8 @@ pub enum TaskStatus {
     InvalidOrUnsupportedBlock,
     #[serde(rename = "zk_any_not_drawn")]
     ZKAnyNotDrawn,
+    #[serde(rename = "sgx_any_not_drawn")]
+    SGXAnyNotDrawn,
     IoFailure(String),
     AnyhowError(String),
     GuestProverFailure(String),
@@ -47,6 +49,7 @@ impl From<TaskStatus> for i32 {
             TaskStatus::CancellationInProgress => -3210,
             TaskStatus::InvalidOrUnsupportedBlock => -4000,
             TaskStatus::ZKAnyNotDrawn => -4100,
+            TaskStatus::SGXAnyNotDrawn => -4101,
             TaskStatus::IoFailure(_) => -5000,
             TaskStatus::AnyhowError(_) => -6000,
             TaskStatus::GuestProverFailure(_) => -7000,
@@ -72,6 +75,7 @@ impl From<i32> for TaskStatus {
             -3210 => TaskStatus::CancellationInProgress,
             -4000 => TaskStatus::InvalidOrUnsupportedBlock,
             -4100 => TaskStatus::ZKAnyNotDrawn,
+            -4101 => TaskStatus::SGXAnyNotDrawn,
             -5000 => TaskStatus::IoFailure("".to_string()),
             -6000 => TaskStatus::AnyhowError("".to_string()),
             -7000 => TaskStatus::GuestProverFailure("".to_string()),
@@ -156,12 +160,32 @@ pub struct BatchProofTaskDescriptor {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+/// A request for Shasta guest input generation.
+pub struct ShastaGuestInputTaskDescriptor {
+    pub proposal_id: u64,
+    pub l1_network: String,
+    pub l2_network: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+/// A request for Shasta proof generation.
+pub struct ShastaProofTaskDescriptor {
+    pub proposal_id: u64,
+    pub l1_network: String,
+    pub l2_network: String,
+    pub proof_system: ProofType,
+    pub prover: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub enum TaskDescriptor {
     GuestInput(GuestInputTaskDescriptor),
     SingleProof(ProofTaskDescriptor),
     Aggregation(AggregationTaskDescriptor),
     BatchProof(BatchProofTaskDescriptor),
     BatchGuestInput(BatchGuestInputTaskDescriptor),
+    ShastaGuestInput(ShastaGuestInputTaskDescriptor),
+    ShastaProof(ShastaProofTaskDescriptor),
 }
 
 pub type TaskReport = (TaskDescriptor, TaskStatus);

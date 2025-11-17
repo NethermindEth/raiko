@@ -1,3 +1,4 @@
+use core::cmp::{max, min};
 use std::io::{Read, Write};
 
 use alloy_rlp::Decodable;
@@ -7,7 +8,8 @@ use reth_primitives::TransactionSigned;
 use tracing::{debug, error, warn};
 
 use crate::consts::{ChainSpec, Network};
-use crate::input::{BlockProposedFork, TaikoGuestBatchInput};
+use crate::input::{BlockProposedFork, GuestBatchInput, GuestInput};
+use crate::manifest::DerivationSourceManifest;
 #[cfg(not(feature = "std"))]
 use crate::no_std::*;
 
@@ -83,7 +85,7 @@ pub fn generate_transactions(
     anchor_tx: &Option<TransactionSigned>,
 ) -> Vec<TransactionSigned> {
     let is_blob_data = block_proposal.blob_used();
-    let blob_slice_param = block_proposal.blob_tx_slice_param();
+    let blob_slice_param = block_proposal.blob_tx_slice_param(tx_list_data_buf);
     // Decode the tx list from the raw data posted onchain
     let unzip_tx_list_buf =
         unzip_tx_list_from_data_buf(chain_spec, is_blob_data, blob_slice_param, tx_list_data_buf);
@@ -138,37 +140,57 @@ fn distribute_txs<T: Clone>(data: &[T], batch_proposal: &BlockProposedFork) -> V
 /// concat blob & decode a whole txlist, then
 /// each block will get a portion of the txlist by its tx_nums
 pub fn generate_transactions_for_batch_blocks(
-    taiko_guest_batch_input: &TaikoGuestBatchInput,
+    guest_batch_input: &GuestBatchInput,
 ) -> Vec<Vec<TransactionSigned>> {
+    let taiko_guest_batch_input = &guest_batch_input.taiko;
     assert!(
-        matches!(
-            taiko_guest_batch_input.batch_proposed,
-            BlockProposedFork::Pacaya(_)
-        ),
-        "only pacaya batch supported"
-    );
-    assert!(
-        taiko_guest_batch_input.tx_data_from_calldata.is_empty()
-            || taiko_guest_batch_input.tx_data_from_blob.is_empty(),
-        "Txlist comes from either calldata or blob, but not both"
+        taiko_guest_batch_input.data_sources.len() > 0,
+        "data_source is empty"
     );
 
     let batch_proposal = &taiko_guest_batch_input.batch_proposed;
+    match batch_proposal {
+        BlockProposedFork::Pacaya(_) => generate_transactions_for_pacaya_blocks(guest_batch_input),
+        BlockProposedFork::Shasta(_) => generate_transactions_for_shasta_blocks(guest_batch_input),
+        _ => {
+            unreachable!(
+                "only pacaya and shasta batch supported, but got {:?}",
+                batch_proposal
+            );
+        }
+    }
+}
+
+/// concat blob & decode a whole txlist, then
+/// each block will get a portion of the txlist by its tx_nums
+pub fn generate_transactions_for_pacaya_blocks(
+    taiko_guest_batch_input: &GuestBatchInput,
+) -> Vec<Vec<TransactionSigned>> {
+    let taiko_guest_batch_input = &taiko_guest_batch_input.taiko;
+    let batch_proposal = &taiko_guest_batch_input.batch_proposed;
+    let data_source = &taiko_guest_batch_input.data_sources[0];
+    assert!(
+        data_source.tx_data_from_calldata.is_empty() || data_source.tx_data_from_blob.is_empty(),
+        "Txlist comes from either calldata or blob, but not both"
+    );
     let use_blob = batch_proposal.blob_used();
     let compressed_tx_list_buf = if use_blob {
-        let blob_data_bufs = taiko_guest_batch_input.tx_data_from_blob.clone();
+        let blob_data_bufs = data_source.tx_data_from_blob.clone();
         let compressed_tx_list_buf = blob_data_bufs
             .iter()
             .map(|blob_data_buf| decode_blob_data(blob_data_buf))
             .collect::<Vec<Vec<u8>>>()
             .concat();
-        let (blob_offset, blob_size) = batch_proposal.blob_tx_slice_param().unwrap_or_else(|| {
-            warn!("blob_tx_slice_param not found, use full buffer to decode tx_list");
-            (0, compressed_tx_list_buf.len())
-        });
+        let (blob_offset, blob_size) = batch_proposal
+            .blob_tx_slice_param(&compressed_tx_list_buf)
+            .unwrap_or_else(|| {
+                warn!("blob_tx_slice_param not found, use full buffer to decode tx_list");
+                (0, compressed_tx_list_buf.len())
+            });
+        tracing::info!("blob_offset: {blob_offset}, blob_size: {blob_size}");
         compressed_tx_list_buf[blob_offset..blob_offset + blob_size].to_vec()
     } else {
-        taiko_guest_batch_input.tx_data_from_calldata.clone()
+        data_source.tx_data_from_calldata.clone()
     };
 
     let tx_list_buf = zlib_decompress_data(&compressed_tx_list_buf).unwrap_or_default();
@@ -176,8 +198,122 @@ pub fn generate_transactions_for_batch_blocks(
     // todo: deal with invalid proposal, to name a few:
     // - txs.len() != tx_num_sizes.sum()
     // - random blob tx bytes
-
     distribute_txs(&txs, batch_proposal)
+}
+
+/// concat blob & decode a whole txlist, then
+/// each block will get a portion of the txlist by its tx_nums
+pub fn generate_transactions_for_shasta_blocks(
+    guest_batch_input: &GuestBatchInput,
+) -> Vec<Vec<TransactionSigned>> {
+    let taiko_guest_batch_input = &guest_batch_input.taiko;
+    let batch_proposal = &taiko_guest_batch_input.batch_proposed;
+    let data_sources = &taiko_guest_batch_input.data_sources;
+    let mut tx_list_bufs = Vec::new();
+
+    // for invalid path, we need to get the last parent block and anchor block number
+    let mut next_block_idx = 0;
+    let mut last_parent_block_header = &guest_batch_input.inputs[next_block_idx].parent_header;
+    // let mut last_anchor_block_number = 0u64; // TODO!!!
+    for (idx, data_source) in data_sources.iter().enumerate() {
+        let use_blob = batch_proposal.blob_used();
+        let compressed_tx_list_buf = if use_blob {
+            let blob_data_bufs = data_source.tx_data_from_blob.clone();
+            let compressed_tx_list_buf = blob_data_bufs
+                .iter()
+                .map(|blob_data_buf| decode_blob_data(blob_data_buf))
+                .collect::<Vec<Vec<u8>>>()
+                .concat();
+            let (blob_offset, blob_size) = batch_proposal
+                .blob_tx_slice_param(&compressed_tx_list_buf)
+                .unwrap_or_else(|| {
+                    warn!("blob_tx_slice_param not found, use full buffer to decode tx_list");
+                    (0, compressed_tx_list_buf.len())
+                });
+            tracing::info!("blob_offset: {blob_offset}, blob_size: {blob_size}");
+            compressed_tx_list_buf[blob_offset..blob_offset + blob_size].to_vec()
+        } else {
+            unreachable!("shasta does not use calldata");
+        };
+
+        // - Decode manifest from blob data
+        // - Extract transactions from manifest blocks
+        // - Distribute transactions to blocks
+        // TODO: support un-happy path in derivation doc
+        assert!(use_blob);
+        if idx == data_sources.len() - 1 {
+            let protocol_manifest_bytes =
+                zlib_decompress_data(&compressed_tx_list_buf).unwrap_or_default();
+            let protocol_manifest =
+                match DerivationSourceManifest::decode(&mut protocol_manifest_bytes.as_ref()) {
+                    Ok(manifest) => {
+                        // last_anchor_block_number = 0u64; // TODO!!!
+                        let manifest_block_number = manifest.blocks.len();
+                        next_block_idx += manifest_block_number;
+                        last_parent_block_header =
+                            &guest_batch_input.inputs[next_block_idx - 1].block.header;
+                        manifest
+                    }
+                    Err(_) => {
+                        let timestamp = taiko_guest_batch_input.l1_header.timestamp;
+                        let coinbase = taiko_guest_batch_input.batch_proposed.proposer();
+                        let anchor_block_number = 0; // todo! get parent block's anchor block number
+                        let gas_limit = last_parent_block_header.gas_limit; // todo! get parent block's gas limit
+                        let transactions = Vec::new();
+                        DerivationSourceManifest::default_block_manifest(
+                            timestamp,
+                            coinbase,
+                            anchor_block_number,
+                            gas_limit,
+                            transactions,
+                        )
+                    }
+                };
+            protocol_manifest
+                .blocks
+                .iter()
+                .for_each(|block| tx_list_bufs.push(block.transactions.clone()));
+        } else {
+            let force_inc_source_bytes =
+                zlib_decompress_data(&compressed_tx_list_buf).unwrap_or_default();
+            let force_inc_source =
+                DerivationSourceManifest::decode(&mut force_inc_source_bytes.as_ref()).unwrap();
+            force_inc_source
+                .blocks
+                .iter()
+                .for_each(|block| tx_list_bufs.push(block.transactions.clone()));
+            // TODO: force inc's invalid manifest handling
+        }
+    }
+    tx_list_bufs
+}
+
+const MAX_BLOCK_GAS_LIMIT_CHANGE_PERMYRIAD: u64 = 10;
+const MAX_BLOCK_GAS_LIMIT: u64 = 100_000_000;
+const MIN_BLOCK_GAS_LIMIT: u64 = 10_000_000;
+
+/// validate gas limit for each block
+pub fn validate_shasta_block_gas_limit(block_guest_inputs: &[GuestInput]) -> bool {
+    for block_guest_input in block_guest_inputs.iter() {
+        let parent_gas_limit = block_guest_input.parent_header.gas_limit;
+        let block_gas_limit: u64 = block_guest_input.block.header.gas_limit;
+        let upper_limit = min(
+            MAX_BLOCK_GAS_LIMIT,
+            parent_gas_limit * (10000 + MAX_BLOCK_GAS_LIMIT_CHANGE_PERMYRIAD) / 10000,
+        );
+        let lower_limit = max(
+            MIN_BLOCK_GAS_LIMIT,
+            parent_gas_limit * (10000 - MAX_BLOCK_GAS_LIMIT_CHANGE_PERMYRIAD) / 10000,
+        );
+        assert!(
+            block_gas_limit >= lower_limit && block_gas_limit <= upper_limit,
+            "block gas limit is out of bounds"
+        );
+        if block_gas_limit < lower_limit || block_gas_limit > upper_limit {
+            return false;
+        }
+    }
+    true
 }
 
 const BLOB_FIELD_ELEMENT_NUM: usize = 4096;
@@ -190,7 +326,7 @@ const BLOB_ENCODING_VERSION: u8 = 0;
 const MAX_BLOB_DATA_SIZE: usize = (4 * 31 + 3) * 1024 - 4;
 
 // decoding https://github.com/ethereum-optimism/optimism/blob/develop/op-service/eth/blob.go
-fn decode_blob_data(blob_buf: &[u8]) -> Vec<u8> {
+pub fn decode_blob_data(blob_buf: &[u8]) -> Vec<u8> {
     // check the version
     if blob_buf[BLOB_VERSION_OFFSET] != BLOB_ENCODING_VERSION {
         return Vec::new();

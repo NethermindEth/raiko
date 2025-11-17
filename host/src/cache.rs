@@ -110,19 +110,20 @@ mod test {
             prover_args: Default::default(),
             l1_inclusion_block_number: 0,
             l2_block_numbers: Default::default(),
-            gpu_number: Some(0)
+            parent_transition_hash: None,
+            checkpoint: None,
+            designated_prover: None,
+            cached_event_data: None,
+            gpu_number: Some(0),
         };
         let raiko = Raiko::new(
             l1_chain_spec.clone(),
             taiko_chain_spec.clone(),
             proof_request.clone(),
         );
-        let provider = RpcBlockDataProvider::new(
-            &taiko_chain_spec.rpc.clone(),
-            proof_request.block_number - 1,
-        )
-        .await
-        .expect("provider init ok");
+        let provider = RpcBlockDataProvider::new(&taiko_chain_spec.rpc.clone())
+            .await
+            .expect("provider init ok");
 
         let input = raiko
             .generate_input(provider.clone())
@@ -136,7 +137,7 @@ mod test {
     }
 
     async fn get_latest_block_num(chain_spec: &ChainSpec) -> u64 {
-        let provider = RpcBlockDataProvider::new(&chain_spec.rpc, 0).await.unwrap();
+        let provider = RpcBlockDataProvider::new(&chain_spec.rpc).await.unwrap();
 
         provider.provider.get_block_number().await.unwrap()
     }

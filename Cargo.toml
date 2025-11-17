@@ -61,6 +61,7 @@ reth-primitives-traits = { git = "https://github.com/paradigmxyz/reth.git", tag 
 
 reth-evm-ethereum = { git = "https://github.com/paradigmxyz/reth.git", tag = "v1.7.0", default-features = false }
 reth-consensus = { git = "https://github.com/paradigmxyz/reth.git", tag = "v1.7.0", default-features = false }
+reth-consensus-common = { git = "https://github.com/paradigmxyz/reth.git", tag = "v1.7.0", default-features = false }
 reth-ethereum-consensus = { git = "https://github.com/paradigmxyz/reth.git", tag = "v1.7.0", default-features = false }
 reth-evm = { git = "https://github.com/paradigmxyz/reth.git", tag = "v1.7.0", default-features = false }
 reth-rpc-types-compat = { git = "https://github.com/paradigmxyz/reth.git", tag = "v1.7.0", default-features = false }
