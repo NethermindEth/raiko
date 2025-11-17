@@ -4,7 +4,7 @@ use crate::{
     methods::risc0_aggregation::RISC0_AGGREGATION_ELF, methods::risc0_batch::RISC0_BATCH_ELF,
     methods::risc0_shasta_aggregation::RISC0_SHASTA_AGGREGATION_ELF,
 };
-use alloy_primitives::{hex::ToHexExt, Address, B256};
+use alloy_primitives::{Address, B256};
 use bonsai::{cancel_proof, maybe_prove};
 use log::{info, warn};
 use once_cell::sync::Lazy;

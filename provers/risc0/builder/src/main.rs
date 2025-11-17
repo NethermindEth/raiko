@@ -15,8 +15,6 @@ fn main() {
     );
     #[cfg(feature = "test")]
     pipeline.tests(&["risc0-batch"], "provers/risc0/driver/src/methods");
-    #[cfg(feature = "bench")]
-    pipeline.bins(&["ecdsa", "sha256"], "provers/risc0/driver/src/methods");
 }
 
 pub struct Risc0Pipeline {

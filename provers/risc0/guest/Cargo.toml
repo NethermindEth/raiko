@@ -23,14 +23,6 @@ path = "src/batch.rs"
 name = "risc0-shasta-aggregation"
 path = "src/shasta_aggregation.rs"
 
-[[bin]]
-name = "sha256"
-path = "src/benchmark/sha256.rs"
-
-[[bin]]
-name = "ecdsa"
-path = "src/benchmark/ecdsa.rs"
-
 [dependencies]
 raiko-lib = { path = "../../../lib", features = ["std", "risc0"] }
 risc0-zkvm = { version = "=3.0.3", default-features = false, features = [
