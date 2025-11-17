@@ -19,6 +19,9 @@ path = "src/aggregation.rs"
 name = "sp1-batch"
 path = "src/batch.rs"
 
+[[bin]]
+name = "sp1-shasta-aggregation"
+path = "src/shasta_aggregation.rs"
 
 # [[test]]
 # name = "main"

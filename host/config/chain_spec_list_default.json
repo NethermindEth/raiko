@@ -47,6 +47,16 @@
                 "SGX": "0x82689c09B5F47592311A13cDB66caF912d78F496",
                 "SP1": "0x839D50BD8c20B660ED26bcF3Ed7366fC0D4000cf",
                 "RISC0": "0x2EDB2d4aec06A25A3b715D5Dcbf63A1d021952DE"
+            },
+            "PACAYA": {
+                "SGX": "0x82689c09B5F47592311A13cDB66caF912d78F496",
+                "SP1": "0x839D50BD8c20B660ED26bcF3Ed7366fC0D4000cf",
+                "RISC0": "0x2EDB2d4aec06A25A3b715D5Dcbf63A1d021952DE"
+            },
+            "SHASTA": {
+                "SGX": "0x82689c09B5F47592311A13cDB66caF912d78F496",
+                "SP1": "0x839D50BD8c20B660ED26bcF3Ed7366fC0D4000cf",
+                "RISC0": "0x2EDB2d4aec06A25A3b715D5Dcbf63A1d021952DE"
             }
         },
         "genesis_time": 0,
