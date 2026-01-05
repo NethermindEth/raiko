@@ -11,7 +11,6 @@ use reth_primitives::{NodePrimitives, SealedBlock};
 use reth_primitives_traits::{Block, BlockHeader, GotExpected, RecoveredBlock, SealedHeader};
 
 use alethia_reth_chainspec::{hardfork::TaikoHardforks, spec::TaikoChainSpec};
-use reth_storage_api::noop::NoopProvider;
 use tracing::debug;
 
 /// Raiko consensus implementation.
@@ -22,7 +21,7 @@ use tracing::debug;
 #[derive(Debug, Clone)]
 pub struct RaikoBeaconConsensus {
     chain_spec: Arc<TaikoChainSpec>,
-    taiko_beacon_consensus: TaikoBeaconConsensus<NoopProvider>,
+    taiko_beacon_consensus: TaikoBeaconConsensus,
     /// The timestamp of the grandparent block, used for base fee calculations in shasta
     /// This value could be None if parent_block_number == 0.
     grandparent_timestamp: Option<u64>,
@@ -33,7 +32,9 @@ impl RaikoBeaconConsensus {
     pub fn new(chain_spec: Arc<TaikoChainSpec>, grandparent_timestamp: Option<u64>) -> Self {
         Self {
             chain_spec: chain_spec.clone(),
-            taiko_beacon_consensus: TaikoBeaconConsensus::new(chain_spec, NoopProvider::default()),
+            taiko_beacon_consensus: TaikoBeaconConsensus::new_with_noop_block_reader(
+                chain_spec.clone(),
+            ),
             grandparent_timestamp,
         }
     }
@@ -49,7 +50,7 @@ where
         block: &RecoveredBlock<N::Block>,
         result: &BlockExecutionResult<N::Receipt>,
     ) -> Result<(), ConsensusError> {
-        <TaikoBeaconConsensus<NoopProvider> as FullConsensus<N>>::validate_block_post_execution(
+        <TaikoBeaconConsensus as FullConsensus<N>>::validate_block_post_execution(
             &self.taiko_beacon_consensus,
             block,
             result,
@@ -66,7 +67,7 @@ impl<B: Block> Consensus<B> for RaikoBeaconConsensus {
         body: &B::Body,
         header: &SealedHeader<B::Header>,
     ) -> Result<(), ConsensusError> {
-        <TaikoBeaconConsensus<NoopProvider> as Consensus<B>>::validate_body_against_header(
+        <TaikoBeaconConsensus as Consensus<B>>::validate_body_against_header(
             &self.taiko_beacon_consensus,
             body,
             header,

@@ -136,49 +136,32 @@ sol! {
         nonReentrant
     {}
 
-    /// Bond type
-    enum BondType {
-        NONE,
-        PROVABILITY,
-        LIVENESS
-    }
-
-    /// Bond instruction
-    struct BondInstruction {
-        uint48 proposalId;
-        BondType bondType;
-        address payer;
-        address receiver;
-    }
-
-
     /// @notice Proposal-level data that applies to the entire batch of blocks.
     struct ProposalParams {
         uint48 proposalId; // Unique identifier of the proposal
         address proposer; // Address of the entity that proposed this batch
         bytes proverAuth; // Encoded ProverAuth for prover designation
-        bytes32 bondInstructionsHash; // Expected hash of bond instructions
-        BondInstruction[] bondInstructions; // Bond credit instructions to process
     }
 
-    /// @notice Block-level data specific to a single block within a proposal.
-    struct BlockParams {
-        uint48 anchorBlockNumber; // L1 block number to anchor (0 to skip)
-        bytes32 anchorBlockHash; // L1 block hash at anchorBlockNumber
-        bytes32 anchorStateRoot; // L1 state root at anchorBlockNumber
+    /// @notice Represents a synced checkpoint
+    struct Checkpoint {
+        /// @notice The block number associated with the checkpoint.
+        uint48 blockNumber;
+        /// @notice The block hash for the end (last) L2 block in this proposal.
+        bytes32 blockHash;
+        /// @notice The state root for the end (last) L2 block in this proposal.
+        bytes32 stateRoot;
     }
 
-    /// @notice Processes a block within a proposal, handling bond instructions and L1 data
-    /// anchoring.
+    /// @notice Processes a block within a proposal and anchors L1 data.
     /// @dev Core function that processes blocks sequentially within a proposal:
-    ///      1. Designates prover on first block (blockIndex == 0)
-    ///      2. Processes bond transfers with cumulative hash verification
-    ///      3. Anchors L1 block data for cross-chain verification
+    ///      1. Designates prover when a new proposal starts (i.e. the first block of a proposal)
+    ///      2. Anchors L1 block data for cross-chain verification
     /// @param _proposalParams Proposal-level parameters that define the overall batch.
-    /// @param _blockParams Block-level parameters specific to this block in the proposal.
+    /// @param _checkpoint Checkpoint data for the L1 block being anchored.
     function anchorV4(
         ProposalParams calldata _proposalParams,
-        BlockParams calldata _blockParams
+        Checkpoint calldata _checkpoint
     )
         external
         onlyValidSender
@@ -187,9 +170,11 @@ sol! {
 
     // event emitted by anchorV4
     event Anchored(
-        bytes32 bondInstructionsHash,
+        uint48 indexed proposalId,
+        bool indexed isNewProposal,
+        bool indexed isLowBondProposal,
         address designatedProver,
-        bool isLowBondProposal,
+        uint48 prevAnchorBlockNumber,
         uint48 anchorBlockNumber,
         bytes32 ancestorsHash
     );

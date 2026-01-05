@@ -9,10 +9,7 @@ use raiko_lib::{
     input::{GuestBatchInput, GuestBatchOutput, GuestInput, GuestOutput, TaikoProverData},
     protocol_instance::ProtocolInstance,
     prover::{IdStore, IdWrite, Proof, ProofKey},
-    utils::{
-        generate_transactions, generate_transactions_for_batch_blocks,
-        validate_shasta_block_gas_limit,
-    },
+    utils::txs::{generate_transactions, generate_transactions_for_batch_blocks},
 };
 use reth_primitives::{Block, Header};
 use serde_json::Value;
@@ -64,6 +61,7 @@ impl Raiko {
                 designated_prover: None,
                 parent_transition_hash: None,
                 checkpoint: None,
+                last_anchor_block_number: None,
             },
             self.request.blob_proof_type.clone(),
         )
@@ -86,6 +84,7 @@ impl Raiko {
                     .checkpoint
                     .clone()
                     .map(ShastaProposalCheckpoint::into),
+                last_anchor_block_number: self.request.last_anchor_block_number,
             },
             blob_proof_type: self.request.blob_proof_type.clone(),
             cached_event_data: self.request.cached_event_data.clone(),
@@ -165,19 +164,13 @@ impl Raiko {
         let blocks = batch_input.inputs.iter().zip(pool_txs_list).try_fold(
             Vec::new(),
             |mut acc, input_and_txs| -> RaikoResult<Vec<Block>> {
-                let (input, pool_txs) = input_and_txs;
+                let (input, txs_with_flag) = input_and_txs;
+                let (pool_txs, _) = txs_with_flag;
                 let output = self.single_output_for_batch(pool_txs, input)?;
                 acc.push(output);
                 Ok(acc)
             },
         )?;
-
-        if batch_input.taiko.batch_proposed.is_shasta() {
-            assert!(
-                validate_shasta_block_gas_limit(&batch_input.inputs),
-                "shasta block gas limit check failed."
-            );
-        }
 
         blocks.windows(2).try_for_each(|window| {
             let parent = &window[0];
@@ -479,7 +472,7 @@ mod tests {
         .await
         .expect("Could not parse L1 shasta proposal tx");
         let all_prove_blocks = proof_request.clone().l2_block_numbers;
-
+        // provider target blocks are all blocks in the batch and the parent block of block[0]
         let provider = RpcBlockDataProvider::new(&taiko_chain_spec.rpc)
             .await
             .expect("Could not create RpcBlockDataProvider");
@@ -494,7 +487,7 @@ mod tests {
             .generate_batch_input(provider)
             .await
             .expect("input generation failed");
-        // let filename = format!("shasta-input-{}.json", proof_request.batch_id);
+        // let filename = format!("input-{}.json", proof_request.batch_id);
         // let writer = std::fs::File::create(&filename).expect("Unable to create file");
         // serde_json::to_writer(writer, &input).expect("Unable to write data");
         trace!("batch guest input: {input:?}");
@@ -502,7 +495,7 @@ mod tests {
             .get_batch_output(&input)
             .expect("output generation failed");
         debug!("batch guest output: {output:?}");
-        // let filename = format!("shasta-output-{}.json", proof_request.batch_id);
+        // let filename = format!("output-{}.json", proof_request.batch_id);
         // let writer = std::fs::File::create(&filename).expect("Unable to create file");
         // serde_json::to_writer(writer, &output).expect("Unable to write data");
         raiko
@@ -524,7 +517,7 @@ mod tests {
         )
         .await
         .expect("Could not parse pacaya L1 batch proposal tx");
-
+        // provider target blocks are all blocks in the batch and the parent block of block[0]
         let provider = RpcBlockDataProvider::new(&taiko_chain_spec.rpc)
             .await
             .expect("Could not create RpcBlockDataProvider");
@@ -577,9 +570,9 @@ mod tests {
         let l1_chain_spec = chain_specs.get_chain_spec(&l1_network).unwrap();
         let proof_request = ProofRequest {
             block_number: 0,
-            batch_id: 863,
-            l1_inclusion_block_number: 7001,
-            l2_block_numbers: vec![864],
+            batch_id: 777,
+            l1_inclusion_block_number: 4919,
+            l2_block_numbers: vec![777],
             network,
             graffiti: B256::ZERO,
             prover: address!("3c44cdddb6a900fa2b585dd299e03d12fa4293bc"),
@@ -593,6 +586,7 @@ mod tests {
             checkpoint: None,
             designated_prover: Some(address!("3c44cdddb6a900fa2b585dd299e03d12fa4293bc")),
             cached_event_data: None,
+            last_anchor_block_number: Some(4909),
             gpu_number: None,
         };
 
@@ -627,6 +621,7 @@ mod tests {
             designated_prover: None,
             cached_event_data: None,
             gpu_number: Some(0),
+            last_anchor_block_number: None,
         };
         batch_prove_pacaya_block(l1_chain_spec, taiko_chain_spec, proof_request).await;
     }
@@ -672,6 +667,7 @@ mod tests {
             checkpoint: None,
             cached_event_data: None,
             gpu_number: Some(0),
+            last_anchor_block_number: None,
         };
         batch_prove_pacaya_block(l1_chain_spec, taiko_chain_spec, proof_request).await;
     }
@@ -710,6 +706,7 @@ mod tests {
             designated_prover: None,
             cached_event_data: None,
             gpu_number: Some(0),
+            last_anchor_block_number: None,
         };
         prove_block(l1_chain_spec, taiko_chain_spec, proof_request).await;
     }
@@ -756,6 +753,7 @@ mod tests {
                 designated_prover: None,
                 cached_event_data: None,
                 gpu_number: Some(0),
+                last_anchor_block_number: None,
             };
             prove_block(l1_chain_spec, taiko_chain_spec, proof_request).await;
         }
@@ -793,6 +791,7 @@ mod tests {
                 designated_prover: None,
                 cached_event_data: None,
                 gpu_number: Some(0),
+                last_anchor_block_number: None,
             };
             batch_prove_pacaya_block(l1_chain_spec, taiko_chain_spec, proof_request).await;
         }
@@ -831,6 +830,7 @@ mod tests {
             designated_prover: None,
             cached_event_data: None,
             gpu_number: Some(0),
+            last_anchor_block_number: None,
         };
         let proof = prove_block(l1_chain_spec, taiko_chain_spec, proof_request).await;
 

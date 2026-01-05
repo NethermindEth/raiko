@@ -5,9 +5,8 @@ use std::sync::LazyLock;
 use crate::builder::consensus::RaikoBeaconConsensus;
 use crate::primitives::keccak::keccak;
 use crate::primitives::mpt::StateAccount;
-use crate::utils::{
-    generate_transactions, generate_transactions_for_batch_blocks, validate_shasta_block_gas_limit,
-};
+use crate::utils::txs::generate_transactions;
+use crate::utils::txs::generate_transactions_for_batch_blocks;
 use crate::{
     consts::MAX_BLOCK_HASH_AGE,
     guest_mem_forget,
@@ -281,7 +280,7 @@ pub fn calculate_batch_blocks_final_header(input: &GuestBatchInput) -> Vec<Block
         );
 
         let mut execute_tx = vec![input.inputs[i].taiko.anchor_tx.clone().unwrap()];
-        execute_tx.extend_from_slice(&pool_txs);
+        execute_tx.extend_from_slice(&pool_txs.0);
         builder
             .execute_transactions(execute_tx.clone(), false)
             .expect("execute");
@@ -292,12 +291,7 @@ pub fn calculate_batch_blocks_final_header(input: &GuestBatchInput) -> Vec<Block
         );
     }
     validate_final_batch_blocks(input, &final_blocks);
-    if input.taiko.batch_proposed.is_shasta() {
-        assert!(
-            validate_shasta_block_gas_limit(&input.inputs),
-            "shasta block gas limit check failed."
-        );
-    }
+
     final_blocks
 }
 
@@ -426,6 +420,24 @@ impl<DB: Database<Error = ProviderError> + DatabaseCommit + OptimisticDatabase +
         let mut block = self.input.block.clone();
         block.body.transactions = pool_txs;
 
+        // let shasta_data_opt = if let Some(extra_data) = &self.input.taiko.extra_data {
+        //     let last_anchor_block_number_opt =
+        //         self.input.taiko.prover_data.last_anchor_block_number;
+        //     assert!(
+        //         last_anchor_block_number_opt.is_some(),
+        //         "last_anchor_block_number is not set in shasta request"
+        //     );
+        //     Some(ShastaData {
+        //         proposal_id: self.input.taiko.block_proposed.proposal_id(),
+        //         is_low_bond_proposal: extra_data.0,
+        //         designated_prover: extra_data.1,
+        //         last_anchor_block_number: last_anchor_block_number_opt.unwrap(),
+        //         is_force_inclusion: extra_data.2,
+        //     })
+        // } else {
+        //     None
+        // };
+
         let taiko_evm_config = TaikoEvmConfig::new_with_evm_factory(
             chain_spec.clone(),
             TaikoEvmFactory::new(Some(Address::ZERO)), // TODO: make it configurable
@@ -449,6 +461,7 @@ impl<DB: Database<Error = ProviderError> + DatabaseCommit + OptimisticDatabase +
                     receipts,
                     requests,
                     gas_used: _,
+                    blob_gas_used: _,
                 },
         } = executor.execute_with_state_closure(&recovered_block, |state| {
             tmp_db = Some(state.database.clone());

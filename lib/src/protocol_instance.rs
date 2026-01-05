@@ -1,7 +1,8 @@
 use core::fmt::Display;
+use std::collections::HashSet;
 
 use alloy_consensus::Transaction;
-use alloy_primitives::{b256, Address, TxHash, B256};
+use alloy_primitives::{b256, Address, TxHash, Uint, B256};
 use alloy_sol_types::SolValue;
 use anyhow::{ensure, Ok, Result};
 use pretty_assertions::Comparison;
@@ -10,29 +11,27 @@ use reth_primitives::{Block, Header};
 #[cfg(not(feature = "std"))]
 use crate::no_std::*;
 use crate::{
-    anchor::{decode_anchor_pacaya, ANCHOR_GAS_LIMIT},
+    anchor::{decode_anchor_pacaya, decode_anchor_shasta, ANCHOR_GAS_LIMIT},
     input::{
         ontake::{BlockMetadataV2, BlockProposedV2},
         pacaya::{BatchInfo, BatchMetadata, BlockParams, Transition as PacayaTransition},
-        shasta::{
-            Checkpoint, Proposal as ShastaProposal, Transition as ShastaTransition,
-            TransitionMetadata,
-        },
+        shasta::{Checkpoint, Commitment, Proposal as ShastaProposal},
         BlobProofType, BlockMetadata, BlockProposed, BlockProposedFork, GuestBatchInput,
-        GuestInput, Transition,
+        GuestInput, ShastaRawAggregationGuestInput, Transition,
     },
     libhash::{
-        hash_core_state, hash_derivation, hash_proposal, hash_public_input,
-        hash_transition_with_metadata, hash_transitions_hash_array_with_metadata,
+        hash_checkpoint, hash_commitment, hash_proposal, hash_public_input,
+        hash_shasta_subproof_input, hash_two_values,
     },
     primitives::{
         eip4844::{self, commitment_to_version_hash},
         keccak::keccak,
     },
     proof_type::ProofType,
+    prover::{ProofCarryData, ShastaTransitionInput, TransitionInputData},
     CycleTracker,
 };
-use tracing::{debug, info};
+use tracing::{debug, error, info};
 
 // The empty root of [`Vec<EthDeposit>`]
 const EMPTY_ETH_DEPOSIT_ROOT: B256 =
@@ -135,7 +134,9 @@ impl BlockMetaDataFork {
             BlockProposedFork::Pacaya(_batch_proposed) => {
                 unimplemented!("single block signature is not supported for pacaya fork")
             }
-            BlockProposedFork::Shasta(event_data) => Self::Shasta(event_data.proposal.clone()),
+            BlockProposedFork::Shasta(_) => {
+                unimplemented!("single block signature is not supported for shasta fork")
+            }
         }
     }
 
@@ -252,6 +253,8 @@ impl BlockMetaDataFork {
                 })
             }
             BlockProposedFork::Shasta(event_data) => {
+                // TODO(shasta): add a full Shasta block metadata reconstruction & comparison,
+                // similar to Pacaya's infoHash / txsHash binding.
                 BlockMetaDataFork::Shasta(event_data.proposal.clone())
             }
             _ => {
@@ -292,7 +295,7 @@ pub enum TransitionFork {
     Hekla(Transition),
     OnTake(Transition),
     Pacaya(PacayaTransition),
-    Shasta(ShastaTransition),
+    Shasta(TransitionInputData),
 }
 
 #[derive(Debug, Clone)]
@@ -309,15 +312,18 @@ pub struct ProtocolInstance {
 fn verify_blob(
     blob_proof_type: BlobProofType,
     blob_data: &[u8],
-    versioned_hash: B256,
+    expected_versioned_hash: &B256,
     commitment: &[u8; 48],
     blob_proof: Option<Vec<u8>>,
 ) -> Result<()> {
     info!("blob proof type: {:?}", &blob_proof_type);
     match blob_proof_type {
         crate::input::BlobProofType::ProofOfEquivalence => {
+            // Even in PoE mode, the blob must be anchored to the on-chain versioned hash.
+            ensure!(*expected_versioned_hash == commitment_to_version_hash(commitment));
+
             let ct = CycleTracker::start("proof_of_equivalence");
-            let (x, y) = eip4844::proof_of_equivalence(blob_data, &versioned_hash)?;
+            let (x, y) = eip4844::proof_of_equivalence(blob_data, &expected_versioned_hash)?;
             ct.end();
             let verified = eip4844::verify_kzg_proof_impl(
                 *commitment,
@@ -332,6 +338,10 @@ fn verify_blob(
         BlobProofType::KzgVersionedHash => {
             let ct = CycleTracker::start("proof_of_commitment");
             ensure!(commitment == &eip4844::calc_kzg_proof_commitment(blob_data)?);
+            ensure!(
+                *expected_versioned_hash
+                    == commitment_to_version_hash(&commitment.clone().try_into().unwrap())
+            );
             ct.end();
         }
     };
@@ -345,52 +355,158 @@ fn verify_batch_mode_blob_usage(
     batch_input: &GuestBatchInput,
     proof_type: ProofType,
 ) -> Result<()> {
-    for data_source in &batch_input.taiko.data_sources {
-        let blob_proof_type = get_blob_proof_type(proof_type, data_source.blob_proof_type.clone());
-        match blob_proof_type {
-            crate::input::BlobProofType::KzgVersionedHash => assert_eq!(
-                data_source.tx_data_from_blob.len(),
-                data_source.blob_commitments.as_ref().map_or(0, |c| c.len()),
-                "Each blob should have its own hash commit"
-            ),
-            crate::input::BlobProofType::ProofOfEquivalence => assert_eq!(
-                data_source.tx_data_from_blob.len(),
-                data_source.blob_proofs.as_ref().map_or(0, |p| p.len()),
-                "Each blob should have its own proof"
-            ),
-        }
+    // Expected on-chain blob hashes for each data source (Shasta: one per DerivationSource,
+    // Pacaya: a single list for the batch).
+    let expected_blob_hashes_per_source: Vec<Vec<B256>> =
+        batch_input.taiko.batch_proposed.all_source_blob_hashes();
+    ensure!(
+        expected_blob_hashes_per_source.len() == batch_input.taiko.data_sources.len(),
+        "data_sources length mismatch: expected {}, got {}",
+        expected_blob_hashes_per_source.len(),
+        batch_input.taiko.data_sources.len()
+    );
 
-        for blob_verify_param in data_source
-            .tx_data_from_blob
-            .iter()
-            .zip(
-                data_source
+    for (source_idx, data_source) in batch_input.taiko.data_sources.iter().enumerate() {
+        let blob_proof_type = get_blob_proof_type(proof_type, data_source.blob_proof_type.clone());
+        let source_blob_hashes =
+            expected_blob_hashes_per_source
+                .get(source_idx)
+                .ok_or_else(|| {
+                    anyhow::anyhow!("missing expected blob hashes for source {source_idx}")
+                })?;
+        ensure!(
+            source_blob_hashes.len() == data_source.tx_data_from_blob.len(),
+            "source blob hashes length mismatch at source {}: expected {}, got {}",
+            source_idx,
+            source_blob_hashes.len(),
+            data_source.tx_data_from_blob.len()
+        );
+        assert_eq!(
+            data_source.tx_data_from_blob.len(),
+            data_source.blob_commitments.as_ref().map_or(0, |c| c.len()),
+            "Each blob should have its own hash commit"
+        );
+        match blob_proof_type {
+            crate::input::BlobProofType::KzgVersionedHash => {
+                let commitments = data_source
                     .blob_commitments
-                    .clone()
-                    .unwrap_or_default()
-                    .iter(),
-            )
-            .zip(data_source.blob_proofs.clone().unwrap_or_default().iter())
-        {
-            let blob_data = blob_verify_param.0 .0;
-            let commitment = blob_verify_param.0 .1;
-            let versioned_hash =
-                commitment_to_version_hash(&commitment.clone().try_into().unwrap());
-            debug!(
-                "verify_batch_mode_blob_usage commitment: {:?}, hash: {:?}",
-                hex::encode(commitment),
-                versioned_hash
-            );
-            verify_blob(
-                blob_proof_type.clone(),
-                blob_data,
-                versioned_hash,
-                &commitment.clone().try_into().unwrap(),
-                Some(blob_verify_param.1.clone()),
-            )?;
+                    .as_ref()
+                    .ok_or_else(|| anyhow::anyhow!("missing blob commitments"))?;
+                for blob_verify_param in data_source
+                    .tx_data_from_blob
+                    .iter()
+                    .zip(commitments.iter())
+                    .zip(source_blob_hashes.iter())
+                {
+                    let blob_data = blob_verify_param.0 .0;
+                    let commitment = blob_verify_param.0 .1;
+                    let expected_blob_hash = blob_verify_param.1;
+                    verify_blob(
+                        blob_proof_type.clone(),
+                        blob_data,
+                        expected_blob_hash,
+                        &commitment
+                            .as_slice()
+                            .try_into()
+                            .map_err(|_| anyhow::anyhow!("invalid blob commitment length"))?,
+                        None,
+                    )?;
+                }
+            }
+            crate::input::BlobProofType::ProofOfEquivalence => {
+                assert_eq!(
+                    data_source.tx_data_from_blob.len(),
+                    data_source.blob_proofs.as_ref().map_or(0, |p| p.len()),
+                    "Each blob should have its own proof in PoE mode"
+                );
+                let proofs = data_source
+                    .blob_proofs
+                    .as_ref()
+                    .ok_or_else(|| anyhow::anyhow!("missing blob proofs"))?;
+                let commitments = data_source
+                    .blob_commitments
+                    .as_ref()
+                    .ok_or_else(|| anyhow::anyhow!("missing blob commitments"))?;
+                for blob_verify_param in data_source
+                    .tx_data_from_blob
+                    .iter()
+                    .zip(commitments.iter())
+                    .zip(proofs.iter())
+                    .zip(source_blob_hashes.iter())
+                {
+                    let blob_data = blob_verify_param.0 .0 .0;
+                    let commitment = blob_verify_param.0 .0 .1;
+                    let proof = blob_verify_param.0 .1;
+                    let expected_blob_hash = blob_verify_param.1;
+                    verify_blob(
+                        blob_proof_type.clone(),
+                        blob_data,
+                        expected_blob_hash,
+                        &commitment
+                            .as_slice()
+                            .try_into()
+                            .map_err(|_| anyhow::anyhow!("invalid blob commitment length"))?,
+                        Some(proof.clone()),
+                    )?;
+                }
+            }
         }
     }
     Ok(())
+}
+
+fn verify_shasha_anchor_linkage(
+    inputs: &[GuestInput],
+    l1_ancestor_headers: &[Header],
+    expected_parent_hash: &B256,
+) -> bool {
+    let mut anchor_param_set = HashSet::new();
+    for input in inputs {
+        let anchor_tx = input.taiko.anchor_tx.clone().unwrap();
+        let anchor_data = decode_anchor_shasta(anchor_tx.input()).unwrap();
+        anchor_param_set.insert((
+            anchor_data._checkpoint.blockNumber,
+            anchor_data._checkpoint.blockHash,
+            anchor_data._checkpoint.stateRoot,
+        ));
+    }
+
+    if l1_ancestor_headers.is_empty() {
+        error!("l1 ancestor headers is empty");
+        return false;
+    }
+
+    let mut last_parent_hash = l1_ancestor_headers[0].hash_slow();
+    let mut l1_ancestor_hash_set = HashSet::from([(
+        l1_ancestor_headers[0].number,
+        last_parent_hash,
+        l1_ancestor_headers[0].state_root,
+    )]);
+    for curr in l1_ancestor_headers.iter().skip(1) {
+        if curr.parent_hash != last_parent_hash {
+            error!(
+                "l1 ancestor header parent hash mismatch, expected: {:?}, got: {:?}",
+                last_parent_hash, curr.parent_hash
+            );
+            return false;
+        }
+        let curr_hash = curr.hash_slow();
+        l1_ancestor_hash_set.insert((curr.number, curr_hash, curr.state_root));
+        last_parent_hash = curr_hash;
+    }
+
+    // every elem in anchor_param_set should be in l1_ancestor_hash_set
+    for anchor_param in anchor_param_set {
+        if !l1_ancestor_hash_set.contains(&(anchor_param.0.to(), anchor_param.1, anchor_param.2)) {
+            error!(
+                "anchor param not found in l1 ancestor hash set: {:?}",
+                anchor_param
+            );
+            return false;
+        }
+    }
+
+    last_parent_hash == *expected_parent_hash
 }
 
 impl ProtocolInstance {
@@ -412,7 +528,7 @@ impl ProtocolInstance {
             verify_blob(
                 get_blob_proof_type(proof_type, input.taiko.blob_proof_type.clone()),
                 &input.taiko.tx_data,
-                versioned_hash,
+                &versioned_hash,
                 &commitment.clone().try_into().unwrap(),
                 input.taiko.blob_proof.clone(),
             )?;
@@ -494,64 +610,57 @@ impl ProtocolInstance {
                 stateRoot: last_block.header.state_root,
             }),
             BlockProposedFork::Shasta(event_data) => {
-                let core_state_hash = hash_core_state(&event_data.core_state);
-                assert_eq!(
-                    event_data.proposal.coreStateHash, core_state_hash,
-                    "core state hash mismatch"
+                assert!(
+                    verify_shasha_anchor_linkage(
+                        &batch_input.inputs,
+                        batch_input.taiko.l1_ancestor_headers.as_slice(),
+                        &event_data.proposal.originBlockHash
+                    ),
+                    "L1 anchor linkage verification failed"
                 );
-                let derivation_hash = hash_derivation(&event_data.derivation);
                 assert_eq!(
-                    event_data.proposal.derivationHash, derivation_hash,
-                    "derivation hash mismatch"
+                    &event_data.proposal.originBlockNumber, &batch_input.taiko.l1_header.number,
+                    "L1 origin block number mismatch"
+                );
+                assert_eq!(
+                    event_data.proposal.originBlockHash,
+                    batch_input.taiko.l1_header.hash_slow(),
+                    "L1 origin block hash mismatch"
                 );
                 // check local re-constructed proposal matches the event proposal
                 let last_block_number = last_block.number;
                 let last_block_hash = last_block.header.hash_slow();
                 let last_block_state_root = last_block.header.state_root;
+                let current_transition_checkpoint = Checkpoint {
+                    blockNumber: Uint::from(last_block_number),
+                    blockHash: last_block_hash,
+                    stateRoot: last_block_state_root,
+                };
                 // let ref_checkpoint = batch_input.taiko.prover_data.checkpoint.as_ref().unwrap();
                 if let Some(ref_checkpoint) = &batch_input.taiko.prover_data.checkpoint {
                     assert_eq!(
-                        last_block_number,
-                        TryInto::<u64>::try_into(ref_checkpoint.blockNumber).unwrap(),
+                        current_transition_checkpoint, *ref_checkpoint,
                         "checkpoint last block number mismatch, expected: {:?}, got: {:?}",
-                        last_block_number,
-                        ref_checkpoint.blockNumber,
-                    );
-                    assert_eq!(
-                        last_block_hash, ref_checkpoint.blockHash,
-                        "last block hash mismatch, expected: {:?}, got: {:?}",
-                        last_block_hash, ref_checkpoint.blockHash,
-                    );
-                    assert_eq!(
-                        last_block_state_root, ref_checkpoint.stateRoot,
-                        "last block state root mismatch, expected: {:?}, got: {:?}",
-                        last_block_state_root, ref_checkpoint.stateRoot,
+                        current_transition_checkpoint, ref_checkpoint
                     );
                 }
-
-                TransitionFork::Shasta(ShastaTransition {
-                    // Use the reconstructed proposal (which has been validated to match the event proposal)
-                    proposalHash: hash_proposal(&ShastaProposal {
-                        id: event_data.proposal.id,
-                        timestamp: event_data.proposal.timestamp,
-                        endOfSubmissionWindowTimestamp: event_data
-                            .proposal
-                            .endOfSubmissionWindowTimestamp,
+                let parent_checkpoint_hash = hash_checkpoint(&Checkpoint {
+                    blockNumber: Uint::from(batch_input.inputs[0].parent_header.number),
+                    blockHash: batch_input.inputs[0].parent_header.hash_slow(),
+                    stateRoot: batch_input.inputs[0].parent_header.state_root,
+                });
+                TransitionFork::Shasta(TransitionInputData {
+                    proposal_id: event_data.proposal.id.to(),
+                    proposal_hash: hash_proposal(&event_data.proposal),
+                    parent_proposal_hash: event_data.proposal.parentProposalHash,
+                    parent_checkpoint_hash: parent_checkpoint_hash,
+                    actual_prover: batch_input.taiko.prover_data.actual_prover,
+                    transition: ShastaTransitionInput {
                         proposer: event_data.proposal.proposer,
-                        coreStateHash: core_state_hash,
-                        derivationHash: derivation_hash,
-                    }),
-                    parentTransitionHash: batch_input
-                        .taiko
-                        .prover_data
-                        .parent_transition_hash
-                        .clone()
-                        .unwrap(),
-                    checkpoint: Checkpoint {
-                        blockNumber: last_block_number.try_into().unwrap(),
-                        blockHash: last_block_hash,
-                        stateRoot: last_block_state_root,
+                        designatedProver: batch_input.taiko.prover_data.designated_prover.unwrap(),
+                        timestamp: event_data.proposal.timestamp.to(),
                     },
+                    checkpoint: current_transition_checkpoint,
                 })
             }
             _ => return Err(anyhow::Error::msg("unknown transition fork")),
@@ -561,14 +670,14 @@ impl ProtocolInstance {
             transition,
             block_metadata: BlockMetaDataFork::from_batch_inputs(batch_input, blocks),
             sgx_instance: Address::default(),
-            prover: input.taiko.prover_data.actual_prover,
-            designated_prover: input.taiko.prover_data.designated_prover,
-            chain_id: input.chain_spec.chain_id,
+            prover: batch_input.taiko.prover_data.actual_prover,
+            designated_prover: batch_input.taiko.prover_data.designated_prover,
+            chain_id: batch_input.taiko.chain_spec.chain_id,
             verifier_address,
         };
 
         // Sanity check
-        if input.chain_spec.is_taiko() {
+        if batch_input.taiko.chain_spec.is_taiko() {
             let (same, pretty_display) = pi
                 .block_metadata
                 .match_block_proposal(&batch_input.taiko.batch_proposed);
@@ -648,15 +757,17 @@ impl ProtocolInstance {
                     .collect::<Vec<u8>>();
                 keccak(data).into()
             }
-            TransitionFork::Shasta(shasta_trans) => {
-                info!("transition to be signed into public: {:?}", shasta_trans);
-                return hash_transition_with_metadata(
-                    shasta_trans,
-                    &TransitionMetadata {
-                        designatedProver: self.designated_prover.unwrap(),
-                        actualProver: self.prover,
-                    },
+            TransitionFork::Shasta(shasta_trans_input) => {
+                info!(
+                    "transition to be signed into public: {:?}.",
+                    shasta_trans_input
                 );
+                // Domain separation: bind chain_id + verifier into the signed message.
+                hash_shasta_subproof_input(&ProofCarryData {
+                    chain_id: self.chain_id,
+                    verifier: self.verifier_address,
+                    transition_input: shasta_trans_input.clone(),
+                })
             }
         }
     }
@@ -713,24 +824,117 @@ pub fn aggregation_output(program: B256, public_inputs: Vec<B256>) -> Vec<u8> {
     aggregation_output_combine([vec![program], public_inputs].concat())
 }
 
+pub fn validate_shasta_aggregate_proof_carry_data(
+    aggregation_input: &ShastaRawAggregationGuestInput,
+) -> bool {
+    // The carry vector is meant to be a per-proof sidecar; treat mismatched sizes as invalid.
+    if aggregation_input.proofs.len() != aggregation_input.proof_carry_data_vec.len() {
+        return false;
+    }
+    validate_shasta_proof_carry_data_vec(&aggregation_input.proof_carry_data_vec)
+}
+
+pub fn validate_shasta_proof_carry_data_vec(proof_carry_data_vec: &[ProofCarryData]) -> bool {
+    if proof_carry_data_vec.is_empty() {
+        return false;
+    }
+
+    let expected_actual_prover = proof_carry_data_vec[0].transition_input.actual_prover;
+    for item in proof_carry_data_vec.iter() {
+        // Commitment uses a single `actualProver` field; make the range unambiguous.
+        if item.transition_input.actual_prover != expected_actual_prover {
+            return false;
+        }
+    }
+
+    for w in proof_carry_data_vec.windows(2) {
+        let prev = &w[0];
+        let next = &w[1];
+        // Ensure proposal ids are sequential
+        if prev.transition_input.proposal_id + 1 != next.transition_input.proposal_id {
+            return false;
+        }
+
+        // Ensure proposal hashes chain correctly
+        if prev.transition_input.proposal_hash != next.transition_input.parent_proposal_hash {
+            return false;
+        }
+
+        if prev.chain_id != next.chain_id {
+            return false;
+        }
+
+        if prev.verifier != next.verifier {
+            return false;
+        }
+
+        // Continuity: prev checkpoint must match next parent checkpoint hash.
+        if hash_checkpoint(&prev.transition_input.checkpoint)
+            != next.transition_input.parent_checkpoint_hash
+        {
+            return false;
+        }
+    }
+
+    true
+}
+
+pub fn build_shasta_commitment_from_proof_carry_data_vec(
+    proof_carry_data_vec: &[ProofCarryData],
+) -> Option<Commitment> {
+    if !validate_shasta_proof_carry_data_vec(proof_carry_data_vec) {
+        return None;
+    }
+    let last = proof_carry_data_vec.last()?;
+
+    let transitions: Vec<crate::input::shasta::Transition> = proof_carry_data_vec
+        .iter()
+        .map(|item| crate::input::shasta::Transition {
+            proposer: item.transition_input.transition.proposer,
+            designatedProver: item.transition_input.transition.designatedProver,
+            timestamp: Uint::from(item.transition_input.transition.timestamp),
+            checkpointHash: hash_checkpoint(&item.transition_input.checkpoint),
+        })
+        .collect();
+
+    Some(Commitment {
+        firstProposalId: Uint::from(proof_carry_data_vec[0].transition_input.proposal_id),
+        // This field is a checkpoint hash in the latest Shasta contract; we store it as bytes32.
+        firstProposalParentBlockHash: proof_carry_data_vec[0]
+            .transition_input
+            .parent_checkpoint_hash,
+        lastProposalHash: last.transition_input.proposal_hash,
+        actualProver: proof_carry_data_vec[0].transition_input.actual_prover,
+        endBlockNumber: last.transition_input.checkpoint.blockNumber,
+        endStateRoot: last.transition_input.checkpoint.stateRoot,
+        transitions,
+    })
+}
+
+pub fn shasta_zk_aggregation_public_input_from_proof_carry_data_vec(
+    sub_image_id: B256,
+    proof_carry_data_vec: &[ProofCarryData],
+    prover_address: Address,
+) -> Option<B256> {
+    let commitment = build_shasta_commitment_from_proof_carry_data_vec(proof_carry_data_vec)?;
+    let first = proof_carry_data_vec.first()?;
+    let aggregation_hash =
+        shasta_aggregation_output(&commitment, first.chain_id, first.verifier, prover_address);
+    Some(shasta_zk_aggregation_output(sub_image_id, aggregation_hash))
+}
+
 pub fn shasta_aggregation_output(
-    transaction_hashes: &Vec<B256>,
+    prove_input: &Commitment,
     chain_id: u64,
     verifier_address: Address,
     sgx_instance: Address,
 ) -> B256 {
-    let aggregated_proving_hash = hash_transitions_hash_array_with_metadata(&transaction_hashes);
-    let public_input_hash = hash_public_input(
-        aggregated_proving_hash,
-        chain_id,
-        verifier_address,
-        sgx_instance,
-    );
+    let prove_input_hash = hash_commitment(&prove_input);
+    hash_public_input(prove_input_hash, chain_id, verifier_address, sgx_instance)
+}
 
-    println!(
-        "shasta transactions_hash: {aggregated_proving_hash:?}, public_input_hash: {public_input_hash:?}."
-    );
-    public_input_hash
+pub fn shasta_zk_aggregation_output(sub_image_id: B256, sub_input_hash: B256) -> B256 {
+    hash_two_values(sub_image_id, sub_input_hash)
 }
 
 #[cfg(test)]
@@ -740,7 +944,7 @@ mod tests {
 
     use super::*;
     use crate::{
-        input::{proveBlockCall, TierProof},
+        input::{proveBlockCall, shasta::Checkpoint, TierProof},
         primitives::keccak,
     };
 
@@ -846,25 +1050,159 @@ mod tests {
 
     #[test]
     fn test_shasta_aggregation_output() {
-        // Test data: sample transaction hashes for Shasta aggregation
-        let transaction_hashes = vec![b256!(
-            "2c4576815d02b522c4f5a3c143e1a3cdf10486bb283c8247fc555ea33bb93798"
-        )];
-
         let chain_id = 167001u64;
         let verifier_address = address!("00f9f60C79e38c08b785eE4F1a849900693C6630");
         let sgx_instance = address!("dc95623058E847fA38e56a0Fa466Bf52C48eFA32");
-
-        let result = shasta_aggregation_output(
-            &transaction_hashes,
-            chain_id,
-            verifier_address,
-            sgx_instance,
-        );
+        let prove_input = Commitment {
+            firstProposalParentBlockHash: b256!(
+                "0000000000000000000000000000000000000000000000000000000000000000"
+            ),
+            lastProposalHash: b256!(
+                "0000000000000000000000000000000000000000000000000000000000000000"
+            ),
+            endBlockNumber: Uint::from(1),
+            endStateRoot: b256!("0000000000000000000000000000000000000000000000000000000000000000"),
+            firstProposalId: Uint::from(12345),
+            actualProver: address!("1111111111111111111111111111111111111111"),
+            transitions: vec![],
+        };
+        let result =
+            shasta_aggregation_output(&prove_input, chain_id, verifier_address, sgx_instance);
 
         assert_eq!(
             result,
-            b256!("0x722a1f359a8a14c18c5139304417cebb48c7a3552627d52f1a7fae843d348408")
+            b256!("5ffd635c42c7e6f7a5aa6c83be7db37dd1c24f1b474606ef0901b9b32beffaae")
         )
+    }
+
+    #[test]
+    fn test_validate_shasta_aggregate_proof_carry_data_basic() {
+        use crate::{
+            input::{RawProof, ShastaRawAggregationGuestInput},
+            libhash::hash_checkpoint,
+            prover::{ProofCarryData, TransitionInputData},
+        };
+
+        let chain_id = 167001u64;
+        let verifier = address!("00f9f60C79e38c08b785eE4F1a849900693C6630");
+
+        let p0_hash = b256!("1111111111111111111111111111111111111111111111111111111111111111");
+        let p1_hash = b256!("2222222222222222222222222222222222222222222222222222222222222222");
+
+        let parent_cp = b256!("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
+        let checkpoint0 = Checkpoint {
+            blockNumber: Uint::from(1),
+            blockHash: b256!("0000000000000000000000000000000000000000000000000000000000000001"),
+            stateRoot: b256!("0000000000000000000000000000000000000000000000000000000000000002"),
+        };
+        let checkpoint1 = Checkpoint {
+            blockNumber: Uint::from(2),
+            blockHash: b256!("0000000000000000000000000000000000000000000000000000000000000003"),
+            stateRoot: b256!("0000000000000000000000000000000000000000000000000000000000000004"),
+        };
+        let cp0 = hash_checkpoint(&checkpoint0);
+
+        let mk = |proposal_id: u64,
+                  proposal_hash: B256,
+                  parent_proposal_hash: B256,
+                  parent_checkpoint_hash: B256,
+                  checkpoint: Checkpoint| {
+            ProofCarryData {
+                chain_id,
+                verifier,
+                transition_input: TransitionInputData {
+                    proposal_id,
+                    proposal_hash,
+                    parent_proposal_hash,
+                    parent_checkpoint_hash,
+                    // Not relevant for these checks
+                    actual_prover: address!("1111111111111111111111111111111111111111"),
+                    transition: ShastaTransitionInput {
+                        proposer: address!("2222222222222222222222222222222222222222"),
+                        designatedProver: address!("3333333333333333333333333333333333333333"),
+                        timestamp: 123,
+                    },
+                    checkpoint,
+                },
+            }
+        };
+
+        // Happy path: ids increment, proposal hash chains, checkpoint continuity holds.
+        let carry_ok = vec![
+            mk(
+                1,
+                p0_hash,
+                b256!("0000000000000000000000000000000000000000000000000000000000000000"),
+                parent_cp,
+                checkpoint0.clone(),
+            ),
+            mk(2, p1_hash, p0_hash, cp0, checkpoint1.clone()),
+        ];
+        let proofs_ok = vec![
+            RawProof {
+                proof: vec![0u8],
+                input: b256!("0000000000000000000000000000000000000000000000000000000000000000"),
+            },
+            RawProof {
+                proof: vec![1u8],
+                input: b256!("0000000000000000000000000000000000000000000000000000000000000000"),
+            },
+        ];
+        assert!(validate_shasta_aggregate_proof_carry_data(
+            &ShastaRawAggregationGuestInput {
+                proofs: proofs_ok.clone(),
+                proof_carry_data_vec: carry_ok,
+            }
+        ));
+
+        // Mismatched lengths => invalid
+        assert!(!validate_shasta_aggregate_proof_carry_data(
+            &ShastaRawAggregationGuestInput {
+                proofs: proofs_ok.clone(),
+                proof_carry_data_vec: vec![],
+            }
+        ));
+
+        // Non-sequential ids => invalid
+        let carry_bad_ids = vec![
+            mk(
+                1,
+                p0_hash,
+                b256!("0000000000000000000000000000000000000000000000000000000000000000"),
+                parent_cp,
+                checkpoint0.clone(),
+            ),
+            mk(3, p1_hash, p0_hash, cp0, checkpoint1.clone()),
+        ];
+        assert!(!validate_shasta_aggregate_proof_carry_data(
+            &ShastaRawAggregationGuestInput {
+                proofs: proofs_ok.clone(),
+                proof_carry_data_vec: carry_bad_ids,
+            }
+        ));
+
+        // Broken proposal-hash chaining => invalid
+        let carry_bad_hash_chain = vec![
+            mk(
+                1,
+                p0_hash,
+                b256!("0000000000000000000000000000000000000000000000000000000000000000"),
+                parent_cp,
+                checkpoint0,
+            ),
+            mk(
+                2,
+                p1_hash,
+                b256!("deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef"),
+                cp0,
+                checkpoint1,
+            ),
+        ];
+        assert!(!validate_shasta_aggregate_proof_carry_data(
+            &ShastaRawAggregationGuestInput {
+                proofs: proofs_ok,
+                proof_carry_data_vec: carry_bad_hash_chain,
+            }
+        ));
     }
 }

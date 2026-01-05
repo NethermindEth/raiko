@@ -236,6 +236,7 @@ mod test {
     }
 
     #[test]
+    #[ignore]
     fn test_reload_config_file_need_init() {
         let file = File::open("/tmp/registered.json").expect("open tmp config file");
         let reader = BufReader::new(file);

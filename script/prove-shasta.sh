@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 
-if [ "$#" -ne 4 ]; then
-    echo "Usage: prove-shasta.sh <chain> <proof> <batch_info>"
+if [ "$#" -ne 5 ]; then
+    echo "Usage: prove-shasta.sh <chain> <proof> <batch_info> <l2 block> <last l2 anchor>"
     echo "  chain: taiko_mainnet, taiko_a7, taiko_dev"
     echo "  proof: native, risc0[-bonsai], sp1, sgx, sgxgeth"
     echo "  batch_info: \"[(batch_id, batch_proposal_height)]\""
@@ -19,7 +19,6 @@ proof="$2"
 # batch_id="$3"
 # # Use the fourth parameter(s) as the batch number as a range
 # batch_proposal_height="$4"
-# aggregate="${5:-"false"}"
 
 # $(dirname "$0")/prove.sh batch "$chain" "$proof" "$batch_id":"$batch_proposal_height" "$aggregate"
 
@@ -29,7 +28,7 @@ l2_block_numbers="$4"
 
 batch_id=""
 height=""
-
+last_anchor_block_number="$5"
 designated_prover="0x3c44cdddb6a900fa2b585dd299e03d12fa4293bc"
 parent_transition_hash="0x66aa40046aa64a8e0a7ecdbbc70fb2c63ebdcb2351e7d0b626ed3cb4f55fb388"
 checkpoint=null
@@ -61,7 +60,8 @@ parse_batch_pair() {
             \"parent_transition_hash\": \"$parent_transition_hash\", \
             \"checkpoint\": $checkpoint, \
             \"l1_inclusion_block_number\": $height, \
-            \"l2_block_numbers\": [$l2_block_numbers] \
+            \"l2_block_numbers\": [$l2_block_numbers], \
+            \"last_anchor_block_number\": $last_anchor_block_number \
         }"
         first=0
     done <<<"$pair"
@@ -88,12 +88,6 @@ elif [ "$chain" == "taiko_a7" ]; then
     l1_network="holesky"
 elif [ "$chain" == "taiko_dev" ]; then
     l1_network="taiko_dev_l1"
-elif [ "$chain" == "surge_testnet" ]; then
-    l1_network="hoodi"
-elif [ "$chain" == "surge_staging" ]; then
-    l1_network="hoodi"
-elif [ "$chain" == "surge_dev" ]; then
-    l1_network="surge_dev_l1"
 else
     echo "Using customized chain name $1. Please double check the RPCs."
     l1_network="holesky"
@@ -112,9 +106,9 @@ elif [ "$proof" == "sp1" ]; then
     "proof_type": "sp1",
     "blob_proof_type": "proof_of_equivalence",
 	"sp1": {
-		"recursion": "plonk",
-		"prover": "network",
-		"verify": true
+	    "recursion": "compressed",
+        "prover": "mock",
+        "verify": false
 	}
   '
 elif [ "$proof" == "sp1-aggregation" ]; then
@@ -154,9 +148,9 @@ elif [ "$proof" == "risc0" ]; then
     "proof_type": "risc0",
     "blob_proof_type": "proof_of_equivalence",
     "risc0": {
-        "bonsai": true,
+        "bonsai": false,
         "snark": true,
-        "profile": false,
+        "profile": true,
         "execution_po2": 20
     }
   '

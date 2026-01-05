@@ -40,6 +40,7 @@ tokio = { workspace = true }
 tokio-util = { workspace = true }
 thiserror = { workspace = true }
 
+
 [features]
 enable = [
     "raiko-lib",
@@ -65,6 +66,8 @@ enable = [
     "reqwest",
     "lazy_static",
 ]
-cuda = ["risc0-zkvm?/cuda"]
-metal = ["risc0-zkvm?/metal"]
+
+
+# cuda = ["risc0-zkvm?/cuda"]
+# metal = ["risc0-zkvm?/metal"]
 bench = []

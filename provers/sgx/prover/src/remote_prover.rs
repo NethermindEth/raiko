@@ -8,7 +8,10 @@ use raiko_lib::{
         ShastaRawAggregationGuestInput,
     },
     proof_type::ProofType,
-    prover::{IdStore, IdWrite, Proof, ProofKey, Prover, ProverConfig, ProverError, ProverResult},
+    prover::{
+        IdStore, IdWrite, Proof, ProofCarryData, ProofKey, Prover, ProverConfig, ProverError,
+        ProverResult,
+    },
 };
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
@@ -364,18 +367,31 @@ async fn shasta_aggregate(
     _proof_type: ProofType,
 ) -> ProverResult<SgxResponse, ProverError> {
     // Extract the useful parts of the proof here so the guest doesn't have to do it
+    let (proofs, proof_carry_data_vec): (Vec<_>, Vec<_>) = input
+        .proofs
+        .iter()
+        .map(|proof| {
+            (
+                RawProof {
+                    input: proof.input.clone().unwrap(),
+                    proof: hex::decode(&proof.proof.clone().unwrap()[2..]).unwrap(),
+                },
+                {
+                    let extra_data = proof.extra_data.clone().unwrap();
+                    ProofCarryData {
+                        chain_id: extra_data.chain_id,
+                        verifier: extra_data.verifier,
+                        transition_input: extra_data.transition_input,
+                    }
+                },
+            )
+        })
+        .unzip();
     let raw_input = ShastaRawAggregationGuestInput {
-        proofs: input
-            .proofs
-            .iter()
-            .map(|proof| RawProof {
-                input: proof.clone().input.unwrap(),
-                proof: hex::decode(&proof.clone().proof.unwrap()[2..]).unwrap(),
-            })
-            .collect(),
-        chain_id: input.chain_id,
-        verifier_address: input.verifier_address,
+        proofs,
+        proof_carry_data_vec,
     };
+
     // Extract the instance id from the first proof
     let _instance_id = {
         let mut instance_id_bytes = [0u8; 4];
@@ -450,21 +466,21 @@ mod tests {
     #[test]
     fn test_get_instance_id_from_params() {
         let _ = env_logger::builder().is_test(true).try_init();
-        let chain_spec = SupportedChainSpecs::merge_from_file(PathBuf::from(
-            "../../../host/config/devnet/chain_spec_list.json",
+        let taiko_chain_spec = SupportedChainSpecs::merge_from_file(PathBuf::from(
+            "../../../host/config/chain_spec_list_default.json",
         ))
         .expect("ok")
         .get_chain_spec("surge_dev")
         .unwrap();
         let sgx_param = SgxParam {
-            instance_ids: vec![(TaikoSpecId::PACAYA, 1), (TaikoSpecId::SHASTA, 1)]
+            instance_ids: vec![(TaikoSpecId::PACAYA, 0), (TaikoSpecId::SHASTA, 10)]
                 .into_iter()
                 .collect(),
             setup: false,
             bootstrap: false,
             prove: false,
         };
-        let spec_id = chain_spec
+        let spec_id = taiko_chain_spec
             .active_fork(1, 0)
             .map_err(|e| ProverError::GuestError(e.to_string()))
             .expect("ok");
@@ -478,6 +494,22 @@ mod tests {
                 ProverError::GuestError(format!("No instance id found for spec id: {:?}", spec_id))
             })
             .expect("ok");
-        assert_eq!(instance_id, 1);
+        assert_eq!(instance_id, 10);
+
+        let spec_id = taiko_chain_spec
+            .active_fork(15, 0)
+            .map_err(|e| ProverError::GuestError(e.to_string()))
+            .expect("ok");
+        assert_eq!(spec_id, TaikoSpecId::SHASTA);
+
+        let instance_id = sgx_param
+            .instance_ids
+            .get(&spec_id)
+            .cloned()
+            .ok_or_else(|| {
+                ProverError::GuestError(format!("No instance id found for spec id: {:?}", spec_id))
+            })
+            .expect("ok");
+        assert_eq!(instance_id, 10);
     }
 }

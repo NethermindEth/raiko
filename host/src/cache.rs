@@ -115,6 +115,7 @@ mod test {
             designated_prover: None,
             cached_event_data: None,
             gpu_number: Some(0),
+            last_anchor_block_number: None,
         };
         let raiko = Raiko::new(
             l1_chain_spec.clone(),

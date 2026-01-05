@@ -16,15 +16,17 @@ pub fn create_shasta_requests(
 )> {
     let mut requests = Vec::with_capacity(batch_request.proposals.len());
 
-    for ShastaProposal {
-        proposal_id,
-        designated_prover,
-        parent_transition_hash,
-        checkpoint,
-        l1_inclusion_block_number,
-        l2_block_numbers,
-    } in batch_request.proposals.iter()
-    {
+    for proposal in batch_request.proposals.iter() {
+        let ShastaProposal {
+            proposal_id,
+            designated_prover,
+            parent_transition_hash,
+            checkpoint,
+            l1_inclusion_block_number,
+            l1_bond_proposal_block_number,
+            l2_block_numbers,
+            last_anchor_block_number,
+        } = proposal;
         // Create Shasta input request key
         let input_request_key = RequestKey::ShastaGuestInput(ShastaInputRequestKey::new(
             *proposal_id, // proposal_id
@@ -33,6 +35,8 @@ pub fn create_shasta_requests(
         ));
 
         // Create Shasta proof request key
+        let actual_prover_address = batch_request.prover.to_string();
+        let designated_prover_address = designated_prover.to_string();
         let request_key =
             RequestKey::ShastaProof(ShastaProofRequestKey::new_with_input_key_and_image_id(
                 ShastaInputRequestKey::new(
@@ -41,7 +45,8 @@ pub fn create_shasta_requests(
                     batch_request.network.clone(),
                 ),
                 batch_request.proof_type,
-                designated_prover.to_string(),
+                actual_prover_address,
+                designated_prover_address,
                 image_id.clone(),
             ));
 
@@ -54,9 +59,11 @@ pub fn create_shasta_requests(
             batch_request.prover,
             batch_request.blob_proof_type.clone(),
             l2_block_numbers.clone(),
-            parent_transition_hash.clone(),
+            parent_transition_hash.unwrap_or_default(),
             checkpoint.clone().into(),
             designated_prover.clone(),
+            last_anchor_block_number.clone(),
+            *l1_bond_proposal_block_number, // l1_bond_proposal_block_number - will be used to parse bond_proposal_hash in reqactor
         );
 
         // Create Shasta proof request entity

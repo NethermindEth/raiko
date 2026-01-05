@@ -430,6 +430,8 @@ pub struct ProofRequest {
     pub cached_event_data: Option<raiko_lib::input::BlockProposedFork>,
     /// GPU number to use for proof generation
     pub gpu_number: Option<u32>,
+    /// last anchor number
+    pub last_anchor_block_number: Option<u64>,
 }
 
 impl ProofRequest {
@@ -582,17 +584,19 @@ impl From<ShastaProposalCheckpoint> for Checkpoint {
 pub struct ShastaProposal {
     pub proposal_id: u64,
     pub designated_prover: Address,
-    pub parent_transition_hash: B256,
+    pub parent_transition_hash: Option<B256>,
     pub checkpoint: Option<ShastaProposalCheckpoint>,
     pub l1_inclusion_block_number: u64,
+    pub l1_bond_proposal_block_number: Option<u64>,
     pub l2_block_numbers: Vec<u64>,
+    pub last_anchor_block_number: u64,
 }
 
 impl std::fmt::Display for ShastaProposal {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
-            "{}:{}:{:?}:{}:{}",
+            "{}:{:?}:{:?}:{}:{}",
             self.proposal_id,
             self.parent_transition_hash,
             self.checkpoint,
@@ -782,6 +786,7 @@ impl TryFrom<ProofRequestOpt> for ProofRequest {
             designated_prover: None,
             cached_event_data: None,
             gpu_number: None,
+            last_anchor_block_number: None,
         })
     }
 }
@@ -928,7 +933,7 @@ impl From<ProofRequestOpt> for AggregationRequest {
     }
 }
 
-#[derive(Default, Clone, Serialize, Deserialize, Debug, ToSchema, PartialEq, Eq, Hash)]
+#[derive(Default, Clone, Serialize, Deserialize, Debug, ToSchema, PartialEq)]
 #[serde(default)]
 /// A request for proof aggregation of multiple proofs.
 pub struct AggregationOnlyRequest {

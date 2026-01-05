@@ -18,6 +18,9 @@ use raiko_core::{
     merge,
 };
 use raiko_lib::proof_type::ProofType;
+use raiko_lib::utils::shasta_guest_input::{
+    encode_guest_input_str_to_prover_arg_value, PROVER_ARG_SHASTA_GUEST_INPUT,
+};
 use raiko_reqactor::Actor;
 use raiko_reqpool::{
     AggregationRequestEntity, AggregationRequestKey, ImageId, RequestEntity, RequestKey,
@@ -55,8 +58,9 @@ async fn shasta_batch_handler(
         authenticated_key.name
     );
 
-    let (first_batch_id, l1_inclusioin_block) =
-        {
+    // For zk_any request, draw zk proof type based on the block hash.
+    if is_zk_any_request(&shasta_request_opt) {
+        let (first_batch_id, l1_inclusioin_block) = {
             let proposals = shasta_request_opt["proposals"].as_array().ok_or(
                 RaikoError::InvalidRequestConfig("Missing proposals".to_string()),
             )?;
@@ -72,8 +76,6 @@ async fn shasta_batch_handler(
             (first_batch_id, l1_inclusioin_block)
         };
 
-    // For zk_any request, draw zk proof type based on the block hash.
-    if is_zk_any_request(&shasta_request_opt) {
         match draw_shasta_zk_request(&actor, first_batch_id, l1_inclusioin_block).await? {
             Some(proof_type) => {
                 shasta_request_opt["proof_type"] = serde_json::to_value(proof_type).unwrap()
@@ -92,6 +94,22 @@ async fn shasta_batch_handler(
 
     // For sgx_any request, draw sgx proof type based on the block hash.
     if is_sgx_any_request(&shasta_request_opt) {
+        let (first_batch_id, l1_inclusioin_block) = {
+            let proposals = shasta_request_opt["proposals"].as_array().ok_or(
+                RaikoError::InvalidRequestConfig("Missing proposals".to_string()),
+            )?;
+            let first_batch = proposals.first().ok_or(RaikoError::InvalidRequestConfig(
+                "batches is empty".to_string(),
+            ))?;
+            let first_batch_id = first_batch["proposal_id"]
+                .as_u64()
+                .expect("first_batch_id ok");
+            let l1_inclusioin_block = first_batch["l1_inclusion_block_number"]
+                .as_u64()
+                .expect("check l1_inclusion_block_number");
+            (first_batch_id, l1_inclusioin_block)
+        };
+
         match draw_shasta_sgx_request(&actor, first_batch_id, l1_inclusioin_block).await? {
             Some(proof_type) => {
                 shasta_request_opt["proof_type"] = serde_json::to_value(proof_type).unwrap()
@@ -101,7 +119,7 @@ async fn shasta_batch_handler(
                     proof_type: ProofType::Native,
                     batch_id: Some(first_batch_id),
                     data: ProofResponse::Status {
-                        status: TaskStatus::SGXAnyNotDrawn,
+                        status: TaskStatus::ZKAnyNotDrawn,
                     },
                 });
             }
@@ -174,8 +192,9 @@ async fn shasta_batch_handler(
                     raiko_reqpool::RequestEntity::ShastaProof(request_entity) => {
                         let mut prover_args = request_entity.prover_args().clone();
                         prover_args.insert(
-                            "shasta_guest_input".to_string(),
-                            serde_json::to_value(guest_input).expect(""),
+                            PROVER_ARG_SHASTA_GUEST_INPUT.to_string(),
+                            encode_guest_input_str_to_prover_arg_value(&guest_input)
+                                .expect("failed to wrap shasta_guest_input string"),
                         );
                         ShastaProofRequestEntity::new_with_guest_input_entity(
                             request_entity.guest_input_entity().clone(),

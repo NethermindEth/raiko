@@ -294,7 +294,7 @@ mod tests {
         assert!(surge_dev_mainnet_spec.spec_id(2, 0).map(Into::into) > Some(SpecId::MERGE));
         assert_eq!(
             surge_dev_mainnet_spec.spec_id(2, 0),
-            Some(TaikoSpecId::PACAYA)
+            Some(TaikoSpecId::SHASTA)
         );
     }
 
@@ -305,21 +305,21 @@ mod tests {
             .unwrap();
         assert_eq!(
             surge_dev_mainnet_spec.active_fork(1, 0).unwrap(),
-            TaikoSpecId::PACAYA
+            TaikoSpecId::SHASTA
         );
     }
 
     #[test]
     fn forked_verifier_address() {
-        let surge_dev_spec = SupportedChainSpecs::default()
+        let eth_mainnet_spec = SupportedChainSpecs::default()
             .get_chain_spec(&Network::SurgeDev.to_string())
             .unwrap();
-        let verifier_address = surge_dev_spec
-            .get_fork_verifier_address(2, 0, ProofType::Sgx)
+        let verifier_address = eth_mainnet_spec
+            .get_fork_verifier_address(15_537_394, 0u64, ProofType::Sgx)
             .unwrap();
         assert_eq!(
             verifier_address,
-            address!("0x82689c09b5f47592311a13cdb66caf912d78f496")
+            address!("0x82689c09B5F47592311A13cDB66caF912d78F496")
         );
     }
 
@@ -329,7 +329,7 @@ mod tests {
             .get_chain_spec(&Network::SurgeDev.to_string())
             .unwrap();
         let verifier_address = eth_mainnet_spec
-            .get_fork_verifier_address(2, 0, ProofType::Native)
+            .get_fork_verifier_address(15_537_394, 0u64, ProofType::Native)
             .unwrap_or_default();
         assert_eq!(verifier_address, Address::ZERO);
     }
