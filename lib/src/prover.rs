@@ -21,6 +21,8 @@ pub enum ProverError {
     Param(#[from] serde_json::Error),
     #[error("Store error `{0}`")]
     StoreError(String),
+    #[error("Other error `{0}`")]
+    Other(String),
 }
 
 impl From<String> for ProverError {

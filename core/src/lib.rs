@@ -24,6 +24,8 @@ use crate::{
 };
 
 pub mod interfaces;
+pub mod mock_prover;
+
 pub mod preflight;
 pub mod prover;
 pub mod provider;
@@ -248,9 +250,18 @@ impl Raiko {
         input: GuestBatchInput,
         output: &GuestBatchOutput,
         store: Option<&mut dyn IdWrite>,
+        mock_key: Option<String>,
     ) -> RaikoResult<Proof> {
         let config = serde_json::to_value(&self.request)?;
-        run_batch_prover(self.request.proof_type, input, output, &config, store).await
+        run_batch_prover(
+            self.request.proof_type,
+            input,
+            output,
+            &config,
+            store,
+            mock_key,
+        )
+        .await
     }
 
     pub async fn shasta_proposal_prove(
@@ -258,9 +269,18 @@ impl Raiko {
         input: GuestBatchInput,
         output: &GuestBatchOutput,
         store: Option<&mut dyn IdWrite>,
+        mock_key: Option<String>,
     ) -> RaikoResult<Proof> {
         let config = serde_json::to_value(&self.request)?;
-        run_shasta_proposal_prover(self.request.proof_type, input, output, &config, store).await
+        run_shasta_proposal_prover(
+            self.request.proof_type,
+            input,
+            output,
+            &config,
+            store,
+            mock_key,
+        )
+        .await
     }
 
     pub async fn cancel(
@@ -499,7 +519,7 @@ mod tests {
         // let writer = std::fs::File::create(&filename).expect("Unable to create file");
         // serde_json::to_writer(writer, &output).expect("Unable to write data");
         raiko
-            .shasta_proposal_prove(input, &output, None)
+            .shasta_proposal_prove(input, &output, None, None)
             .await
             .expect("proof generation failed")
     }
@@ -550,7 +570,7 @@ mod tests {
         // let writer = std::fs::File::create(&filename).expect("Unable to create file");
         // serde_json::to_writer(writer, &output).expect("Unable to write data");
         raiko
-            .batch_prove(input, &output, None)
+            .batch_prove(input, &output, None, None)
             .await
             .expect("proof generation failed")
     }
@@ -845,6 +865,7 @@ mod tests {
             input,
             &output,
             &serde_json::to_value(&test_proof_params(false)).unwrap(),
+            None,
             None,
         )
         .await
