@@ -30,6 +30,7 @@ pub async fn start_actor(
     default_request_config: ProofRequestOpt,
     max_proving_concurrency: usize,
     max_queue_size: usize,
+    mock_key: Option<String>,
 ) -> Actor {
     let queue = Arc::new(Mutex::new(Queue::new(max_queue_size)));
     let notify = Arc::new(Notify::new());
@@ -48,6 +49,7 @@ pub async fn start_actor(
         max_proving_concurrency,
         Arc::clone(&queue),
         Arc::clone(&notify),
+        mock_key,
     );
     let _ = tokio::spawn(async move {
         backend.serve_in_background().await;

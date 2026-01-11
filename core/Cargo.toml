@@ -46,6 +46,9 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 serde_with = { workspace = true }
 
+# crypto
+secp256k1 = { workspace = true }
+
 # c-kzg
 kzg = { workspace = true }
 kzg_traits = { workspace = true }
