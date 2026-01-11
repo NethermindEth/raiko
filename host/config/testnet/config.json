@@ -1,6 +1,5 @@
 {
     "network": "surge_test",
-    "mock": false,
     "concurrency_limit": 1,
     "l1_network": "hoodi",
     "cache_path": "/tmp/raiko/",

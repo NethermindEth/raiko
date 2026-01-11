@@ -41,6 +41,7 @@ async fn main() -> HostResult<()> {
         default_request_config.clone(),
         max_proving_concurrency,
         opts.queue_limit,
+        opts.mock_key.clone(),
     )
     .await;
 

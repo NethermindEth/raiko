@@ -61,6 +61,7 @@ impl TestServerBuilder {
             default_request_config.clone(),
             max_proving_concurrency,
             1000, // max_queue_size
+            None,
         )
         .await;
 
