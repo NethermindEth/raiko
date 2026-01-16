@@ -216,7 +216,7 @@ mod tests {
     use super::*;
     use alloy_primitives::{Address, B256};
     use raiko_ballot::Ballot;
-    use raiko_core::interfaces::{ProofRequestOpt, ShastaProposalCheckpoint};
+    use raiko_core::interfaces::{L1InclusionData, ProofRequestOpt, ShastaProposalCheckpoint};
     use raiko_lib::input::BlobProofType;
     use raiko_lib::{consts::SupportedChainSpecs, proof_type::ProofType};
     use raiko_reqpool::{
@@ -300,7 +300,7 @@ mod tests {
     fn create_test_request_shasta_entity() -> RequestEntity {
         let shasta_proof_entity = ShastaProofRequestEntity::new(
             1234u64,
-            5678u64,
+            L1InclusionData::L1InclusionBlockNumber(5678u64),
             "ethereum".to_string(),
             "ethereum".to_string(),
             Address::ZERO,

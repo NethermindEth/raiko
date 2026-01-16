@@ -22,7 +22,7 @@ pub fn create_shasta_requests(
             designated_prover,
             parent_transition_hash,
             checkpoint,
-            l1_inclusion_block_number,
+            l1_inclusion_data,
             l1_bond_proposal_block_number,
             l2_block_numbers,
             last_anchor_block_number,
@@ -53,7 +53,7 @@ pub fn create_shasta_requests(
         // Create Shasta input request entity
         let input_request_entity = ShastaInputRequestEntity::new(
             *proposal_id, // proposal_id
-            *l1_inclusion_block_number,
+            l1_inclusion_data.clone(),
             batch_request.network.clone(),
             batch_request.l1_network.clone(),
             batch_request.prover,

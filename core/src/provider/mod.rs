@@ -36,6 +36,14 @@ pub trait BlockDataProvider: Clone + std::fmt::Debug {
         offset: usize,
         num_storage_proofs: usize,
     ) -> RaikoResult<MerkleProof>;
+
+    async fn get_block(&self, block: (u64, bool)) -> RaikoResult<Block> {
+        let blocks = self.get_blocks(&[block]).await?;
+        blocks
+            .into_iter()
+            .next()
+            .ok_or_else(|| RaikoError::RPC("No block for requested block number".to_string()))
+    }
 }
 
 pub async fn get_task_data(

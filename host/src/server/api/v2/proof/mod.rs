@@ -134,9 +134,20 @@ async fn proof_handler(State(actor): State<Actor>, Json(req): Json<Value>) -> Ho
     let proof_type = proof_request.proof_type;
     let request_key =
         GuestInputRequestKey::new(chain_id, proof_request.block_number, blockhash).into();
+
+    if !proof_request.l1_inclusion_data.is_block_number() {
+        return Err(anyhow::anyhow!(
+            "l1 inclusion data other than block number is not supported in v2 proof api"
+        )
+        .into());
+    }
+
     let request_entity = GuestInputRequestEntity::new(
         proof_request.block_number,
-        proof_request.l1_inclusion_block_number,
+        proof_request
+            .l1_inclusion_data
+            .get_l1_inclusion_block_number()
+            .unwrap(),
         proof_request.network.clone(),
         proof_request.l1_network.clone(),
         proof_request.graffiti,
@@ -164,7 +175,10 @@ async fn proof_handler(State(actor): State<Actor>, Json(req): Json<Value>) -> Ho
             );
             let request_entity = SingleProofRequestEntity::new(
                 proof_request.block_number,
-                proof_request.l1_inclusion_block_number,
+                proof_request
+                    .l1_inclusion_data
+                    .get_l1_inclusion_block_number()
+                    .unwrap(),
                 proof_request.network,
                 proof_request.l1_network,
                 proof_request.graffiti,

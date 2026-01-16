@@ -109,9 +109,20 @@ async fn proof_handler(
         proof_request.prover.to_string(),
     )
     .into();
+
+    if !proof_request.l1_inclusion_data.is_block_number() {
+        return Err(anyhow::anyhow!(
+            "l1 inclusion data other than block number is not supported in v1 proof api"
+        )
+        .into());
+    }
+
     let request_entity = SingleProofRequestEntity::new(
         proof_request.block_number,
-        proof_request.l1_inclusion_block_number,
+        proof_request
+            .l1_inclusion_data
+            .get_l1_inclusion_block_number()
+            .unwrap(),
         proof_request.network,
         proof_request.l1_network,
         proof_request.graffiti,

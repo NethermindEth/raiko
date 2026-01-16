@@ -3,7 +3,7 @@ use core::fmt::Debug;
 use serde::{Deserialize, Serialize};
 
 sol! {
-    #[derive(Debug, Default, Deserialize, Serialize)]
+    #[derive(Debug, Default, Deserialize, Serialize, PartialEq)]
     /// @notice Represents a frame of data that is stored in multiple blobs. Note the size is
     /// encoded as a bytes32 at the offset location.
     struct BlobSlice {
@@ -24,7 +24,7 @@ sol! {
 
     /// @notice Contains derivation data for a proposal that is not needed during proving.
     /// @dev This data is hashed and stored in the Proposal struct to reduce calldata size.
-    #[derive(Debug, Default, Deserialize, Serialize)]
+    #[derive(Debug, Default, Deserialize, Serialize, PartialEq)]
 
     /// @notice Represents a source of derivation data within a Derivation
     struct DerivationSource {
@@ -139,8 +139,8 @@ pub struct ShastaEventData {
 
 impl ShastaEventData {
     /// Decode the bytes data from Shasta Proposed event into ShastaEventData
-    pub fn from_proposal_event(proposal: &Proposed) -> Result<Self, alloy_sol_types::Error> {
-        Ok(Self {
+    pub fn from_proposal_event(proposal: &Proposed) -> Self {
+        Self {
             proposal: Proposal {
                 id: proposal.id,
                 endOfSubmissionWindowTimestamp: proposal.endOfSubmissionWindowTimestamp,
@@ -150,7 +150,7 @@ impl ShastaEventData {
                 sources: proposal.sources.clone(),
                 ..Default::default()
             },
-        })
+        }
     }
 }
 

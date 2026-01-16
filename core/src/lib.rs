@@ -49,10 +49,18 @@ impl Raiko {
         }
     }
 
-    fn get_preflight_data(&self) -> PreflightData {
-        PreflightData::new(
+    fn get_preflight_data(&self) -> RaikoResult<PreflightData> {
+        if self.request.l1_inclusion_data.is_limp_mode() {
+            return Err(RaikoError::InvalidRequestConfig(
+                "Limp mode is not supported for single block proof generation".to_string(),
+            ));
+        }
+        Ok(PreflightData::new(
             self.request.block_number,
-            self.request.l1_inclusion_block_number,
+            self.request
+                .l1_inclusion_data
+                .get_l1_inclusion_block_number()
+                .unwrap(),
             self.l1_chain_spec.to_owned(),
             self.taiko_chain_spec.to_owned(),
             TaikoProverData {
@@ -64,14 +72,14 @@ impl Raiko {
                 last_anchor_block_number: None,
             },
             self.request.blob_proof_type.clone(),
-        )
+        ))
     }
 
     fn get_batch_preflight_data(&self) -> BatchPreflightData {
         BatchPreflightData {
             batch_id: self.request.batch_id,
             block_numbers: self.request.l2_block_numbers.clone(),
-            l1_inclusion_block_number: self.request.l1_inclusion_block_number, // todo: user input
+            l1_inclusion_data: self.request.l1_inclusion_data.clone(), // todo: user input
             l1_chain_spec: self.l1_chain_spec.to_owned(),
             taiko_chain_spec: self.taiko_chain_spec.to_owned(),
             prover_data: TaikoProverData {
@@ -96,7 +104,7 @@ impl Raiko {
         provider: BDP,
     ) -> RaikoResult<GuestInput> {
         //TODO: read fork from config
-        let preflight_data = self.get_preflight_data();
+        let preflight_data = self.get_preflight_data()?;
         info!("Generating input for block {}", self.request.block_number);
         preflight(provider, preflight_data)
             .await
@@ -363,7 +371,7 @@ pub fn merge(a: &mut Value, b: &Value) {
 
 #[cfg(test)]
 mod tests {
-    use crate::interfaces::aggregate_proofs;
+    use crate::interfaces::{aggregate_proofs, L1InclusionData};
     use crate::preflight::{
         parse_l1_batch_proposal_tx_for_pacaya_fork, parse_l1_batch_proposal_tx_for_shasta_fork,
     };
@@ -466,7 +474,10 @@ mod tests {
         let (_block_numbers, _cached_data) = parse_l1_batch_proposal_tx_for_shasta_fork(
             &l1_chain_spec,
             &taiko_chain_spec,
-            proof_request.l1_inclusion_block_number,
+            proof_request
+                .l1_inclusion_data
+                .get_l1_inclusion_block_number()
+                .unwrap(),
             proof_request.batch_id,
         )
         .await
@@ -512,7 +523,10 @@ mod tests {
         let (all_prove_blocks, _) = parse_l1_batch_proposal_tx_for_pacaya_fork(
             &l1_chain_spec,
             &taiko_chain_spec,
-            proof_request.l1_inclusion_block_number,
+            proof_request
+                .l1_inclusion_data
+                .get_l1_inclusion_block_number()
+                .unwrap(),
             proof_request.batch_id,
         )
         .await
@@ -571,7 +585,7 @@ mod tests {
         let proof_request = ProofRequest {
             block_number: 0,
             batch_id: 777,
-            l1_inclusion_block_number: 4919,
+            l1_inclusion_data: L1InclusionData::L1InclusionBlockNumber(4919),
             l2_block_numbers: vec![777],
             network,
             graffiti: B256::ZERO,
@@ -607,7 +621,7 @@ mod tests {
         let proof_request = ProofRequest {
             block_number: 0,
             batch_id: 5361,
-            l1_inclusion_block_number: 1584196,
+            l1_inclusion_data: L1InclusionData::L1InclusionBlockNumber(1584196),
             l2_block_numbers: vec![],
             network,
             graffiti: B256::ZERO,
@@ -653,7 +667,7 @@ mod tests {
         let proof_request = ProofRequest {
             block_number: 0,
             batch_id: 1,
-            l1_inclusion_block_number: 1000,
+            l1_inclusion_data: L1InclusionData::L1InclusionBlockNumber(1000),
             l2_block_numbers: vec![block_number],
             network,
             graffiti: B256::ZERO,
@@ -692,7 +706,7 @@ mod tests {
         let proof_request = ProofRequest {
             block_number,
             batch_id: 0,
-            l1_inclusion_block_number: 0,
+            l1_inclusion_data: L1InclusionData::L1InclusionBlockNumber(0),
             l2_block_numbers: vec![],
             network,
             graffiti: B256::ZERO,
@@ -739,7 +753,7 @@ mod tests {
             let proof_request = ProofRequest {
                 block_number,
                 batch_id: 0,
-                l1_inclusion_block_number: 0,
+                l1_inclusion_data: L1InclusionData::L1InclusionBlockNumber(0),
                 l2_block_numbers: Vec::new(),
                 network,
                 graffiti: B256::ZERO,
@@ -777,7 +791,7 @@ mod tests {
             let proof_request = ProofRequest {
                 block_number: 0,
                 batch_id: 1329350,
-                l1_inclusion_block_number: 23365352,
+                l1_inclusion_data: L1InclusionData::L1InclusionBlockNumber(23365352),
                 l2_block_numbers: Vec::new(),
                 network,
                 graffiti: B256::ZERO,
@@ -816,7 +830,7 @@ mod tests {
         let proof_request = ProofRequest {
             block_number,
             batch_id: 0,
-            l1_inclusion_block_number: 0,
+            l1_inclusion_data: L1InclusionData::L1InclusionBlockNumber(0),
             l2_block_numbers: Vec::new(),
             network,
             graffiti: B256::ZERO,
