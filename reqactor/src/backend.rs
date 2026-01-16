@@ -3,7 +3,7 @@ use std::sync::Arc;
 use alloy_primitives::B256;
 
 use raiko_core::{
-    interfaces::{aggregate_proofs, aggregate_shasta_proposals, ProofRequest},
+    interfaces::{aggregate_proofs, aggregate_shasta_proposals, L1InclusionData, ProofRequest},
     preflight::{
         parse_l1_batch_proposal_tx_for_pacaya_fork, parse_l1_batch_proposal_tx_for_shasta_fork,
     },
@@ -230,7 +230,9 @@ pub async fn do_generate_guest_input(
         })?;
     let proof_request = ProofRequest {
         block_number: *request_entity.block_number(),
-        l1_inclusion_block_number: *request_entity.l1_inclusion_block_number(),
+        l1_inclusion_data: L1InclusionData::L1InclusionBlockNumber(
+            *request_entity.l1_inclusion_block_number(),
+        ),
         network: request_entity.network().clone(),
         l1_network: request_entity.l1_network().clone(),
         graffiti: request_entity.graffiti().clone(),
@@ -296,7 +298,9 @@ pub async fn do_prove_single(
 
     let proof_request = ProofRequest {
         block_number: *request_entity.block_number(),
-        l1_inclusion_block_number: *request_entity.l1_inclusion_block_number(),
+        l1_inclusion_data: L1InclusionData::L1InclusionBlockNumber(
+            *request_entity.l1_inclusion_block_number(),
+        ),
         network: request_entity.network().clone(),
         l1_network: request_entity.l1_network().clone(),
         graffiti: request_entity.graffiti().clone(),
@@ -433,9 +437,11 @@ async fn new_raiko_for_batch_request(
     let proof_request = ProofRequest {
         block_number: 0,
         batch_id: *request_entity.guest_input_entity().batch_id(),
-        l1_inclusion_block_number: *request_entity
-            .guest_input_entity()
-            .l1_inclusion_block_number(),
+        l1_inclusion_data: L1InclusionData::L1InclusionBlockNumber(
+            *request_entity
+                .guest_input_entity()
+                .l1_inclusion_block_number(),
+        ),
         network: request_entity.guest_input_entity().network().clone(),
         l1_network: request_entity.guest_input_entity().l1_network().clone(),
         graffiti: request_entity.guest_input_entity().graffiti().clone(),
@@ -579,26 +585,31 @@ async fn new_raiko_for_shasta_proposal_request(
         .get_chain_spec(&request_entity.guest_input_entity().network())
         .expect("unsupported taiko network");
     let proposal_id = request_entity.guest_input_entity().proposal_id();
-    let l1_include_block_number = request_entity
-        .guest_input_entity()
-        .l1_inclusion_block_number();
+    let l1_inclusion_data = request_entity.guest_input_entity().l1_inclusion_data();
 
     // parse & verify proposal event and cache it to avoid duplicate RPC calls
-    let (_block_numbers, cached_event_data) = parse_l1_batch_proposal_tx_for_shasta_fork(
-        &l1_chain_spec,
-        &taiko_chain_spec,
-        *l1_include_block_number,
-        *proposal_id,
-    )
-    .await
-    .map_err(|err| format!("Could not parse L1 shasta proposal tx: {err:?}"))?;
-
+    let (_block_numbers, cached_event_data) = match l1_inclusion_data {
+        L1InclusionData::L1InclusionBlockNumber(l1_inclusion_block_number) => {
+            parse_l1_batch_proposal_tx_for_shasta_fork(
+                &l1_chain_spec,
+                &taiko_chain_spec,
+                *l1_inclusion_block_number,
+                *proposal_id,
+            )
+            .await
+            .map_err(|err| format!("Could not parse L1 shasta proposal tx: {err:?}"))?
+        }
+        L1InclusionData::LimpModeData(limp_mode_data) => {
+            (vec![], limp_mode_data.get_block_proposed_fork())
+        }
+    };
     let proof_request = ProofRequest {
         block_number: 0,
         batch_id: *request_entity.guest_input_entity().proposal_id(),
-        l1_inclusion_block_number: *request_entity
+        l1_inclusion_data: request_entity
             .guest_input_entity()
-            .l1_inclusion_block_number(),
+            .l1_inclusion_data()
+            .clone(),
         network: request_entity.guest_input_entity().network().clone(),
         l1_network: request_entity.guest_input_entity().l1_network().clone(),
         graffiti: Default::default(),

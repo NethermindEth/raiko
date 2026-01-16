@@ -79,6 +79,7 @@ mod test {
     use alloy_primitives::{Address, B256};
     use alloy_provider::Provider;
 
+    use raiko_core::interfaces::L1InclusionData;
     use raiko_core::{interfaces::ProofRequest, provider::rpc::RpcBlockDataProvider, Raiko};
     use raiko_lib::input::BlobProofType;
     use raiko_lib::{
@@ -108,7 +109,7 @@ mod test {
             proof_type: ProofType::Native,
             blob_proof_type: BlobProofType::KzgVersionedHash,
             prover_args: Default::default(),
-            l1_inclusion_block_number: 0,
+            l1_inclusion_data: L1InclusionData::L1InclusionBlockNumber(0),
             l2_block_numbers: Default::default(),
             parent_transition_hash: None,
             checkpoint: None,

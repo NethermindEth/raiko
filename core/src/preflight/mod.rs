@@ -1,7 +1,7 @@
 use std::{collections::HashSet, env};
 
 use crate::{
-    interfaces::{RaikoError, RaikoResult},
+    interfaces::{L1InclusionData, RaikoError, RaikoResult},
     preflight::util::get_grandparent_timestamp,
     provider::{db::ProviderDb, rpc::RpcBlockDataProvider, BlockDataProvider},
 };
@@ -28,6 +28,7 @@ use util::{
 
 pub use util::{
     parse_l1_batch_proposal_tx_for_pacaya_fork, parse_l1_batch_proposal_tx_for_shasta_fork,
+    GetBlobData, GetBlobsResponse,
 };
 
 #[cfg(feature = "statedb_lru")]
@@ -49,7 +50,7 @@ pub struct PreflightData {
 pub struct BatchPreflightData {
     pub batch_id: u64,
     pub block_numbers: Vec<u64>,
-    pub l1_inclusion_block_number: u64,
+    pub l1_inclusion_data: L1InclusionData,
     pub l1_chain_spec: ChainSpec,
     pub taiko_chain_spec: ChainSpec,
     pub prover_data: TaikoProverData,
@@ -241,7 +242,7 @@ pub async fn batch_preflight<BDP: BlockDataProvider>(
         taiko_chain_spec,
         prover_data,
         blob_proof_type,
-        l1_inclusion_block_number,
+        l1_inclusion_data,
         cached_event_data,
     }: BatchPreflightData,
 ) -> RaikoResult<GuestBatchInput> {
@@ -274,7 +275,7 @@ pub async fn batch_preflight<BDP: BlockDataProvider>(
         prepare_taiko_chain_batch_input(
             &l1_chain_spec,
             &taiko_chain_spec,
-            l1_inclusion_block_number,
+            l1_inclusion_data,
             batch_id,
             &all_prove_blocks,
             prover_data,
@@ -503,7 +504,7 @@ mod test {
         utils::txs::decode_transactions,
     };
 
-    use crate::preflight::util::{blob_to_bytes, block_time_to_block_slot};
+    use crate::preflight::util::blobs::{blob_to_bytes, block_time_to_block_slot};
 
     #[test]
     fn test_new_blob_decode() {

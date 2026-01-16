@@ -79,9 +79,20 @@ async fn proof_handler(
             proof_request.proof_type,
             proof_request.prover.to_string(),
         ));
+
+        if !proof_request.l1_inclusion_data.is_block_number() {
+            return Err(anyhow::anyhow!(
+                "l1 inclusion data other than block number is not supported in non-shasta proof"
+            )
+            .into());
+        }
+
         let request_entity = RequestEntity::SingleProof(SingleProofRequestEntity::new(
             proof_request.block_number,
-            proof_request.l1_inclusion_block_number,
+            proof_request
+                .l1_inclusion_data
+                .get_l1_inclusion_block_number()
+                .unwrap(),
             proof_request.network,
             proof_request.l1_network,
             proof_request.graffiti,

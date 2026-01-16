@@ -1,13 +1,11 @@
-use alloy_consensus::{Blob, Transaction};
-use alloy_primitives::{hex, Log as LogStruct, Uint, B256};
+use alloy_consensus::Transaction;
+use alloy_primitives::{Log as LogStruct, Uint, B256};
 use alloy_provider::{Provider, RootProvider};
 use alloy_rpc_types::{BlockId, Filter, Header, Log, Transaction as AlloyRpcTransaction};
 use alloy_sol_types::{SolCall, SolEvent};
-use anyhow::{anyhow, bail, ensure, Result};
-use kzg::kzg_types::ZFr;
-use kzg_traits::{eip_4844::blob_to_kzg_commitment_rust, Fr, G1};
+use anyhow::{anyhow, bail, Result};
 use raiko_lib::{
-    anchor::{decode_anchor, decode_anchor_ontake, decode_anchor_pacaya, decode_anchor_shasta},
+    anchor::decode_anchor,
     builder::{OptimisticDatabase, RethBlockBuilder},
     clear_line,
     consts::{ChainSpec, TaikoSpecId},
@@ -17,22 +15,35 @@ use raiko_lib::{
         pacaya::BatchProposed,
         proposeBlockCall,
         shasta::{Proposed as ShastaProposed, ShastaEventData},
-        BlobProofType, BlockProposed, BlockProposedFork, InputDataSource, TaikoGuestBatchInput,
-        TaikoGuestInput, TaikoProverData,
+        BlobProofType, BlockProposed, BlockProposedFork, TaikoGuestBatchInput, TaikoGuestInput,
+        TaikoProverData,
     },
-    primitives::eip4844::{self, commitment_to_version_hash, KZG_SETTINGS},
     utils::shasta_rules::ANCHOR_MAX_OFFSET,
 };
 use reth_primitives::{Block as RethBlock, TransactionSigned};
-use serde::{Deserialize, Serialize};
 use std::iter;
-use tracing::{debug, error, info, instrument, warn};
+use tracing::{debug, info, instrument, warn};
 
 use crate::{
-    interfaces::{RaikoError, RaikoResult},
+    interfaces::{L1InclusionData, RaikoError, RaikoResult},
     provider::{db::ProviderDb, rpc::RpcBlockDataProvider, BlockDataProvider},
     require,
 };
+
+// Re-export blob utilities
+pub use blobs::{
+    filter_tx_blob_beacon_with_proof, get_batch_tx_data_with_proofs, get_tx_blob, GetBlobData,
+    GetBlobsResponse,
+};
+
+pub mod blobs;
+pub mod ontake;
+pub mod pacaya;
+pub mod shasta;
+
+use pacaya::prepare_taiko_chain_batch_input as prepare_taiko_chain_batch_input_pacaya;
+
+use shasta::prepare_taiko_chain_batch_input as prepare_taiko_chain_batch_input_shasta;
 
 /// Optimize data gathering by executing the transactions multiple times so data can be requested in batches
 pub async fn execute_txs<'a, BDP>(
@@ -107,10 +118,7 @@ pub async fn prepare_taiko_chain_input(
                     .to_owned(),
             ));
         }
-        TaikoSpecId::ONTAKE => {
-            let anchor_call = decode_anchor_ontake(anchor_tx.input())?;
-            (anchor_call._anchorBlockId, anchor_call._anchorStateRoot)
-        }
+        TaikoSpecId::ONTAKE => ontake::get_anchor_info(anchor_tx)?,
         _ => {
             let anchor_call = decode_anchor(anchor_tx.input())?;
             (anchor_call.l1BlockId, anchor_call.l1StateRoot)
@@ -235,26 +243,15 @@ fn get_anchor_tx_info_by_fork(
     anchor_tx: &TransactionSigned,
 ) -> RaikoResult<(u64, B256)> {
     match fork {
-        TaikoSpecId::SHASTA => {
-            let anchor_call = decode_anchor_shasta(anchor_tx.input())?;
-            Ok((
-                anchor_call._checkpoint.blockNumber.to(),
-                anchor_call._checkpoint.stateRoot,
-            ))
-        }
-        TaikoSpecId::PACAYA => {
-            let anchor_call = decode_anchor_pacaya(anchor_tx.input())?;
-            Ok((anchor_call._anchorBlockId, anchor_call._anchorStateRoot))
-        }
-        TaikoSpecId::ONTAKE => {
-            let anchor_call = decode_anchor_ontake(anchor_tx.input())?;
-            Ok((anchor_call._anchorBlockId, anchor_call._anchorStateRoot))
-        }
+        TaikoSpecId::SHASTA => shasta::get_anchor_info(anchor_tx),
+        TaikoSpecId::PACAYA => pacaya::get_anchor_info(anchor_tx),
+        TaikoSpecId::ONTAKE => ontake::get_anchor_info(anchor_tx),
         _ => {
             let anchor_call = decode_anchor(anchor_tx.input())?;
             Ok((anchor_call.l1BlockId, anchor_call.l1StateRoot))
         }
     }
+    .map_err(|e| RaikoError::Anyhow(e))
 }
 
 /// a problem here is that we need to know the fork of the batch proposal tx
@@ -359,246 +356,11 @@ pub async fn _parse_l1_bond_proposal_tx_for_shasta_fork(
     // Ok(B256::ZERO)
 }
 
-/// Prepare Pacaya batch input
-async fn prepare_pacaya_batch_input(
-    batch_proposed: raiko_lib::input::pacaya::BatchProposed,
-    batch_id: u64,
-    l1_inclusion_block_number: u64,
-    anchor_block_height: u64,
-    l1_inclusion_header: Header,
-    l1_state_header: Header,
-    l1_chain_spec: &ChainSpec,
-    taiko_chain_spec: &ChainSpec,
-    prover_data: TaikoProverData,
-    blob_proof_type: &BlobProofType,
-    provider_l1: &RpcBlockDataProvider,
-) -> RaikoResult<TaikoGuestBatchInput> {
-    let batch_info = &batch_proposed.info;
-    let blob_hashes = batch_info.blobHashes.clone();
-    let force_inclusion_block_number = batch_info.blobCreatedIn;
-    let is_forced_inclusion = force_inclusion_block_number != 0
-        && force_inclusion_block_number != l1_inclusion_block_number;
-    let l1_blob_timestamp = if is_forced_inclusion {
-        // force inclusion block
-        info!(
-            "process force inclusion block: {l1_inclusion_block_number:?} -> {force_inclusion_block_number:?}"
-        );
-        let (force_inclusion_header, _) = get_headers(
-            provider_l1,
-            (force_inclusion_block_number, anchor_block_height),
-        )
-        .await?;
-        force_inclusion_header.timestamp
-    } else {
-        l1_inclusion_header.timestamp
-    };
-
-    // according to protocol, calldata is mutex with blob
-    let (tx_data_from_calldata, blob_tx_buffers_with_proofs) = if blob_hashes.is_empty() {
-        let tx_list = &batch_proposed.txList;
-        (tx_list.to_vec(), Vec::new())
-    } else {
-        let blob_tx_buffers = get_batch_tx_data_with_proofs(
-            blob_hashes,
-            l1_blob_timestamp,
-            l1_chain_spec,
-            blob_proof_type,
-        )
-        .await?;
-        (Vec::new(), blob_tx_buffers)
-    };
-
-    Ok(TaikoGuestBatchInput {
-        batch_id: batch_id,
-        batch_proposed: BlockProposedFork::Pacaya(batch_proposed),
-        l1_header: l1_state_header.try_into().unwrap(),
-        l1_ancestor_headers: Vec::new(),
-        chain_spec: taiko_chain_spec.clone(),
-        prover_data: prover_data,
-        data_sources: vec![InputDataSource {
-            tx_data_from_calldata,
-            tx_data_from_blob: blob_tx_buffers_with_proofs
-                .iter()
-                .map(|(blob_tx_data, _, _)| blob_tx_data.clone())
-                .collect(),
-            blob_commitments: blob_tx_buffers_with_proofs
-                .iter()
-                .map(|(_, commit, _)| commit.clone())
-                .collect(),
-            blob_proofs: blob_tx_buffers_with_proofs
-                .iter()
-                .map(|(_, _, proof)| proof.clone())
-                .collect(),
-            blob_proof_type: blob_proof_type.clone(),
-            is_forced_inclusion: is_forced_inclusion,
-        }],
-    })
-}
-
-/// Prepare Pacaya batch input
-async fn prepare_shasta_batch_input(
-    shasta_event_data: raiko_lib::input::shasta::ShastaEventData,
-    batch_id: u64,
-    _l1_inclusion_block_number: u64,
-    _anchor_block_height: u64,
-    l1_inclusion_header: Header,
-    l1_state_header: Header,
-    l1_ancestor_headers: Vec<Header>,
-    l1_chain_spec: &ChainSpec,
-    taiko_chain_spec: &ChainSpec,
-    prover_data: TaikoProverData,
-    blob_proof_type: &BlobProofType,
-    _provider_l1: &RpcBlockDataProvider,
-) -> RaikoResult<TaikoGuestBatchInput> {
-    let mut data_sources = Vec::new();
-    for derivation_source in shasta_event_data.proposal.sources.clone() {
-        let blob_hashes = derivation_source.blobSlice.blobHashes;
-        let is_forced_inclusion = derivation_source.isForcedInclusion;
-        let l1_blob_timestamp = if is_forced_inclusion {
-            // force inclusion block
-            info!("process force inclusion from data_source blob hashes: {blob_hashes:?}");
-            derivation_source.blobSlice.timestamp.to()
-        } else {
-            l1_inclusion_header.timestamp
-        };
-
-        // according to protocol, calldata is mutex with blob
-        let (tx_data_from_calldata, blob_tx_buffers_with_proofs) = if blob_hashes.is_empty() {
-            unimplemented!("calldata txlist is not supported in shasta.");
-        } else {
-            let blob_tx_buffers = get_batch_tx_data_with_proofs(
-                blob_hashes,
-                l1_blob_timestamp,
-                l1_chain_spec,
-                blob_proof_type,
-            )
-            .await?;
-            (Vec::new(), blob_tx_buffers)
-        };
-        data_sources.push(InputDataSource {
-            tx_data_from_calldata,
-            tx_data_from_blob: blob_tx_buffers_with_proofs
-                .iter()
-                .map(|(blob_tx_data, _, _)| blob_tx_data.clone())
-                .collect(),
-            blob_commitments: blob_tx_buffers_with_proofs
-                .iter()
-                .map(|(_, commit, _)| commit.clone())
-                .collect(),
-            blob_proofs: blob_tx_buffers_with_proofs
-                .iter()
-                .map(|(_, _, proof)| proof.clone())
-                .collect(),
-            blob_proof_type: blob_proof_type.clone(),
-            is_forced_inclusion,
-        });
-    }
-
-    Ok(TaikoGuestBatchInput {
-        batch_id: batch_id,
-        batch_proposed: BlockProposedFork::Shasta(shasta_event_data),
-        l1_header: l1_state_header.try_into().unwrap(),
-        l1_ancestor_headers: l1_ancestor_headers
-            .iter()
-            .map(|header| header.clone().try_into().unwrap())
-            .collect(),
-        chain_spec: taiko_chain_spec.clone(),
-        prover_data: prover_data,
-        data_sources,
-    })
-}
-
-async fn prepare_taiko_chain_batch_input_pacaya(
-    l1_chain_spec: &ChainSpec,
-    taiko_chain_spec: &ChainSpec,
-    l1_inclusion_block_number: u64,
-    batch_id: u64,
-    prover_data: TaikoProverData,
-    blob_proof_type: &BlobProofType,
-    batch_anchor_tx_info: Vec<(u64, B256)>,
-    batch_proposed: raiko_lib::input::pacaya::BatchProposed,
-) -> RaikoResult<TaikoGuestBatchInput> {
-    let (anchor_block_height, anchor_state_root) = batch_anchor_tx_info[0];
-    let provider_l1 = RpcBlockDataProvider::new(&l1_chain_spec.rpc).await?;
-
-    let (l1_inclusion_header, l1_state_header) = get_headers(
-        &provider_l1,
-        (l1_inclusion_block_number, anchor_block_height),
-    )
-    .await?;
-    assert_eq!(anchor_state_root, l1_state_header.state_root);
-
-    prepare_pacaya_batch_input(
-        batch_proposed,
-        batch_id,
-        l1_inclusion_block_number,
-        anchor_block_height,
-        l1_inclusion_header,
-        l1_state_header,
-        l1_chain_spec,
-        taiko_chain_spec,
-        prover_data,
-        blob_proof_type,
-        &provider_l1,
-    )
-    .await
-}
-
-async fn prepare_taiko_chain_batch_input_shasta(
-    l1_chain_spec: &ChainSpec,
-    taiko_chain_spec: &ChainSpec,
-    l1_inclusion_block_number: u64,
-    batch_id: u64,
-    prover_data: TaikoProverData,
-    blob_proof_type: &BlobProofType,
-    batch_anchor_tx_info: Vec<(u64, B256)>,
-    shasta_event_data: raiko_lib::input::shasta::ShastaEventData,
-) -> RaikoResult<TaikoGuestBatchInput> {
-    let (anchor_block_height, _) = batch_anchor_tx_info[0];
-    let provider_l1 = RpcBlockDataProvider::new(&l1_chain_spec.rpc).await?;
-
-    assert!(
-        l1_inclusion_block_number > 0,
-        "l1_inclusion_block_number is 0"
-    );
-    // unlike pacaya that using anchor block as l1_state_header
-    // shasta use parent block instead of anchor block because it connect anchor way through parent block
-    let (l1_inclusion_header, l1_state_header) = get_headers(
-        &provider_l1,
-        (l1_inclusion_block_number, l1_inclusion_block_number - 1),
-    )
-    .await?;
-    assert_eq!(l1_inclusion_header.parent_hash, l1_state_header.hash);
-
-    let l1_ancestor_headers = get_max_anchor_headers(
-        &provider_l1,
-        batch_anchor_tx_info,
-        l1_inclusion_block_number - 1,
-    )
-    .await?;
-
-    prepare_shasta_batch_input(
-        shasta_event_data,
-        batch_id,
-        l1_inclusion_block_number,
-        anchor_block_height,
-        l1_inclusion_header,
-        l1_state_header,
-        l1_ancestor_headers,
-        l1_chain_spec,
-        taiko_chain_spec,
-        prover_data,
-        blob_proof_type,
-        &provider_l1,
-    )
-    .await
-}
-
 /// Prepare the input for a Taiko chain
 pub async fn prepare_taiko_chain_batch_input(
     l1_chain_spec: &ChainSpec,
     taiko_chain_spec: &ChainSpec,
-    l1_inclusion_block_number: u64,
+    l1_inclusion_data: L1InclusionData,
     batch_id: u64,
     batch_blocks: &[RethBlock],
     prover_data: TaikoProverData,
@@ -630,16 +392,25 @@ pub async fn prepare_taiko_chain_batch_input(
     } else {
         debug!("No cached event data, fetching from RPC");
         let provider_l1 = RpcBlockDataProvider::new(&l1_chain_spec.rpc).await?;
-        let (l1_inclusion_height, _, event_data) = get_block_proposed_event_by_height(
-            provider_l1.provider(),
-            taiko_chain_spec.clone(),
-            l1_inclusion_block_number,
-            batch_id,
-            fork,
-        )
-        .await?;
-        assert_eq!(l1_inclusion_block_number, l1_inclusion_height);
-        event_data
+
+        match &l1_inclusion_data {
+            L1InclusionData::L1InclusionBlockNumber(l1_inclusion_block_number) => {
+                let (l1_inclusion_height, _, event_data) = get_block_proposed_event_by_height(
+                    provider_l1.provider(),
+                    taiko_chain_spec.clone(),
+                    *l1_inclusion_block_number,
+                    batch_id,
+                    fork,
+                )
+                .await?;
+
+                assert_eq!(*l1_inclusion_block_number, l1_inclusion_height);
+                event_data
+            }
+            L1InclusionData::LimpModeData(limp_mode_data) => {
+                limp_mode_data.get_block_proposed_fork()
+            }
+        }
     };
 
     match (fork, batch_proposed_fork) {
@@ -648,10 +419,16 @@ pub async fn prepare_taiko_chain_batch_input(
                 batch_anchor_tx_info.windows(2).all(|w| { w[0] == w[1] }),
                 "batch anchor tx info mismatch {batch_anchor_tx_info:?}"
             );
+
+            if l1_inclusion_data.is_limp_mode() {
+                return Err(RaikoError::InvalidRequestConfig(
+                    "Limp mode is not supported for Pacaya batch input".to_owned(),
+                ));
+            }
             prepare_taiko_chain_batch_input_pacaya(
                 l1_chain_spec,
                 taiko_chain_spec,
-                l1_inclusion_block_number,
+                l1_inclusion_data.get_l1_inclusion_block_number().unwrap(),
                 batch_id,
                 prover_data,
                 blob_proof_type,
@@ -675,7 +452,7 @@ pub async fn prepare_taiko_chain_batch_input(
             prepare_taiko_chain_batch_input_shasta(
                 l1_chain_spec,
                 taiko_chain_spec,
-                l1_inclusion_block_number,
+                l1_inclusion_data,
                 batch_id,
                 prover_data,
                 blob_proof_type,
@@ -690,108 +467,6 @@ pub async fn prepare_taiko_chain_batch_input(
             ))
         }
     }
-}
-
-pub async fn get_tx_blob(
-    blob_hash: B256,
-    timestamp: u64,
-    chain_spec: &ChainSpec,
-    blob_proof_type: &BlobProofType,
-) -> RaikoResult<(Vec<u8>, Option<Vec<u8>>, Option<Vec<u8>>)> {
-    debug!("get tx from hash blob: {blob_hash:?}");
-    // Get the blob data for this block
-    let slot_id = block_time_to_block_slot(
-        timestamp,
-        chain_spec.genesis_time,
-        chain_spec.seconds_per_slot,
-    )?;
-    info!("get_tx_data: slot_id done");
-    let beacon_rpc_url: String = chain_spec.beacon_rpc.clone().ok_or_else(|| {
-        RaikoError::Preflight("Beacon RPC URL is required for Taiko chains".to_owned())
-    })?;
-    let blob = get_and_filter_blob_data(&beacon_rpc_url, slot_id, blob_hash).await?;
-    let commitment = eip4844::calc_kzg_proof_commitment(&blob).map_err(|e| anyhow!(e))?;
-    let blob_proof = match blob_proof_type {
-        BlobProofType::KzgVersionedHash => None,
-        BlobProofType::ProofOfEquivalence => {
-            let (x, y) =
-                eip4844::proof_of_equivalence(&blob, &commitment_to_version_hash(&commitment))
-                    .map_err(|e| anyhow!(e))?;
-
-            debug!("x {x:?} y {y:?}");
-            let point = eip4844::calc_kzg_proof_with_point(&blob, ZFr::from_bytes(&x).unwrap());
-            debug!("calc_kzg_proof_with_point {point:?}");
-
-            Some(
-                point
-                    .map(|g1| g1.to_bytes().to_vec())
-                    .map_err(|e| anyhow!(e))?,
-            )
-        }
-    };
-
-    Ok((blob, Some(commitment.to_vec()), blob_proof))
-}
-
-pub async fn filter_tx_blob_beacon_with_proof(
-    blob_hash: B256,
-    blobs: Vec<String>,
-    blob_proof_type: &BlobProofType,
-) -> RaikoResult<(Vec<u8>, Option<Vec<u8>>, Option<Vec<u8>>)> {
-    info!("get tx from hash blob: {blob_hash:?}");
-    // Get the blob data for this block
-    let blob = filter_blob_data_beacon(blobs, blob_hash).await?;
-    let commitment = eip4844::calc_kzg_proof_commitment(&blob).map_err(|e| anyhow!(e))?;
-    info!("get_tx_data: commitment done");
-    let blob_proof = match blob_proof_type {
-        BlobProofType::KzgVersionedHash => None,
-        BlobProofType::ProofOfEquivalence => {
-            let (x, y) =
-                eip4844::proof_of_equivalence(&blob, &commitment_to_version_hash(&commitment))
-                    .map_err(|e| anyhow!(e))?;
-
-            debug!("x {x:?} y {y:?}");
-            let point = eip4844::calc_kzg_proof_with_point(&blob, ZFr::from_bytes(&x).unwrap());
-            debug!("calc_kzg_proof_with_point {point:?}");
-
-            Some(
-                point
-                    .map(|g1| g1.to_bytes().to_vec())
-                    .map_err(|e| anyhow!(e))?,
-            )
-        }
-    };
-
-    info!("get_tx_data: blob_proof done");
-
-    Ok((blob, Some(commitment.to_vec()), blob_proof))
-}
-
-/// get tx data(blob data) vec from blob hashes
-/// and get proofs for each blobs
-pub async fn get_batch_tx_data_with_proofs(
-    blob_hashes: Vec<B256>,
-    timestamp: u64,
-    chain_spec: &ChainSpec,
-    blob_proof_type: &BlobProofType,
-) -> RaikoResult<Vec<(Vec<u8>, Option<Vec<u8>>, Option<Vec<u8>>)>> {
-    let mut tx_data = Vec::new();
-    let beacon_rpc_url: String = chain_spec.beacon_rpc.clone().ok_or_else(|| {
-        RaikoError::Preflight("Beacon RPC URL is required for Taiko chains".to_owned())
-    })?;
-    let slot_id = block_time_to_block_slot(
-        timestamp,
-        chain_spec.genesis_time,
-        chain_spec.seconds_per_slot,
-    )?;
-    // get blob data once
-    let blob_data = get_blob_data(&beacon_rpc_url, slot_id).await?;
-    let blobs: Vec<String> = blob_data.data.iter().map(|b| b.blob.clone()).collect();
-    for hash in blob_hashes {
-        let data = filter_tx_blob_beacon_with_proof(hash, blobs.clone(), blob_proof_type).await?;
-        tx_data.push(data);
-    }
-    Ok(tx_data)
 }
 
 pub async fn filter_blockchain_event(
@@ -810,42 +485,7 @@ pub async fn get_calldata_txlist_event(
     block_hash: B256,
     l2_block_number: u64,
 ) -> Result<(AlloyRpcTransaction, CalldataTxList)> {
-    // Get the address that emitted the event
-    let l1_address = chain_spec.get_fork_l1_contract_address(l2_block_number)?;
-
-    let logs = filter_blockchain_event(provider, || {
-        Filter::new()
-            .address(l1_address)
-            .at_block_hash(block_hash)
-            .event_signature(CalldataTxList::SIGNATURE_HASH)
-    })
-    .await?;
-
-    // Run over the logs returned to find the matching event for the specified L2 block number
-    // (there can be multiple blocks proposed in the same block and even same tx)
-    for log in logs {
-        let Some(log_struct) = LogStruct::new(
-            log.address(),
-            log.topics().to_vec(),
-            log.data().data.clone(),
-        ) else {
-            bail!("Could not create log")
-        };
-        let event = CalldataTxList::decode_log(&log_struct)
-            .map_err(|_| RaikoError::Anyhow(anyhow!("Could not decode log")))?;
-        if event.blockId == raiko_lib::primitives::U256::from(l2_block_number) {
-            let Some(log_tx_hash) = log.transaction_hash else {
-                bail!("No transaction hash in the log")
-            };
-            let tx = provider
-                .get_transaction_by_hash(log_tx_hash)
-                .await
-                .expect("couldn't query the propose tx")
-                .expect("Could not find the propose tx");
-            return Ok((tx, event.data));
-        }
-    }
-    bail!("No BlockProposedV2 event found for block {l2_block_number}");
+    ontake::get_calldata_txlist_event(provider, chain_spec, block_hash, l2_block_number).await
 }
 
 #[derive(Debug)]
@@ -926,10 +566,7 @@ pub async fn filter_block_proposed_event(
                 let event = ShastaProposed::decode_log(&log_struct)
                     .map_err(|_| RaikoError::Anyhow(anyhow!("Could not decode log")))?;
 
-                let mut event_data =
-                    ShastaEventData::from_proposal_event(&event.data).map_err(|_| {
-                        RaikoError::Anyhow(anyhow!("Could not decode Shasta event data"))
-                    })?;
+                let mut event_data = ShastaEventData::from_proposal_event(&event.data);
 
                 // let timestamp = log.block_timestamp.unwrap();
                 let current_block_number = log.block_number.unwrap();
@@ -1225,180 +862,6 @@ where
         .collect())
 }
 
-// block_time_to_block_slot returns the slots of the given timestamp.
-pub fn block_time_to_block_slot(
-    block_time: u64,
-    genesis_time: u64,
-    block_per_slot: u64,
-) -> RaikoResult<u64> {
-    if genesis_time == 0 {
-        Err(RaikoError::Anyhow(anyhow!(
-            "genesis time is 0, please check chain spec"
-        )))
-    } else if block_time < genesis_time {
-        Err(RaikoError::Anyhow(anyhow!(
-            "provided block_time precedes genesis time",
-        )))
-    } else {
-        Ok((block_time - genesis_time) / block_per_slot)
-    }
-}
-
-pub fn blob_to_bytes(blob_str: &str) -> Vec<u8> {
-    hex::decode(blob_str.to_lowercase().trim_start_matches("0x")).unwrap_or_default()
-}
-
-fn calc_blob_versioned_hash(blob_str: &str) -> [u8; 32] {
-    let blob_bytes = hex::decode(blob_str.to_lowercase().trim_start_matches("0x"))
-        .expect("Could not decode blob");
-    let blob = Blob::try_from(blob_bytes.as_slice()).expect("Could not create blob from bytes");
-    let commitment = blob_to_kzg_commitment_rust(
-        &eip4844::deserialize_blob_rust(&blob).expect("Could not deserialize blob"),
-        &KZG_SETTINGS.clone(),
-    )
-    .expect("Could not create kzg commitment from blob");
-    commitment_to_version_hash(&commitment.to_bytes()).0
-}
-
-async fn get_and_filter_blob_data(
-    beacon_rpc_url: &str,
-    block_id: u64,
-    blob_hash: B256,
-) -> Result<Vec<u8>> {
-    if beacon_rpc_url.contains("blobscan.com") {
-        get_and_filter_blob_data_by_blobscan(beacon_rpc_url, block_id, blob_hash).await
-    } else {
-        get_and_filter_blob_data_beacon(beacon_rpc_url, block_id, blob_hash).await
-    }
-}
-
-async fn get_blob_data(beacon_rpc_url: &str, block_id: u64) -> Result<GetBlobsResponse> {
-    if beacon_rpc_url.contains("blobscan.com") {
-        unimplemented!("blobscan.com is not supported yet")
-    } else {
-        get_blob_data_beacon(beacon_rpc_url, block_id).await
-    }
-}
-
-// Blob data from the beacon chain
-// type Sidecar struct {
-// Index                    string                   `json:"index"`
-// Blob                     string                   `json:"blob"`
-// SignedBeaconBlockHeader  *SignedBeaconBlockHeader `json:"signed_block_header"`
-// KzgCommitment            string                   `json:"kzg_commitment"`
-// KzgProof                 string                   `json:"kzg_proof"`
-// CommitmentInclusionProof []string
-// `json:"kzg_commitment_inclusion_proof"` }
-#[derive(Clone, Debug, Deserialize, Serialize)]
-struct GetBlobData {
-    pub index: String,
-    pub blob: String,
-    // pub signed_block_header: SignedBeaconBlockHeader, // ignore for now
-    pub kzg_commitment: String,
-    pub kzg_proof: String,
-    //pub kzg_commitment_inclusion_proof: Vec<String>,
-}
-
-#[derive(Clone, Debug, Deserialize, Serialize)]
-struct GetBlobsResponse {
-    pub data: Vec<GetBlobData>,
-}
-
-async fn get_blob_data_beacon(beacon_rpc_url: &str, block_id: u64) -> Result<GetBlobsResponse> {
-    let url = format!(
-        "{}/eth/v1/beacon/blob_sidecars/{block_id}",
-        beacon_rpc_url.trim_end_matches('/'),
-    );
-    info!("Retrieve blob from {url}.");
-    let response = reqwest::get(url.clone()).await?;
-
-    if !response.status().is_success() {
-        warn!(
-            "Request {url} failed with status code: {}",
-            response.status()
-        );
-        return Err(anyhow::anyhow!(
-            "Request failed with status code: {}",
-            response.status()
-        ));
-    }
-
-    let blobs = response.json::<GetBlobsResponse>().await?;
-    ensure!(!blobs.data.is_empty(), "blob data not available anymore");
-    Ok(blobs)
-}
-
-async fn get_and_filter_blob_data_beacon(
-    beacon_rpc_url: &str,
-    block_id: u64,
-    blob_hash: B256,
-) -> Result<Vec<u8>> {
-    info!("Retrieve blob for {block_id} and expect {blob_hash}.");
-    let blobs = get_blob_data_beacon(beacon_rpc_url, block_id).await?;
-    // Get the blob data for the blob storing the tx list
-    let tx_blob = blobs
-        .data
-        .iter()
-        .find(|blob| {
-            // calculate from plain blob
-            blob_hash == calc_blob_versioned_hash(&blob.blob)
-        })
-        .cloned();
-
-    if let Some(tx_blob) = &tx_blob {
-        Ok(blob_to_bytes(&tx_blob.blob))
-    } else {
-        Err(anyhow!("couldn't find blob data matching blob hash"))
-    }
-}
-
-async fn filter_blob_data_beacon(blobs: Vec<String>, blob_hash: B256) -> Result<Vec<u8>> {
-    // Get the blob data for the blob storing the tx list
-    let tx_blob = blobs
-        .iter()
-        .find(|blob| {
-            // calculate from plain blob
-            blob_hash == calc_blob_versioned_hash(blob)
-        })
-        .cloned();
-
-    if let Some(tx_blob) = &tx_blob {
-        Ok(blob_to_bytes(tx_blob))
-    } else {
-        Err(anyhow!("couldn't find blob data matching blob hash"))
-    }
-}
-
-// https://api.blobscan.com/#/
-#[derive(Clone, Debug, Deserialize, Serialize)]
-struct BlobScanData {
-    pub commitment: String,
-    pub data: String,
-}
-
-async fn get_and_filter_blob_data_by_blobscan(
-    beacon_rpc_url: &str,
-    _block_id: u64,
-    blob_hash: B256,
-) -> Result<Vec<u8>> {
-    let url = format!("{}/blobs/{blob_hash}", beacon_rpc_url.trim_end_matches('/'),);
-    let response = reqwest::get(url.clone()).await?;
-
-    if !response.status().is_success() {
-        error!(
-            "Request {url} failed with status code: {}",
-            response.status()
-        );
-        return Err(anyhow::anyhow!(
-            "Request failed with status code: {}",
-            response.status()
-        ));
-    }
-
-    let blob = response.json::<BlobScanData>().await?;
-    Ok(blob_to_bytes(&blob.data))
-}
-
 /// Decodes extra data for Taiko chain containing base fee sharing percentage and bond proposal flag
 ///
 /// # Arguments
@@ -1418,40 +881,4 @@ pub(crate) fn decode_extra_data(extra_data: &[u8]) -> (u8, bool) {
     let is_low_bond_proposal = (extra_data[1] & 0x01) != 0;
 
     (basefee_sharing_pctg, is_low_bond_proposal)
-}
-
-#[cfg(test)]
-mod test {
-    use alloy_rlp::Decodable;
-    use raiko_lib::{
-        manifest::DerivationSourceManifest,
-        utils::blobs::{decode_blob_data, zlib_decompress_data},
-    };
-
-    use super::*;
-
-    #[ignore = "not run in CI as devnet changes frequently"]
-    #[tokio::test]
-    async fn test_shasta_blob_decoding() -> Result<()> {
-        let beacon_rpc_url = "https://l1beacon.internal.taiko.xyz";
-        let slot_id = 156;
-        let blob_data = get_blob_data(&beacon_rpc_url, slot_id).await.expect("ok");
-        println!("blob_data: {blob_data:?}");
-        let blob_data = blob_to_bytes(&blob_data.data[0].blob);
-        // decompress
-        let decoded_blob_data = decode_blob_data(&blob_data);
-        println!("decoded_blob_data: {decoded_blob_data:?}");
-        let version = B256::from_slice(&decoded_blob_data[0..32]);
-        let size = B256::from_slice(&decoded_blob_data[32..64]);
-        let size_u64 = usize::from_be_bytes(size.as_slice()[24..32].try_into().unwrap());
-        println!("version: {version:?}, size: {size:?}, size_u64: {size_u64}");
-        let decompressed_blob_data =
-            zlib_decompress_data(&decoded_blob_data[64..64 + size_u64]).expect("ok");
-        println!("decompressed_blob_data: {decompressed_blob_data:?}");
-
-        let proposal_manifest =
-            DerivationSourceManifest::decode(&mut decompressed_blob_data.as_ref()).unwrap();
-        println!("proposal_manifest: {proposal_manifest:?}");
-        Ok(())
-    }
 }

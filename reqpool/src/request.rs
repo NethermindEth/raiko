@@ -2,7 +2,7 @@ use crate::impl_display_using_json_pretty;
 use alloy_primitives::Address;
 use chrono::{DateTime, Utc};
 use derive_getters::Getters;
-use raiko_core::interfaces::{ProverSpecificOpts, ShastaProposalCheckpoint};
+use raiko_core::interfaces::{L1InclusionData, ProverSpecificOpts, ShastaProposalCheckpoint};
 use raiko_lib::{
     input::BlobProofType,
     primitives::{ChainId, B256},
@@ -64,9 +64,7 @@ impl Status {
     }
 }
 
-#[derive(
-    PartialEq, Debug, Clone, Deserialize, Serialize, Eq, RedisValue, Getters,
-)]
+#[derive(PartialEq, Debug, Clone, Deserialize, Serialize, Eq, RedisValue, Getters)]
 /// The status of a request with context
 pub struct StatusWithContext {
     /// The status of the request
@@ -700,8 +698,9 @@ impl BatchGuestInputRequestEntity {
 pub struct ShastaInputRequestEntity {
     /// The block number for the block to generate a proof for.
     proposal_id: u64,
-    /// The l1 block number of the l2 block be proposed.
-    l1_inclusion_block_number: u64,
+    /// Either L1 block inclusion number for regular mode or
+    /// Limp data for Limp mode.
+    l1_inclusion_data: L1InclusionData,
     /// The network to generate the proof for.
     network: String,
     /// The L1 network to generate the proof for.
@@ -727,7 +726,7 @@ pub struct ShastaInputRequestEntity {
 impl ShastaInputRequestEntity {
     pub fn new(
         proposal_id: u64,
-        l1_inclusion_block_number: u64,
+        l1_inclusion_data: L1InclusionData,
         network: String,
         l1_network: String,
         actual_prover: Address,
@@ -741,7 +740,7 @@ impl ShastaInputRequestEntity {
     ) -> Self {
         Self {
             proposal_id,
-            l1_inclusion_block_number,
+            l1_inclusion_data,
             network,
             l1_network,
             actual_prover,
@@ -830,7 +829,7 @@ pub struct ShastaProofRequestEntity {
 impl ShastaProofRequestEntity {
     pub fn new(
         batch_id: u64,
-        l1_inclusion_block_number: u64,
+        l1_inclusion_data: L1InclusionData,
         network: String,
         l1_network: String,
         actual_prover: Address,
@@ -846,7 +845,7 @@ impl ShastaProofRequestEntity {
         Self {
             guest_input_entity: ShastaInputRequestEntity::new(
                 batch_id,
-                l1_inclusion_block_number,
+                l1_inclusion_data,
                 network,
                 l1_network,
                 actual_prover,

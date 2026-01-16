@@ -1,9 +1,10 @@
-use crate::{merge, prover::NativeProver};
-use alloy_primitives::{Address, B256};
+use crate::{merge, preflight::GetBlobsResponse, prover::NativeProver};
+use alloy_primitives::{Address, Uint, B256};
 use clap::Args;
 use raiko_lib::{
     input::{
-        shasta::Checkpoint, AggregationGuestInput, AggregationGuestOutput, BlobProofType,
+        shasta::{Checkpoint, DerivationSource, ShastaEventData},
+        AggregationGuestInput, AggregationGuestOutput, BlobProofType, BlockProposedFork,
         GuestBatchInput, GuestBatchOutput, GuestInput, GuestOutput, ShastaAggregationGuestInput,
     },
     proof_type::ProofType,
@@ -398,7 +399,7 @@ pub struct ProofRequest {
     /// in shasta, this is the proposal id
     pub batch_id: u64,
     /// The l1 block number of the l2 block be proposed.
-    pub l1_inclusion_block_number: u64,
+    pub l1_inclusion_data: L1InclusionData,
     /// To support batch proof generation.
     pub l2_block_numbers: Vec<u64>,
     /// The network to generate the proof for.
@@ -580,27 +581,149 @@ impl From<ShastaProposalCheckpoint> for Checkpoint {
 }
 
 #[serde_as]
-#[derive(Clone, Debug, Serialize, Deserialize, ToSchema)]
+#[derive(Clone, Debug, Serialize, Deserialize, ToSchema, PartialEq)]
 pub struct ShastaProposal {
     pub proposal_id: u64,
     pub designated_prover: Address,
     pub parent_transition_hash: Option<B256>,
     pub checkpoint: Option<ShastaProposalCheckpoint>,
-    pub l1_inclusion_block_number: u64,
+    #[serde(flatten)]
+    pub l1_inclusion_data: L1InclusionData,
     pub l1_bond_proposal_block_number: Option<u64>,
     pub l2_block_numbers: Vec<u64>,
     pub last_anchor_block_number: u64,
+}
+
+#[serde_as]
+#[derive(Clone, Debug, Serialize, Deserialize, ToSchema, PartialEq)]
+pub enum L1InclusionData {
+    #[serde(rename = "l1_inclusion_block_number")]
+    L1InclusionBlockNumber(u64),
+    #[serde(rename = "l1_limp_data")]
+    LimpModeData(LimpModeData),
+}
+
+impl L1InclusionData {
+    pub fn is_limp_mode(&self) -> bool {
+        matches!(self, L1InclusionData::LimpModeData(_))
+    }
+    pub fn is_block_number(&self) -> bool {
+        matches!(self, L1InclusionData::L1InclusionBlockNumber(_))
+    }
+
+    pub fn get_l1_inclusion_block_number(&self) -> Option<u64> {
+        match self {
+            L1InclusionData::L1InclusionBlockNumber(num) => Some(*num),
+            _ => None,
+        }
+    }
+
+    pub fn get_limp_mode_data(&self) -> Option<&LimpModeData> {
+        match self {
+            L1InclusionData::LimpModeData(data) => Some(data),
+            _ => None,
+        }
+    }
+}
+
+#[serde_as]
+#[derive(Clone, Debug, Serialize, Deserialize, ToSchema, PartialEq)]
+#[serde(untagged)]
+pub enum LimpModeData {
+    LimpModeDataShasta {
+        /// The expected Propose event data for the proposal with additional data
+        /// In limp mode Propose event is not emitted on-chain yet, so we need to provide it here
+        /// with additional `origin_block_number` and `origin_block_hash` fields
+        limp_proposed_event: LimpProposedEvent,
+        /// The blobs data for the proposal
+        blobs: GetBlobsResponse,
+    },
+}
+
+impl LimpModeData {
+    pub fn get_limp_proposed_event(&self) -> &LimpProposedEvent {
+        match self {
+            LimpModeData::LimpModeDataShasta {
+                limp_proposed_event,
+                ..
+            } => limp_proposed_event,
+        }
+    }
+    pub fn get_proposed_event(&self) -> raiko_lib::input::shasta::Proposed {
+        match self {
+            LimpModeData::LimpModeDataShasta {
+                limp_proposed_event,
+                ..
+            } => limp_proposed_event.clone().into(),
+        }
+    }
+
+    pub fn get_block_proposed_fork(&self) -> BlockProposedFork {
+        match self {
+            LimpModeData::LimpModeDataShasta {
+                limp_proposed_event,
+                ..
+            } => {
+                let mut event_data =
+                    ShastaEventData::from_proposal_event(&self.get_proposed_event());
+
+                event_data.proposal.originBlockNumber =
+                    Uint::from(limp_proposed_event.origin_block_number);
+                event_data.proposal.originBlockHash = limp_proposed_event.origin_block_hash;
+                event_data.proposal.timestamp = Uint::from(0);
+                event_data.proposal.parentProposalHash = B256::ZERO;
+
+                todo!("TIMESTAMP IS NOT PROVIDED IN LIMPMODE");
+                BlockProposedFork::Shasta(event_data)
+            }
+        }
+    }
+
+    pub fn get_blob_data(&self) -> &GetBlobsResponse {
+        match self {
+            LimpModeData::LimpModeDataShasta { blobs, .. } => blobs,
+        }
+    }
+}
+
+#[serde_as]
+#[derive(Clone, Debug, Serialize, Deserialize, ToSchema, PartialEq)]
+/// Struct representing a Propose event in Shasta fork with additional fields for limp mode.
+/// The problem with limp mode is that the Propose event is not emitted on-chain yet,
+/// so we need to provide the event data manually, along with the origin block number and hash.
+pub struct LimpProposedEvent {
+    pub id: u64,
+    pub proposer: Address,
+    pub parent_proposal_hash: B256,
+    pub end_of_submission_window_timestamp: u64,
+    pub basefee_sharing_pctg: u8,
+    pub origin_block_number: u64,
+    pub origin_block_hash: B256,
+    pub sources: Vec<DerivationSource>,
+}
+
+impl From<LimpProposedEvent> for raiko_lib::input::shasta::Proposed {
+    fn from(value: LimpProposedEvent) -> Self {
+        raiko_lib::input::shasta::Proposed {
+            id: Uint::from(value.id),
+            proposer: value.proposer,
+            parentProposalHash: value.parent_proposal_hash,
+            endOfSubmissionWindowTimestamp: Uint::from(value.end_of_submission_window_timestamp),
+            basefeeSharingPctg: value.basefee_sharing_pctg,
+            sources: value.sources,
+        }
+    }
 }
 
 impl std::fmt::Display for ShastaProposal {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
-            "{}:{:?}:{:?}:{}:{}",
+            "{}:{:?}:{:?}:{:?}:{}",
             self.proposal_id,
             self.parent_transition_hash,
             self.checkpoint,
-            self.l1_inclusion_block_number,
+            self.l1_inclusion_data,
             self.designated_prover
         )
     }
@@ -744,7 +867,9 @@ impl TryFrom<ProofRequestOpt> for ProofRequest {
         Ok(Self {
             block_number: value.block_number.unwrap_or_default(),
             batch_id: value.batch_id.unwrap_or_default(),
-            l1_inclusion_block_number: value.l1_inclusion_block_number.unwrap_or_default(),
+            l1_inclusion_data: L1InclusionData::L1InclusionBlockNumber(
+                value.l1_inclusion_block_number.unwrap_or_default(),
+            ),
             network: value.network.ok_or(RaikoError::InvalidRequestConfig(
                 "Missing network".to_string(),
             ))?,
