@@ -20,24 +20,6 @@ COPY script script
 RUN ls -al > /tmp/file_list.txt
 RUN cat /tmp/file_list.txt
 
-ENV TARGET=risc0
-RUN mkdir -p ~/.cargo/bin
-RUN echo "Building for risc0"
-# Pass GITHUB_TOKEN to avoid rate limiting during rzup install
-RUN --mount=type=secret,id=github_token \
-    if [ -f /run/secrets/github_token ] && [ -s /run/secrets/github_token ]; then \
-        export GITHUB_TOKEN=$(cat /run/secrets/github_token); \
-    fi; \
-    make install
-RUN echo "Building for sp1"
-ENV TARGET=sp1
-# Pass GITHUB_TOKEN to avoid rate limiting during sp1up install
-RUN --mount=type=secret,id=github_token \
-    if [ -f /run/secrets/github_token ] && [ -s /run/secrets/github_token ]; then \
-        export GITHUB_TOKEN=$(cat /run/secrets/github_token); \
-    fi; \
-    make install
-
 FROM base-builder AS builder
 
 ENV DEBIAN_FRONTEND=noninteractive
@@ -65,14 +47,7 @@ COPY redis-derive redis-derive
 RUN ls -al > /tmp/file_list.txt
 RUN cat /tmp/file_list.txt
 
-ENV TARGET=risc0
-RUN mkdir -p ~/.cargo/bin
-RUN echo "Building for risc0"
-RUN make guest
-RUN echo "Building for sp1"
-ENV TARGET=sp1
-RUN make guest
-RUN cargo build --release ${BUILD_FLAGS} --features "sp1,risc0" --features "docker_build"
+RUN cargo build --release ${BUILD_FLAGS}
 
 FROM ubuntu:22.04 AS raiko-zk
 RUN mkdir -p \
