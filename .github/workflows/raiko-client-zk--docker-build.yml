@@ -105,17 +105,11 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           outputs: type=image,name=${{ env.DOCKER_REGISTRY }}/${{ env.DOCKER_REPOSITORY }},push-by-digest=true,name-canonical=true,push=true
 
-      - name: Set digest output
-        id: digest
+      - name: Export digest
         run: |
-          echo "amd64=${{ env.DOCKER_REGISTRY }}/${{ env.DOCKER_REPOSITORY_STAGING }}@${{ steps.build.outputs.digest }}" >> $GITHUB_OUTPUT
-
-
-          - name: Export digest
-          run: |
-            mkdir -p /tmp/digests
-            digest="${{ steps.build.outputs.digest }}"
-            touch "/tmp/digests/${digest#sha256:}"
+          mkdir -p /tmp/digests
+          digest="${{ steps.build.outputs.digest }}"
+          touch "/tmp/digests/${digest#sha256:}"
 
       - name: Upload digest
         uses: actions/upload-artifact@v5
