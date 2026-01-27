@@ -94,6 +94,30 @@ function update_raiko_sgx_instance_id() {
     fi
 }
 
+function update_raiko_tdx_instance_id() {
+    CONFIG_FILE=$1
+    if [[ -n $TDX_INSTANCE_ID ]]; then
+        jq \
+            --arg update_value "$TDX_INSTANCE_ID" \
+            '.tdx.instance_ids.HEKLA = ($update_value | tonumber)' $CONFIG_FILE \
+            >/tmp/config_tmp.json && mv /tmp/config_tmp.json $CONFIG_FILE
+        echo "Update hekla tdx instance id to $TDX_INSTANCE_ID"
+    fi
+    if [[ -n $TDX_ONTAKE_INSTANCE_ID ]]; then
+        jq \
+            --arg update_value "$TDX_ONTAKE_INSTANCE_ID" \
+            '.tdx.instance_ids.ONTAKE = ($update_value | tonumber)' $CONFIG_FILE \
+            >/tmp/config_tmp.json && mv /tmp/config_tmp.json $CONFIG_FILE
+        echo "Update ontake tdx instance id to $TDX_ONTAKE_INSTANCE_ID"
+    fi
+    if [[ -n $TDX_PACAYA_INSTANCE_ID ]]; then
+        jq \
+            --arg update_value "$TDX_PACAYA_INSTANCE_ID" \
+            '.tdx.instance_ids.PACAYA = ($update_value | tonumber)' $CONFIG_FILE \
+            >/tmp/config_tmp.json && mv /tmp/config_tmp.json $CONFIG_FILE
+        echo "Update pacaya tdx instance id to $TDX_PACAYA_INSTANCE_ID"
+    fi
+}
 
 if [[ -z "${PCCS_HOST}" ]]; then
     MY_PCCS_HOST=pccs:8081
@@ -150,6 +174,49 @@ if [[ -n $ZK ]]; then
         echo "$RAIKO_CONF_BASE_CONFIG file not found."
         exit 1
     fi
+
+    #update raiko server config
+    update_raiko_network $RAIKO_CONF_BASE_CONFIG
+    update_raiko_sgx_instance_id $RAIKO_CONF_BASE_CONFIG
+    update_raiko_tdx_instance_id $RAIKO_CONF_BASE_CONFIG
+
+    #update raiko server chainspec
+    merge_json_arrays $PRODUCT_CHAINSPEC_FILE $DEVNET_CHAINSPEC_FILE $RAIKO_CONF_CHAIN_SPECS
+    update_docker_chain_specs $RAIKO_CONF_CHAIN_SPECS
+
+    /opt/raiko/bin/raiko-host  --config-path=$RAIKO_CONF_BASE_CONFIG --chain-spec-path=$RAIKO_CONF_CHAIN_SPECS "$@"
+fi
+
+if [[ -n $SGX_SERVER ]]; then
+    echo "running sgx in sgx server mode"
+
+    if [[ $# -eq 1 && $1 == "--init" ]]; then
+        echo "start server bootstrap"
+        # useless here, as it can share same raiko init
+        # keep it now for future refactory
+        bootstrap
+    else
+        if [[ -z $SGX_PACAYA_INSTANCE_ID || -z $SGXGETH_PACAYA_INSTANCE_ID ]]; then 
+            echo "SGX_PACAYA_INSTANCE_ID and SGXGETH_PACAYA_INSTANCE_ID must be presented, please check."
+            exit 1
+        fi
+
+        echo "start sgx-guest --sgx-instance-id $SGX_PACAYA_INSTANCE_ID --address 0.0.0.0 --port 9090"
+        gramine-sgx /opt/raiko/bin/sgx-guest serve --sgx-instance-id $SGX_PACAYA_INSTANCE_ID --address 0.0.0.0 --port 9090 | sed 's/^/[raiko] /' &
+        echo "start gaiko serve --sgx-instance-id $SGXGETH_PACAYA_INSTANCE_ID --port 8080"
+        /opt/raiko/bin/gaiko --verbosity $GAIKO_GUEST_APP_VERBOSE_LEVEL serve --sgx-instance-id $SGXGETH_PACAYA_INSTANCE_ID --port 8090 | sed 's/^/[gaiko] /' &
+        wait
+    fi
+fi
+
+if [[ -n $TDX ]]; then
+    echo "running raiko in tdx mode"
+    if [ ! -f $RAIKO_CONF_BASE_CONFIG ]; then
+        echo "$RAIKO_CONF_BASE_CONFIG file not found."
+        exit 1
+    fi
+
+    update_raiko_tdx_instance_id $RAIKO_CONF_BASE_CONFIG
 
     /opt/raiko/bin/raiko-host  --config-path=$RAIKO_CONF_BASE_CONFIG --chain-spec-path=$RAIKO_CONF_CHAIN_SPECS "$@"
 fi
