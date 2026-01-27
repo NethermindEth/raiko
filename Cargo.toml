@@ -1,5 +1,8 @@
 [workspace]
 resolver = "2"
+exclude = [
+    "provers/zisk/agent", # Entire ZISK agent is now self-contained
+]
 members = [
     "lib",
     "host",

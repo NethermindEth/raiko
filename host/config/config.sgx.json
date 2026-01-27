@@ -25,7 +25,8 @@
         "input_path": null
     },
     "risc0": {
-        "bonsai": true,
+        "boundless": true,
+        "bonsai": false,
         "snark": true,
         "profile": false,
         "execution_po2": 20,
@@ -34,6 +35,11 @@
     "sp1": {
         "prover": "network",
         "verify": true
+    },
+    "zisk": {
+        "prover": "local",
+        "verify": true,
+        "execution_mode": "prove"
     },
     "native": {
         "json_guest_input": null

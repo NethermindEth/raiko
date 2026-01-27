@@ -149,7 +149,7 @@ pub fn kzg_proof_to_bytes(proof: &ZG1) -> KzgGroup {
     proof.to_bytes()
 }
 
-#[cfg(test)]
+#[cfg(all(test, not(feature = "zisk")))]
 mod test {
 
     use super::*;
@@ -159,6 +159,12 @@ mod test {
         G1,
     };
 
+    #[cfg(not(feature = "zisk"))]
+    use reth_primitives::revm_primitives::kzg::{G1Points, G2Points, G1_POINTS, G2_POINTS};
+    #[cfg(not(feature = "zisk"))]
+    use reth_primitives::revm_primitives::Bytes;
+
+    #[cfg(not(feature = "zisk"))]
     pub fn verify_kzg_proof_evm(
         commitment: &KzgCommitment,
         z: &ZFr,
@@ -180,6 +186,41 @@ mod test {
             revm::precompile::kzg_point_evaluation::run(&Bytes::copy_from_slice(&input), u64::MAX)
                 .is_ok(),
         )
+    }
+
+    #[cfg(feature = "zisk")]
+    pub fn verify_kzg_proof_evm(
+        commitment: &KzgCommitment,
+        z: &ZFr,
+        y: &ZFr,
+        proof: &ZG1,
+    ) -> Result<bool, Eip4844Error> {
+        // For ZISK, use pure Rust implementation to avoid C dependencies
+        verify_kzg_proof_impl(
+            *commitment,
+            z.to_bytes(),
+            y.to_bytes(),
+            kzg_proof_to_bytes(proof),
+        )
+    }
+
+    #[test]
+    fn test_kzg_settings_equivalence() {
+        let kzg_settings: KZGSettings = kzg_traits::eip_4844::load_trusted_setup_rust(
+            &G1Points::as_ref(G1_POINTS)
+                .into_iter()
+                .flatten()
+                .cloned()
+                .collect::<Vec<_>>(),
+            &G2Points::as_ref(G2_POINTS)
+                .into_iter()
+                .flatten()
+                .cloned()
+                .collect::<Vec<_>>(),
+        )
+        .expect("failed to load trusted setup");
+        assert_eq!(KZG_SETTINGS.clone().secret_g1, kzg_settings.secret_g1);
+        assert_eq!(KZG_SETTINGS.clone().secret_g2, kzg_settings.secret_g2);
     }
 
     #[test]

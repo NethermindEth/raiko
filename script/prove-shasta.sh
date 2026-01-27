@@ -3,7 +3,7 @@
 if [ "$#" -ne 5 ]; then
     echo "Usage: prove-shasta.sh <chain> <proof> <batch_info> <l2 block> <last l2 anchor>"
     echo "  chain: taiko_mainnet, taiko_a7, taiko_dev"
-    echo "  proof: native, risc0[-bonsai], sp1, sgx, sgxgeth"
+    echo "  proof: native, risc0[-bonsai], sp1, sgx, sgxgeth, zisk"
     echo "  batch_info: \"[(batch_id, batch_proposal_height)]\""
     echo "Example:"
     echo "  prove-batch.sh ethereum native \"[(1, 2)]\" "
@@ -29,8 +29,6 @@ l2_block_numbers="$4"
 batch_id=""
 height=""
 last_anchor_block_number="$5"
-designated_prover="0x3c44cdddb6a900fa2b585dd299e03d12fa4293bc"
-parent_transition_hash="0x66aa40046aa64a8e0a7ecdbbc70fb2c63ebdcb2351e7d0b626ed3cb4f55fb388"
 checkpoint=null
 
 parse_batch_pair() {
@@ -56,8 +54,6 @@ parse_batch_pair() {
         fi
         json_array+="{ \
             \"proposal_id\": $batch_id, \
-            \"designated_prover\": \"$designated_prover\", \
-            \"parent_transition_hash\": \"$parent_transition_hash\", \
             \"checkpoint\": $checkpoint, \
             \"l1_inclusion_block_number\": $height, \
             \"l2_block_numbers\": [$l2_block_numbers], \
@@ -165,8 +161,14 @@ elif [ "$proof" == "risc0-bonsai" ]; then
         "execution_po2": 20
     }
   '
+elif [ "$proof" == "zisk" ]; then
+    proofParam='
+    "proof_type": "zisk",
+    "blob_proof_type": "proof_of_equivalence",
+    "zisk": {}
+  '
 else
-    echo "Invalid proof name. Please use 'native', 'risc0[-bonsai]', 'sp1', 'sgxgeth' or 'sgx'."
+    echo "Invalid proof name. Please use 'native', 'risc0[-bonsai]', 'sp1', 'sgxgeth', 'sgx', or 'zisk'."
     exit 1
 fi
 

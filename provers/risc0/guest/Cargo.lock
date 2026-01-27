@@ -4300,7 +4300,9 @@ dependencies = [
 [[package]]
 name = "risc0-bigint2"
 version = "1.4.10"
+version = "1.4.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e916aa385e61e31935d7964aaeaec1fae9da617af6415d6363864147f430ebff"
 checksum = "e916aa385e61e31935d7964aaeaec1fae9da617af6415d6363864147f430ebff"
 dependencies = [
  "include_bytes_aligned",
@@ -5477,12 +5479,15 @@ checksum = "ebc1c04c71510c7f702b52b7c350734c9ff1295c464a03335b00bb84fc54f853"
 [[package]]
 name = "url"
 version = "2.5.7"
+version = "2.5.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "08bc136a29a3d1758e07a9cca267be308aeebf5cfd5a10f3f67ab2097683ef5b"
 checksum = "08bc136a29a3d1758e07a9cca267be308aeebf5cfd5a10f3f67ab2097683ef5b"
 dependencies = [
  "form_urlencoded",
  "idna",
  "percent-encoding",
+ "serde",
  "serde",
 ]
 
@@ -5744,7 +5749,9 @@ checksum = "d6bbff5f0aada427a1e5a6da5f1f98158182f26556f345ac9e04d36d0ebed650"
 [[package]]
 name = "winnow"
 version = "0.7.13"
+version = "0.7.13"
 source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "21a0236b59786fed61e2a80582dd500fe61f18b5dca67a4a067d0bc9039339cf"
 checksum = "21a0236b59786fed61e2a80582dd500fe61f18b5dca67a4a067d0bc9039339cf"
 dependencies = [
  "memchr",
