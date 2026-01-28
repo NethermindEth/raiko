@@ -286,12 +286,10 @@ mod tests {
         let shasta_input_key =
             ShastaInputRequestKey::new(1u64, "ethereum".to_string(), "ethereum".to_string());
         let actual_prover_address = "test_actual_prover".to_string();
-        let designated_prover_address = "test_designated_prover".to_string();
         let shasta_proof_key = ShastaProofRequestKey::new_with_input_key(
             shasta_input_key,
             ProofType::Native,
             actual_prover_address,
-            designated_prover_address,
         );
         RequestKey::ShastaProof(shasta_proof_key)
     }
@@ -308,13 +306,11 @@ mod tests {
             BlobProofType::ProofOfEquivalence,
             vec![1234u64],
             HashMap::new(),
-            B256::from([0u8; 32]),
             Some(ShastaProposalCheckpoint {
                 block_number: 1234u64,
                 block_hash: B256::from([0u8; 32]),
                 state_root: B256::from([0u8; 32]),
             }),
-            Address::ZERO,
             0,
         );
         RequestEntity::ShastaProof(shasta_proof_entity)

@@ -1,6 +1,6 @@
 // rust impl of taiko-mono/packages/protocol/contracts/layer1/shasta/libs/LibHashing.sol
 
-use crate::input::shasta::{Commitment, CoreState, Derivation, Proposal};
+use crate::input::shasta::{Commitment, Derivation, Proposal};
 
 use crate::input::shasta::Checkpoint;
 use crate::primitives::keccak::keccak;
@@ -121,16 +121,13 @@ pub fn hash_shasta_transition_input(transition_input: &TransitionInputData) -> B
     values.push(u64_to_b256(transition_input.proposal_id));
     values.push(transition_input.proposal_hash);
     values.push(transition_input.parent_proposal_hash);
-    values.push(transition_input.parent_checkpoint_hash);
+    values.push(transition_input.parent_block_hash);
 
     // Prover identity (L1-level)
     values.push(address_to_b256(transition_input.actual_prover));
 
     // Transition fields (as in Solidity Transition struct)
     values.push(address_to_b256(transition_input.transition.proposer));
-    values.push(address_to_b256(
-        transition_input.transition.designatedProver,
-    ));
     values.push(u48_to_b256(transition_input.transition.timestamp));
     values.push(hash_checkpoint(&transition_input.checkpoint));
 
@@ -142,30 +139,45 @@ pub fn hash_shasta_transition_input(transition_input: &TransitionInputData) -> B
     hash_values_impl(&values)
 }
 
-pub fn hash_commitment(prove_input: &Commitment) -> B256 {
-    // Flatten all the fields into a Vec<B256>, as in Solidity's buffer.
-    let transition_count = prove_input.transitions.len();
-    let mut buffer: Vec<B256> = Vec::with_capacity(9 + transition_count * 4);
+/// Optimized hashing for commitment data, matching Solidity's hashCommitment implementation.
+/// Flattens all fields following the same memory layout as the Solidity buffer,
+/// including static field ordering, offsets, and transition element packing.
+pub fn hash_commitment(commitment: &Commitment) -> B256 {
+    let transitions_len = commitment.transitions.len();
+    let total_words = 9 + transitions_len * 4;
 
-    // Top-level head
+    let mut buffer: Vec<B256> = Vec::with_capacity(total_words);
+
+    // [0] offset to commitment (0x20)
     buffer.push(U256::from(0x20u64).into());
 
-    // Commitment static fields
-    buffer.push(U256::from(prove_input.firstProposalId).into());
-    buffer.push(prove_input.firstProposalParentBlockHash);
-    buffer.push(prove_input.lastProposalHash);
-    buffer.push(address_to_b256(prove_input.actualProver));
-    buffer.push(U256::from(prove_input.endBlockNumber).into());
-    buffer.push(prove_input.endStateRoot);
+    // Commitment static section
+    // [1] firstProposalId
+    buffer.push(U256::from(commitment.firstProposalId).into());
+    // [2] firstProposalParentBlockHash
+    buffer.push(commitment.firstProposalParentBlockHash);
+    // [3] lastProposalHash
+    buffer.push(commitment.lastProposalHash);
+    // [4] actualProver as address (160 bits zero-extended to 256)
+    buffer.push(address_to_b256(commitment.actualProver));
+    // [5] endBlockNumber
+    buffer.push(U256::from(commitment.endBlockNumber).into());
+    // [6] endStateRoot
+    buffer.push(commitment.endStateRoot);
+    // [7] offset to transitions (0xe0)
     buffer.push(U256::from(0xe0u64).into());
 
-    buffer.push(U256::from(transition_count as u64).into());
-    // Flatten each Transition as in Solidity: [proposer, designatedProver, timestamp, checkpointHash]
-    for transition in &prove_input.transitions {
+    // [8] transitions array length
+    buffer.push(U256::from(transitions_len as u64).into());
+
+    // Each transition: [proposer, timestamp, blockHash]
+    for transition in &commitment.transitions {
+        // proposer: address (uint160, left padded to 32 bytes)
         buffer.push(address_to_b256(transition.proposer));
-        buffer.push(address_to_b256(transition.designatedProver));
-        buffer.push(u48_to_b256(transition.timestamp.to()));
-        buffer.push(transition.checkpointHash);
+        // timestamp: as 256 bits (Solidity stores as uint256)
+        buffer.push(U256::from(transition.timestamp).into());
+        // blockHash (matches Solidity's .blockHash field naming and usage)
+        buffer.push(transition.blockHash);
     }
 
     hash_values_impl(&buffer)
@@ -189,16 +201,6 @@ unchecked {
 */
 pub fn hash_proposal(proposal: &Proposal) -> B256 {
     keccak(proposal.abi_encode().as_slice()).into()
-}
-
-pub fn hash_core_state(core_state: &CoreState) -> B256 {
-    hash_five_values(
-        U256::from(core_state.nextProposalId).into(),
-        U256::from(core_state.lastProposalBlockId).into(),
-        U256::from(core_state.lastFinalizedProposalId).into(),
-        U256::from(core_state.lastCheckpointTimestamp).into(),
-        core_state.lastFinalizedTransitionHash,
-    )
 }
 
 /// Hash a derivation source (isForcedInclusion flag + blobSlice)
@@ -506,7 +508,6 @@ mod test {
     fn test_hash_prove_input() {
         // Setup a sample ProveInput with minimal structure to test only that hash_prove_input is called and behaves as expected.
         // This matches the test structure and dummy field values from the Solidity reference.
-
         let prove_input = Commitment {
             firstProposalId: Uint::from(42),
             firstProposalParentBlockHash: b256!(
@@ -518,12 +519,19 @@ mod test {
             actualProver: address!("0000000000000000000000000000000000012345"),
             endBlockNumber: Uint::from(1000),
             endStateRoot: b256!("0000000000000000000000000000000000000000000000000000000000abcdef"),
-            transitions: vec![],
+            transitions: vec![crate::input::shasta::Transition {
+                proposer: address!("0000000000000000000000000000000000001111"),
+                timestamp: Uint::from(123_456_789),
+                blockHash: b256!(
+                    "0000000000000000000000000000000000000000000000000000000000003333"
+                ),
+            }],
         };
+
         let prove_input_hash = hash_commitment(&prove_input);
         assert_eq!(
             alloy_primitives::hex::encode_prefixed(prove_input_hash),
-            "0x0f1c0b0391c2617d236a059287ba55aeaa668cacfcd9abf6d537de314ae9fce8"
+            "0x079961e990a2be01ebe286ee2fdd382fde2349730971fe32a821da9dec67559e"
         );
     }
 
@@ -540,13 +548,12 @@ mod test {
             parent_proposal_hash: b256!(
                 "0000000000000000000000000000000000000000000000000000000000000000"
             ),
-            parent_checkpoint_hash: b256!(
+            parent_block_hash: b256!(
                 "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
             ),
             actual_prover: address!("1111111111111111111111111111111111111111"),
             transition: ShastaTransitionInput {
                 proposer: address!("2222222222222222222222222222222222222222"),
-                designatedProver: address!("3333333333333333333333333333333333333333"),
                 timestamp: 123,
             },
             checkpoint: Checkpoint {
@@ -563,11 +570,11 @@ mod test {
         let h0 = hash_shasta_transition_input(&base);
 
         // Changing any continuity / commitment-relevant field must change the hash.
-        base.parent_checkpoint_hash =
+        base.parent_block_hash =
             b256!("eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee");
         assert_ne!(h0, hash_shasta_transition_input(&base));
 
-        base.parent_checkpoint_hash =
+        base.parent_block_hash =
             b256!("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
         base.parent_proposal_hash =
             b256!("ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff");
@@ -593,13 +600,12 @@ mod test {
             parent_proposal_hash: b256!(
                 "0000000000000000000000000000000000000000000000000000000000000000"
             ),
-            parent_checkpoint_hash: b256!(
+            parent_block_hash: b256!(
                 "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
             ),
             actual_prover: address!("1111111111111111111111111111111111111111"),
             transition: ShastaTransitionInput {
                 proposer: address!("2222222222222222222222222222222222222222"),
-                designatedProver: address!("3333333333333333333333333333333333333333"),
                 timestamp: 123,
             },
             checkpoint: Checkpoint {

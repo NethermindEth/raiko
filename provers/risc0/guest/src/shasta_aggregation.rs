@@ -8,10 +8,7 @@ use raiko_lib::{
     input::ShastaRisc0AggregationGuestInput,
     libhash::hash_shasta_subproof_input,
     primitives::B256,
-    protocol_instance::{
-        build_shasta_commitment_from_proof_carry_data_vec, shasta_aggregation_output,
-        shasta_zk_aggregation_output, words_to_bytes_le,
-    },
+    protocol_instance::{shasta_aggregation_hash_for_zk, words_to_bytes_le},
 };
 
 pub fn main() {
@@ -27,20 +24,10 @@ pub fn main() {
         );
     }
 
-    let commitment =
-        build_shasta_commitment_from_proof_carry_data_vec(&input.proof_carry_data_vec).unwrap();
-    let first = input.proof_carry_data_vec.first().unwrap();
-    let aggregation_hash = shasta_aggregation_output(
-        &commitment,
-        first.chain_id,
-        first.verifier,
-        input.prover_address,
-    );
-
-    let agg_public_input_hash = shasta_zk_aggregation_output(
-        B256::from(words_to_bytes_le(&input.image_id)),
-        aggregation_hash,
-    );
+    let sub_image_id = B256::from(words_to_bytes_le(&input.image_id));
+    let agg_public_input_hash =
+        shasta_aggregation_hash_for_zk(sub_image_id, &input.proof_carry_data_vec)
+            .expect("invalid shasta proof carry data");
 
     env::commit_slice(agg_public_input_hash.as_slice());
 }
