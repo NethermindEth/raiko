@@ -453,21 +453,16 @@ pub struct ProofRequest {
     #[serde(flatten)]
     /// Additional prover params.
     pub prover_args: HashMap<String, Value>,
-    /// For shasta
-    /// parent transition hash, if not provided, it will be set to the default value
-    pub parent_transition_hash: Option<B256>,
     /// checkpoint, if not provided, it will be set to the default value
     /// in shasta, this is the checkpoint of the l2 block
     pub checkpoint: Option<ShastaProposalCheckpoint>,
-    /// designated_prover
-    pub designated_prover: Option<Address>,
+    /// last anchor number
+    pub last_anchor_block_number: Option<u64>,
     /// Cached block proposed event data to avoid duplicate RPC calls
     #[serde(skip)]
     pub cached_event_data: Option<raiko_lib::input::BlockProposedFork>,
     /// GPU number to use for proof generation
     pub gpu_number: Option<u32>,
-    /// last anchor number
-    pub last_anchor_block_number: Option<u64>,
 }
 
 impl ProofRequest {
@@ -619,11 +614,8 @@ impl From<ShastaProposalCheckpoint> for Checkpoint {
 #[derive(Clone, Debug, Serialize, Deserialize, ToSchema)]
 pub struct ShastaProposal {
     pub proposal_id: u64,
-    pub designated_prover: Address,
-    pub parent_transition_hash: Option<B256>,
     pub checkpoint: Option<ShastaProposalCheckpoint>,
     pub l1_inclusion_block_number: u64,
-    pub l1_bond_proposal_block_number: Option<u64>,
     pub l2_block_numbers: Vec<u64>,
     pub last_anchor_block_number: u64,
 }
@@ -632,12 +624,8 @@ impl std::fmt::Display for ShastaProposal {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
-            "{}:{:?}:{:?}:{}:{}",
-            self.proposal_id,
-            self.parent_transition_hash,
-            self.checkpoint,
-            self.l1_inclusion_block_number,
-            self.designated_prover
+            "{}:{:?}:{}",
+            self.proposal_id, self.checkpoint, self.l1_inclusion_block_number
         )
     }
 }
@@ -817,9 +805,7 @@ impl TryFrom<ProofRequestOpt> for ProofRequest {
                     RaikoError::InvalidRequestConfig("Invalid blob_proof_type".to_string())
                 })?,
             prover_args: value.prover_args.into(),
-            parent_transition_hash: None,
             checkpoint: None,
-            designated_prover: None,
             cached_event_data: None,
             gpu_number: None,
             last_anchor_block_number: None,

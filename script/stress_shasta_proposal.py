@@ -58,6 +58,7 @@ class BatchMonitor:
         watch_mode: bool = False,
         time_speed: float = 1.0,
         anchor_abi_file: Optional[str] = None,
+        aggregate: int = 0,
     ):
         self.l1_rpc = l1_rpc
         self.l2_rpc = l2_rpc
@@ -78,11 +79,20 @@ class BatchMonitor:
         self.watch_mode = watch_mode
         self.time_speed = time_speed
         self.anchor_abi_file = anchor_abi_file
+        self.aggregate = aggregate
         # Initialize Shasta event decoder
         self.shasta_decoder = ShastaEventDecoder()
         # Cache for proposal block numbers: proposal_id -> l1_block_number
         # Used for both normal proposals and bond proposals
         self.proposal_block_cache: Dict[int, Optional[int]] = {}
+        # Queue for proposals waiting to be aggregated
+        self.pending_proposals: list[Dict[str, Any]] = []
+        # Aggregate running count
+        self.aggregate_running_count = 0
+        # Track aggregate requests: list of proposal data dicts
+        self.aggregate_requests: list[list[Dict[str, Any]]] = []
+        # Track aggregate requests: list of proposal_ids lists
+        self.aggregate_requests: list[list[int]] = []
         # logger
         logging.basicConfig(
             level=logging.INFO,
@@ -177,14 +187,49 @@ class BatchMonitor:
             self.logger.error(f"Failed to get L2 block {block_number}: {e}")
             return None
 
-    def decode_anchor_tx_input(self, tx_input: str) -> Optional[Tuple[int, int]]:
+    def extract_proposal_id_from_extradata(self, extradata: str) -> Optional[int]:
         """
-        Decode anchorV4 transaction input to extract proposal_id and anchor_number.
+        Extract proposal_id from block extradata.
+        
+        Format: byte[0] is config, bytes[1:7] is proposal_id (6 bytes, big-endian uint48)
+        Example: 0x4b000000000005 -> proposal_id = 5
+        
+        Returns proposal_id or None if extraction fails.
+        """
+        try:
+            # Remove 0x prefix if present
+            if extradata.startswith("0x"):
+                extradata = extradata[2:]
+            
+            extradata_bytes = bytes.fromhex(extradata)
+            
+            # Need at least 7 bytes (1 config byte + 6 proposal_id bytes)
+            if len(extradata_bytes) < 7:
+                self.logger.warning(f"extradata too short: {len(extradata_bytes)} bytes (need at least 7)")
+                return None
+            
+            # Extract proposal_id from bytes[1:7] (6 bytes, big-endian)
+            proposal_id_bytes = extradata_bytes[1:7]
+            proposal_id = int.from_bytes(proposal_id_bytes, byteorder="big")
+            
+            self.logger.debug(f"Extracted proposal_id from extradata: {proposal_id}")
+            return proposal_id
+        except Exception as e:
+            self.logger.error(f"Error extracting proposal_id from extradata: {e}")
+            import traceback
+            self.logger.debug(traceback.format_exc())
+            return None
+
+    def decode_anchor_tx_input(self, tx_input: str) -> Optional[int]:
+        """
+        Decode anchorV4 transaction input to extract anchor_number.
+        
+        New ABI only has _checkpoint parameter, which contains blockNumber.
         
         First tries to use web3.py's contract decoding if ABI is available.
         Falls back to manual decoding if that fails.
         
-        Returns (proposal_id, anchor_number) or None if decoding fails.
+        Returns anchor_number or None if decoding fails.
         """
         try:
             # Try web3.py contract decoding first if available
@@ -198,35 +243,17 @@ class BatchMonitor:
                     
                     # Check if it's anchorV4
                     if func_obj.fn_name == "anchorV4":
-                        # Extract from decoded parameters
-                        proposal_params = func_params.get("_proposalParams", {})
-                        # AnchorV4 ABI changed: second param is now `_checkpoint` (ICheckpointStore.Checkpoint)
+                        # New anchorV4 ABI: only has `_checkpoint` parameter (ICheckpointStore.Checkpoint)
+                        # Checkpoint: (blockNumber: uint48, blockHash: bytes32, stateRoot: bytes32)
                         checkpoint_params = func_params.get("_checkpoint", {})
                         
                         self.logger.debug(
-                            f"Decoded params - proposal_params type: {type(proposal_params)}, checkpoint_params type: {type(checkpoint_params)}"
+                            f"Decoded params - checkpoint_params type: {type(checkpoint_params)}"
                         )
                         
-                        # Handle different return types from web3.py
-                        # ProposalParams: (proposalId, proposer, proverAuth)
-                        # Checkpoint: (blockNumber, blockHash, stateRoot)
-                        
-                        proposal_id = None
                         anchor_number = None
                         
-                        # Try to extract from tuple/list (indexed access)
-                        if isinstance(proposal_params, (list, tuple)):
-                            proposal_id = proposal_params[0] if len(proposal_params) > 0 else None
-                            self.logger.debug(f"Extracted proposal_id from tuple index 0: {proposal_id}")
-                        # Try dict access (named parameters)
-                        elif isinstance(proposal_params, dict):
-                            proposal_id = proposal_params.get("proposalId")
-                            self.logger.debug(f"Extracted proposal_id from dict: {proposal_id}")
-                        # Try AttributeDict or namedtuple
-                        elif hasattr(proposal_params, 'proposalId'):
-                            proposal_id = proposal_params.proposalId
-                            self.logger.debug(f"Extracted proposal_id from attribute: {proposal_id}")
-                        
+                        # Extract blockNumber from checkpoint
                         if isinstance(checkpoint_params, (list, tuple)):
                             anchor_number = checkpoint_params[0] if len(checkpoint_params) > 0 else None
                             self.logger.debug(f"Extracted anchor_number from checkpoint tuple index 0: {anchor_number}")
@@ -237,14 +264,14 @@ class BatchMonitor:
                             anchor_number = checkpoint_params.blockNumber
                             self.logger.debug(f"Extracted anchor_number from checkpoint attribute: {anchor_number}")
                         
-                        if proposal_id is not None and anchor_number is not None:
+                        if anchor_number is not None:
                             self.logger.info(
-                                f"✓ Decoded via ABI: proposal_id={proposal_id}, anchor_number={anchor_number}"
+                                f"✓ Decoded via ABI: anchor_number={anchor_number}"
                             )
-                            return (proposal_id, anchor_number)
+                            return anchor_number
                         else:
                             self.logger.warning(
-                                f"anchorV4 decoded but missing fields: proposal_id={proposal_id}, anchor_number={anchor_number}"
+                                f"anchorV4 decoded but missing anchor_number"
                             )
                     else:
                         self.logger.warning(f"Function is {func_obj.fn_name}, not anchorV4")
@@ -260,19 +287,18 @@ class BatchMonitor:
             
             input_bytes = bytes.fromhex(tx_input)
             
-            # anchorV4 ABI (current):
-            #   anchorV4((uint48 proposalId, address proposer, bytes proverAuth),
-            #            (uint48 blockNumber, bytes32 blockHash, bytes32 stateRoot))
+            # New anchorV4 ABI (updated):
+            #   anchorV4(ICheckpointStore.Checkpoint)
+            #   Checkpoint: (blockNumber: uint48, blockHash: bytes32, stateRoot: bytes32)
             #
-            # ABI head layout after selector (6 * 32 bytes):
-            #   word0: proposalId (uint48 in low 6 bytes)
-            #   word1: proposer (address in low 20 bytes)
-            #   word2: proverAuth offset (uint256, relative to params start)
-            #   word3: checkpoint.blockNumber (uint48 in low 6 bytes)   <-- anchor_number
-            #   word4: checkpoint.blockHash (bytes32)
-            #   word5: checkpoint.stateRoot (bytes32)
-            if len(input_bytes) < 4 + 32 * 6:
-                self.logger.error(f"Anchor tx input too short: {len(input_bytes)} bytes")
+            # ABI layout after selector (3 * 32 bytes = 96 bytes):
+            #   word0: checkpoint.blockNumber (uint48 in low 6 bytes)   <-- anchor_number
+            #   word1: checkpoint.blockHash (bytes32)
+            #   word2: checkpoint.stateRoot (bytes32)
+            # Total: 4 (selector) + 96 = 100 bytes
+            
+            if len(input_bytes) < 4 + 32 * 3:
+                self.logger.error(f"Anchor tx input too short: {len(input_bytes)} bytes (expected at least {4 + 32 * 3})")
                 return None
             
             # Get function selector
@@ -280,22 +306,15 @@ class BatchMonitor:
             self.logger.debug(f"Function selector: 0x{func_selector}")
             
             params_start = 4
-            # word0: proposalId
-            proposal_id_word = input_bytes[params_start:params_start + 32]
-            proposal_id = int.from_bytes(proposal_id_word[26:32], byteorder="big")
-
-            # word3: checkpoint.blockNumber (anchor number)
-            checkpoint_block_number_word_start = params_start + 32 * 3
-            checkpoint_block_number_word = input_bytes[
-                checkpoint_block_number_word_start:checkpoint_block_number_word_start + 32
-            ]
+            # word0: checkpoint.blockNumber (anchor number)
+            checkpoint_block_number_word = input_bytes[params_start:params_start + 32]
             anchor_number = int.from_bytes(checkpoint_block_number_word[26:32], byteorder="big")
             
             self.logger.debug(
-                f"Decoded anchor tx: proposal_id={proposal_id}, anchor_number={anchor_number}"
+                f"Decoded anchor tx (manual): anchor_number={anchor_number}"
             )
             
-            return (proposal_id, anchor_number)
+            return anchor_number
         except Exception as e:
             self.logger.error(f"Error decoding anchor tx input: {e}")
             import traceback
@@ -306,10 +325,24 @@ class BatchMonitor:
         """
         Parse L2 block to extract anchor transaction information.
         Returns AnchorTxInfo with proposal_id, anchor_number, and l2_block_number.
+        
+        proposal_id is extracted from block extradata (bytes[1:7]).
+        anchor_number is extracted from anchor transaction checkpoint.
         """
         try:
             block = await self.get_l2_block(l2_block_number)
             if block is None:
+                return None
+            
+            # Extract proposal_id from block extradata
+            extradata = block.get("extraData", "0x")
+            if not extradata or extradata == "0x":
+                self.logger.warning(f"No extradata in L2 block {l2_block_number}")
+                return None
+            
+            proposal_id = self.extract_proposal_id_from_extradata(extradata)
+            if proposal_id is None:
+                self.logger.warning(f"Failed to extract proposal_id from extradata in block {l2_block_number}")
                 return None
             
             transactions = block.get("transactions", [])
@@ -325,13 +358,11 @@ class BatchMonitor:
                 self.logger.warning(f"Empty or invalid anchor tx input in block {l2_block_number}")
                 return None
             
-            # Decode anchor tx input
-            decoded = self.decode_anchor_tx_input(tx_input)
-            if decoded is None:
+            # Decode anchor tx input to get anchor_number
+            anchor_number = self.decode_anchor_tx_input(tx_input)
+            if anchor_number is None:
                 self.logger.warning(f"Failed to decode anchor tx input for block {l2_block_number}")
                 return None
-            
-            proposal_id, anchor_number = decoded
             
             return AnchorTxInfo(
                 proposal_id=proposal_id,
@@ -340,6 +371,8 @@ class BatchMonitor:
             )
         except Exception as e:
             self.logger.error(f"Error parsing L2 block {l2_block_number}: {e}")
+            import traceback
+            self.logger.debug(traceback.format_exc())
             return None
 
     def group_blocks_by_proposal_id(
@@ -683,29 +716,18 @@ class BatchMonitor:
         return logs[0].blockNumber, batch_ids
 
     def generate_post_data(
-        self, proposal_id: int, l1_inclusion_block_number: int, l2_block_numbers: list[int], last_anchor_block_number: int, l1_bond_proposal_block_number: Optional[int] = None
+        self, 
+        proposals: list[Dict[str, Any]], 
+        aggregate: bool = False
     ) -> Dict[str, Any]:
         """generate post data"""
-        proposal_data = {
-            "proposal_id": proposal_id,
-            "l1_inclusion_block_number": l1_inclusion_block_number,
-            "l2_block_numbers": l2_block_numbers,
-            "designated_prover": "0x3c44cdddb6a900fa2b585dd299e03d12fa4293bc",
-            "parent_transition_hash": "0x66aa40046aa64a8e0a7ecdbbc70fb2c63ebdcb2351e7d0b626ed3cb4f55fb388",
-            "checkpoint": None,
-            "last_anchor_block_number": last_anchor_block_number,
-        }
-        
-        # Add l1_bond_proposal_block_number if provided
-        if l1_bond_proposal_block_number is not None:
-            proposal_data["l1_bond_proposal_block_number"] = l1_bond_proposal_block_number
-        
         return {
-            "proposals": [proposal_data],
+            "proposals": proposals,
             "prover": "0x70997970C51812dc3A010C7d01b50e0d17dc79C8",
             "graffiti": "8008500000000000000000000000000000000000000000000000000000000000",
             "proof_type": self.prove_type,
             "blob_proof_type": "proof_of_equivalence",
+            "aggregate": aggregate,
             "native": {},
             "sgx": {
                 "instance_id": 1234,
@@ -723,13 +745,21 @@ class BatchMonitor:
         }
 
     async def submit_to_raiko(
-        self, proposal_id: int, l1_inclusion_block: int, l2_block_numbers: list[int], last_anchor_block_number: int, l1_bond_proposal_block_number: Optional[int] = None
+        self, proposal_id: int, l1_inclusion_block: int, l2_block_numbers: list[int], last_anchor_block_number: int
     ) -> Optional[str]:
         """submit batch to Raiko"""
         try:
             headers = {"x-api-key": "1", "Content-Type": "application/json"}
 
-            payload = self.generate_post_data(proposal_id, l1_inclusion_block, l2_block_numbers, last_anchor_block_number, l1_bond_proposal_block_number)
+            proposal_data = {
+                "proposal_id": proposal_id,
+                "l1_inclusion_block_number": l1_inclusion_block,
+                "l2_block_numbers": l2_block_numbers,
+                "checkpoint": None,
+                "last_anchor_block_number": last_anchor_block_number,
+            }
+            
+            payload = self.generate_post_data([proposal_data], aggregate=False)
             print(f"payload = {payload}")
 
             response = requests.post(
@@ -754,14 +784,66 @@ class BatchMonitor:
         except Exception as e:
             self.logger.error(f"Failed to submit to Raiko: {e}")
             return None
+    
+    async def submit_aggregate_to_raiko(self) -> Optional[str]:
+        """submit aggregate request to Raiko"""
+        if len(self.pending_proposals) == 0:
+            return None
+            
+        try:
+            headers = {"x-api-key": "1", "Content-Type": "application/json"}
+            
+            # Use the collected proposals
+            proposals_to_aggregate = self.pending_proposals.copy()
+            self.pending_proposals.clear()
+            
+            payload = self.generate_post_data(proposals_to_aggregate, aggregate=True)
+            proposal_ids = [p["proposal_id"] for p in proposals_to_aggregate]
+            self.logger.info(
+                f"Submitting aggregate request for {len(proposals_to_aggregate)} proposals: {proposal_ids}"
+            )
+            print(f"aggregate payload = {payload}")
+
+            response = requests.post(
+                f"{self.raiko_rpc}/v3/proof/batch/shasta",
+                headers=headers,
+                json=payload,
+                timeout=10,
+            )
+            result = response.json()
+            if "data" in result:
+                result["data"] = {}  # avoid big print
+            if result.get("status") == "ok":
+                self.aggregate_running_count += 1
+                self.aggregate_requests.append(proposals_to_aggregate)
+                self.logger.info(
+                    f"Aggregate request for proposals {proposal_ids} submitted to Raiko with response: {result}, "
+                    f"current running aggregate requests: {self.aggregate_running_count}"
+                )
+                return None
+            else:
+                self.logger.error(
+                    f"Failed to submit aggregate request: {result.get('message', 'Unknown error')}"
+                )
+                return None
+        except Exception as e:
+            self.logger.error(f"Failed to submit aggregate to Raiko: {e}")
+            return None
 
     async def query_raiko_status(
-        self, proposal_id: int, l1_inclusion_block: int, l2_block_numbers: list[int], last_anchor_block_number: int, l1_bond_proposal_block_number: Optional[int] = None
+        self, proposal_id: int, l1_inclusion_block: int, l2_block_numbers: list[int], last_anchor_block_number: int
     ) -> RaikoResponse:
         """query Raiko status"""
         try:
             headers = {"x-api-key": "1", "Content-Type": "application/json"}
-            payload = self.generate_post_data(proposal_id, l1_inclusion_block, l2_block_numbers, last_anchor_block_number, l1_bond_proposal_block_number)
+            proposal_data = {
+                "proposal_id": proposal_id,
+                "l1_inclusion_block_number": l1_inclusion_block,
+                "l2_block_numbers": l2_block_numbers,
+                "checkpoint": None,
+                "last_anchor_block_number": last_anchor_block_number,
+            }
+            payload = self.generate_post_data([proposal_data], aggregate=False)
             response = requests.post(
                 f"{self.raiko_rpc}/v3/proof/batch/shasta",
                 headers=headers,
@@ -779,6 +861,30 @@ class BatchMonitor:
                 return RaikoResponse(status="error", message="Invalid response format")
         except Exception as e:
             self.logger.error(f"Failed to query Raiko status: {e}")
+            return RaikoResponse(status="error", message=str(e))
+    
+    async def query_aggregate_status(self, proposals: list[Dict[str, Any]]) -> RaikoResponse:
+        """query aggregate request status"""
+        try:
+            headers = {"x-api-key": "1", "Content-Type": "application/json"}
+            payload = self.generate_post_data(proposals, aggregate=True)
+            response = requests.post(
+                f"{self.raiko_rpc}/v3/proof/batch/shasta",
+                headers=headers,
+                json=payload,
+                timeout=10,
+            )
+            result = response.json()
+            if result.get("status") == "error":
+                return RaikoResponse(
+                    status="error", message=result.get("message", "Unknown error")
+                )
+            elif result.get("status") == "ok":
+                return RaikoResponse(status="ok", data=result.get("data", {}))
+            else:
+                return RaikoResponse(status="error", message="Invalid response format")
+        except Exception as e:
+            self.logger.error(f"Failed to query aggregate status: {e}")
             return RaikoResponse(status="error", message=str(e))
 
     async def process_proposal_group(self, group: ProposalGroup, l1_inclusion_block: int):
@@ -819,26 +925,8 @@ class BatchMonitor:
                     f"First block is 0, no parent block available, using default last_anchor_block_number=0"
                 )
 
-            # Get l1_bond_proposal_block_number from cache (pre-fetched in batch)
-            l1_bond_proposal_block_number = None
-            bond_proposal_id = group.proposal_id - 6
-            if bond_proposal_id > 0:
-                l1_bond_proposal_block_number = self.proposal_block_cache.get(bond_proposal_id)
-                if l1_bond_proposal_block_number is not None:
-                    self.logger.info(
-                        f"Using cached bond proposal_id {bond_proposal_id} -> L1 block {l1_bond_proposal_block_number}"
-                    )
-                else:
-                    self.logger.info(
-                        f"Bond proposal_id {bond_proposal_id} not found (cached as None)"
-                    )
-            else:
-                self.logger.info(
-                    f"Proposal_id {group.proposal_id} is too small (bond_proposal_id would be {bond_proposal_id}), skipping bond proposal lookup"
-                )
-
             # request Raiko
-            await self.submit_to_raiko(group.proposal_id, l1_inclusion_block, group.l2_block_numbers, last_anchor_block_number, l1_bond_proposal_block_number)
+            await self.submit_to_raiko(group.proposal_id, l1_inclusion_block, group.l2_block_numbers, last_anchor_block_number)
 
             # polling
             retry_count = 0
@@ -851,7 +939,7 @@ class BatchMonitor:
                     )
                     break
 
-                response = await self.query_raiko_status(group.proposal_id, l1_inclusion_block, group.l2_block_numbers, last_anchor_block_number, l1_bond_proposal_block_number)
+                response = await self.query_raiko_status(group.proposal_id, l1_inclusion_block, group.l2_block_numbers, last_anchor_block_number)
 
                 if response.status == "error":
                     self.logger.error(
@@ -878,6 +966,23 @@ class BatchMonitor:
                         self.logger.info(
                             f"Proposal {group.proposal_id} in L1 Block {l1_inclusion_block} completed with proof {response.data['proof']['proof']}"
                         )
+                        # If aggregate mode is enabled, add completed proposal to pending list
+                        if self.aggregate > 0:
+                            proposal_data = {
+                                "proposal_id": group.proposal_id,
+                                "l1_inclusion_block_number": l1_inclusion_block,
+                                "l2_block_numbers": group.l2_block_numbers,
+                                "checkpoint": None,
+                                "last_anchor_block_number": last_anchor_block_number,
+                            }
+                            self.pending_proposals.append(proposal_data)
+                            self.logger.info(
+                                f"Added completed proposal {group.proposal_id} to pending aggregate list ({len(self.pending_proposals)}/{self.aggregate})"
+                            )
+                            
+                            # If we've collected enough proposals, submit aggregate request
+                            if len(self.pending_proposals) >= self.aggregate:
+                                await self.submit_aggregate_to_raiko()
                         break
                     else:
                         self.logger.warning(
@@ -1161,8 +1266,11 @@ class BatchMonitor:
             # Apply block_running_ratio
             acc_odds += self.block_running_ratio
             if acc_odds >= 1.0:
+                aggregate_info = ""
+                if self.aggregate > 0:
+                    aggregate_info = f", aggregate running: {self.aggregate_running_count}"
                 self.logger.info(
-                    f"Submitting proposal {group.proposal_id} (L2 blocks {group.l2_block_numbers}) @ L1 block {l1_inclusion_block}, current running tasks: {self.running_count}"
+                    f"Submitting proposal {group.proposal_id} (L2 blocks {group.l2_block_numbers}) @ L1 block {l1_inclusion_block}, current running tasks: {self.running_count}{aggregate_info}"
                 )
                 self.running_count += 1
                 acc_odds -= 1.0
@@ -1183,6 +1291,30 @@ class BatchMonitor:
         if tasks:
             await asyncio.gather(*tasks, return_exceptions=True)
         
+        # Submit any remaining pending proposals as aggregate if aggregate mode is enabled
+        if self.aggregate > 0 and len(self.pending_proposals) > 0:
+            self.logger.info(
+                f"Submitting remaining {len(self.pending_proposals)} proposals as aggregate"
+            )
+            await self.submit_aggregate_to_raiko()
+        
+        # Check aggregate requests status and decrease count when completed
+        if self.aggregate > 0 and len(self.aggregate_requests) > 0:
+            completed_requests = []
+            for proposals in self.aggregate_requests:
+                response = await self.query_aggregate_status(proposals)
+                if response.data and response.data.get("proof"):
+                    proposal_ids = [p["proposal_id"] for p in proposals]
+                    self.logger.info(
+                        f"Aggregate request for proposals {proposal_ids} completed"
+                    )
+                    completed_requests.append(proposals)
+                    self.aggregate_running_count = max(0, self.aggregate_running_count - 1)
+            
+            # Remove completed requests
+            for completed in completed_requests:
+                self.aggregate_requests.remove(completed)
+        
         self.logger.info("All L2 blocks processed")
 
     async def run(self):
@@ -1196,6 +1328,7 @@ class BatchMonitor:
             "l2_block_range": self.l2_block_range,
             "prove_type": self.prove_type,
             "block_running_ratio": self.block_running_ratio,
+            "aggregate": self.aggregate,
         }
         self.logger.info(f"Config:\n{json.dumps(config_dict, indent=2, default=str)}")
         
@@ -1333,6 +1466,14 @@ async def main():
         help="time scaling, real world 1s to 1*x s in stress",
     )
 
+    parser.add_argument(
+        "-A",
+        "--aggregate",
+        type=lambda x: parse_none_value(x, int),
+        default=0,
+        help="Aggregate mode: if > 0, collect n proposals and submit as aggregate request",
+    )
+
     args = parser.parse_args()
 
     monitor = BatchMonitor(
@@ -1349,6 +1490,7 @@ async def main():
         watch_mode=args.watch_event,
         time_speed=args.time_speed,
         anchor_abi_file=args.anchor_abi_file,
+        aggregate=args.aggregate,
     )
 
     await monitor.run()
@@ -1356,9 +1498,11 @@ async def main():
 
 # Example usage:
 # python stress_shasta_proposal.py -t native -g 1000,2000 -p 10 -o stress_dev.log -a http://localhost:8080 -c 0xe9BDA5fd0C7F8E97b12860a57Cbcc89f33AAfFE8 -e https://l1rpc.internal.taiko.xyz -l https://l2rpc.internal.taiko.xyz -i IInbox.json -b Anchor.json -x 100 -w
+# python stress_shasta_proposal.py -t native -g 1000,2000 -A 5 -a http://localhost:8080 -c 0xe9BDA5fd0C7F8E97b12860a57Cbcc89f33AAfFE8 -e https://l1rpc.internal.taiko.xyz -l https://l2rpc.internal.taiko.xyz -i IInbox.json -b Anchor.json
 # Note: 
 #   -a (--raiko-rpc): Raiko RPC endpoint (default: http://localhost:8080)
 #   -g now specifies L2 block range instead of L1 block range
 #   -b (--anchor-abi-file) is optional but recommended for proper anchorV4 decoding
+#   -A (--aggregate): Aggregate mode, if > 0, collect n proposals and submit as aggregate request
 if __name__ == "__main__":
     asyncio.run(main())

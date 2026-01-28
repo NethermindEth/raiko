@@ -9011,6 +9011,7 @@ dependencies = [
  "bonsai-sdk",
  "bytemuck",
  "cfg-if",
+ "env_logger",
  "ethers-contract",
  "ethers-core",
  "ethers-providers",

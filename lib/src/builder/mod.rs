@@ -277,7 +277,8 @@ pub fn calculate_batch_blocks_final_header(input: &GuestBatchInput) -> Vec<Block
         let mut builder = RethBlockBuilder::new(
             &input.inputs[i],
             create_mem_db(&mut input.inputs[i].clone()).unwrap(),
-        );
+        )
+        .set_is_first_block_in_proposal(i == 0);
 
         let mut execute_tx = vec![input.inputs[i].taiko.anchor_tx.clone().unwrap()];
         execute_tx.extend_from_slice(&pool_txs.0);
@@ -345,18 +346,29 @@ pub struct RethBlockBuilder<DB> {
     pub chain_spec: crate::consts::ChainSpec,
     pub input: GuestInput,
     pub db: Option<DB>,
+    /// Whether this is the first block in a proposal batch (for Shasta)
+    pub is_first_block_in_proposal: bool,
 }
 
 impl<DB: Database<Error = ProviderError> + DatabaseCommit + OptimisticDatabase + Clone>
     RethBlockBuilder<DB>
 {
     /// Creates a new block builder.
+    /// For single block execution, `is_first_block_in_proposal` defaults to `true`.
+    /// For batch execution, it should be set explicitly using `set_is_first_block_in_proposal`.
     pub fn new(input: &GuestInput, db: DB) -> RethBlockBuilder<DB> {
         RethBlockBuilder {
             chain_spec: input.chain_spec.clone(),
             db: Some(db),
             input: input.clone(),
+            is_first_block_in_proposal: true, // Default to true for single block execution
         }
+    }
+
+    /// Sets whether this is the first block in a proposal batch.
+    pub fn set_is_first_block_in_proposal(mut self, is_first: bool) -> Self {
+        self.is_first_block_in_proposal = is_first;
+        self
     }
 
     /// Executes all input transactions.
