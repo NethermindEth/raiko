@@ -23,6 +23,15 @@
         "bootstrap": false,
         "prove": true
     },
+    "tdx": {
+        "instance_ids": {
+            "ONTAKE": 0,
+            "PACAYA": 0,
+            "SHASTA": 0
+        },
+        "bootstrap": false,
+        "prove": true
+    },
     "risc0": {
         "bonsai": true,
         "snark": true,

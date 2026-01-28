@@ -508,6 +508,7 @@ async fn do_prove_batch(
 ) -> Result<Proof, String> {
     tracing::info!("Generating proof for {request_key}");
 
+    let proof_type = request_key.proof_type().clone();
     let raiko = new_raiko_for_batch_request(chain_specs, request_entity, gpu_number).await?;
     let input = if let Some(batch_guest_input) = raiko.request.prover_args.get("batch_guest_input")
     {

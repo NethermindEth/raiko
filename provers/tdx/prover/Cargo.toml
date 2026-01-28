@@ -1,0 +1,38 @@
+[package]
+name = "tdx-prover"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+name = "tdx_prover"
+path = "src/lib.rs"
+
+[dependencies]
+raiko-lib = { workspace = true, features = ["std"] }
+once_cell = { workspace = true }
+
+# Crypto
+secp256k1 = { workspace = true, features = ["rand"] }
+hex = { workspace = true }
+
+# Serialization
+serde = { workspace = true }
+serde_json = { workspace = true }
+serde_with = { workspace = true }
+
+# Error handling
+thiserror = { workspace = true }
+anyhow = { workspace = true }
+
+# Logging
+tracing = { workspace = true }
+
+# Path and file handling
+dirs = { workspace = true }
+
+# TDX attestation
+rand = { workspace = true }
+
+[features]
+default = []
+enable = []

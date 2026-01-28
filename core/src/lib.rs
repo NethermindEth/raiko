@@ -64,6 +64,7 @@ impl Raiko {
                 last_anchor_block_number: None,
             },
             self.request.blob_proof_type.clone(),
+            self.request.proof_type,
         )
     }
 
@@ -88,6 +89,7 @@ impl Raiko {
             },
             blob_proof_type: self.request.blob_proof_type.clone(),
             cached_event_data: self.request.cached_event_data.clone(),
+            proof_type: self.request.proof_type,
         }
     }
 
@@ -116,6 +118,18 @@ impl Raiko {
     }
 
     pub fn get_output(&self, input: &GuestInput) -> RaikoResult<GuestOutput> {
+        if self.should_execute_transactions() {
+            self.execute_transactions(input)?;
+        }
+
+        Ok(GuestOutput {
+            header: input.block.header.clone(),
+            hash: ProtocolInstance::new(input, &input.block.header, self.request.proof_type)?
+                .instance_hash(),
+        })
+    }
+
+    fn execute_transactions(&self, input: &GuestInput) -> RaikoResult<()> {
         let db = create_mem_db(&mut input.clone()).unwrap();
         let mut builder = RethBlockBuilder::new(input, db);
         let pool_tx = generate_transactions(
@@ -129,30 +143,21 @@ impl Raiko {
             .expect("execute");
         let result = builder.finalize();
 
-        match result {
-            Ok(header) => {
-                info!("Verifying final state using provider data ...");
-                info!(
-                    "Final block hash derived successfully. {}",
-                    header.hash_slow()
-                );
-                debug!("Final block header derived successfully. {header:?}");
-                // Check if the header is the expected one
-                check_header(&input.block.header, &header)?;
+        let header = result.map_err(|e| {
+            warn!("Proving bad block construction!");
+            RaikoError::Guest(raiko_lib::prover::ProverError::GuestError(e.to_string()))
+        })?;
 
-                Ok(GuestOutput {
-                    header: header.clone(),
-                    hash: ProtocolInstance::new(input, &header, self.request.proof_type)?
-                        .instance_hash(),
-                })
-            }
-            Err(e) => {
-                warn!("Proving bad block construction!");
-                Err(RaikoError::Guest(
-                    raiko_lib::prover::ProverError::GuestError(e.to_string()),
-                ))
-            }
-        }
+        info!("Verifying final state using provider data ...");
+        info!(
+            "Final block hash derived successfully. {}",
+            header.hash_slow()
+        );
+        debug!("Final block header derived successfully. {header:?}");
+
+        check_header(&input.block.header, &header)?;
+
+        Ok(())
     }
 
     pub fn get_batch_output(&self, batch_input: &GuestBatchInput) -> RaikoResult<GuestBatchOutput> {
@@ -195,6 +200,18 @@ impl Raiko {
         origin_pool_txs: Vec<reth_primitives::TransactionSigned>,
         input: &GuestInput,
     ) -> RaikoResult<Block> {
+        if self.should_execute_transactions() {
+            self.execute_transaction_batch(origin_pool_txs, input)?;
+        }
+
+        Ok(input.block.clone())
+    }
+
+    fn execute_transaction_batch(
+        &self,
+        origin_pool_txs: Vec<reth_primitives::TransactionSigned>,
+        input: &GuestInput,
+    ) -> RaikoResult<()> {
         let db = create_mem_db(&mut input.clone()).unwrap();
         let mut builder = RethBlockBuilder::new(input, db);
 
@@ -222,7 +239,7 @@ impl Raiko {
                 // Check if the header is the expected one
                 check_header(&input.block.header, &header)?;
 
-                Ok(block.clone())
+                Ok(())
             }
             Err(e) => {
                 warn!("Proving bad block construction!");
@@ -231,6 +248,15 @@ impl Raiko {
                 ))
             }
         }
+    }
+
+    /// Whether transactions should be executed for this proof type
+    /// For TDX and Azure TDX, we skip transaction execution
+    /// as they are expected to be executed inside the TDX enclave,
+    /// so we could trust the input.
+    fn should_execute_transactions(&self) -> bool {
+        self.request.proof_type != raiko_lib::proof_type::ProofType::Tdx
+            && self.request.proof_type != raiko_lib::proof_type::ProofType::AzureTdx
     }
 
     pub async fn prove(
@@ -430,6 +456,16 @@ mod tests {
                 {
                     "instance_id": 121,
                     "setup": enable_aggregation,
+                    "bootstrap": enable_aggregation,
+                    "prove": true,
+                }
+            },
+        );
+        prover_args.insert(
+            "tdx".to_string(),
+            json! {
+                {
+                    "instance_id": 121,
                     "bootstrap": enable_aggregation,
                     "prove": true,
                 }

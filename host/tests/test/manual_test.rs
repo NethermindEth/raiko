@@ -61,6 +61,8 @@ pub async fn test_manual_prove() {
             sgxgeth: None,
             sp1: None,
             risc0: None,
+            tdx: None,
+            azure_tdx: None,
         },
     };
 

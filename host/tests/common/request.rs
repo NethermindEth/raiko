@@ -50,6 +50,8 @@ pub fn make_proof_request(
             sgx: None,
             sgxgeth: None,
             sp1: None,
+            tdx: None,
+            azure_tdx: None,
         },
     }
 }
@@ -88,6 +90,8 @@ pub async fn make_aggregate_proof_request(
             sgx: None,
             sp1: None,
             sgxgeth: None,
+            tdx: None,
+            azure_tdx: None,
         },
     }
 }
