@@ -42,6 +42,7 @@ pub(crate) struct Backend {
     queue: Arc<Mutex<Queue>>,
     notifier: Arc<Notify>,
     gpu_semaphore: Arc<GpuSemaphore>,
+    mock_key: Option<String>,
 }
 
 impl Backend {
@@ -51,6 +52,7 @@ impl Backend {
         max_proving_concurrency: usize,
         queue: Arc<Mutex<Queue>>,
         notifier: Arc<Notify>,
+        mock_key: Option<String>,
     ) -> Self {
         Self {
             pool,
@@ -58,6 +60,7 @@ impl Backend {
             queue,
             notifier,
             gpu_semaphore: Arc::new(GpuSemaphore::new(max_proving_concurrency)),
+            mock_key,
         }
     }
 
@@ -88,6 +91,7 @@ impl Backend {
             let mut pool_ = self.pool.clone();
             let chain_specs = self.chain_specs.clone();
             let gpu_semaphore = self.gpu_semaphore.clone();
+            let mock_key = self.mock_key.clone();
 
             let handle = tokio::spawn(async move {
                 // Acquire GPU permit (combines semaphore permit + optional GPU number assignment)
@@ -111,6 +115,7 @@ impl Backend {
                             request_key_.clone(),
                             entity,
                             Some(gpu_permit.gpu_number()),
+                            mock_key.clone(),
                         )
                         .await
                     }
@@ -121,6 +126,7 @@ impl Backend {
                             request_key_.clone(),
                             entity,
                             Some(gpu_permit.gpu_number()),
+                            mock_key.clone(),
                         )
                         .await
                     }
@@ -158,11 +164,18 @@ impl Backend {
                             request_key_.clone(),
                             entity,
                             Some(gpu_permit.gpu_number()),
+                            mock_key.clone(),
                         )
                         .await
                     }
                     RequestEntity::ShastaAggregation(entity) => {
-                        do_shasta_aggregation(&mut pool_, request_key_.clone(), entity).await
+                        do_shasta_aggregation(
+                            &mut pool_,
+                            request_key_.clone(),
+                            entity,
+                            mock_key.clone(),
+                        )
+                        .await
                     }
                 };
 
@@ -360,6 +373,7 @@ async fn do_prove_aggregation(
     request_key: RequestKey,
     request_entity: AggregationRequestEntity,
     gpu_number: Option<u32>,
+    mock_key: Option<String>,
 ) -> Result<Proof, String> {
     let proof_type = request_key.proof_type().clone();
     let proofs = request_entity.proofs().clone();
@@ -374,7 +388,7 @@ async fn do_prove_aggregation(
         config["gpu_number"] = gpu_number.into();
     }
 
-    let proof = aggregate_proofs(proof_type, input, &output, &config, Some(pool))
+    let proof = aggregate_proofs(proof_type, input, &output, &config, Some(pool), mock_key)
         .await
         .map_err(|err| format!("failed to generate aggregation proof: {err:?}"))?;
 
@@ -385,6 +399,7 @@ async fn do_shasta_aggregation(
     pool: &mut dyn IdWrite,
     request_key: RequestKey,
     request_entity: AggregationRequestEntity,
+    mock_key: Option<String>,
 ) -> Result<Proof, String> {
     let proof_type = request_key.proof_type().clone();
     let proofs = request_entity.proofs().clone();
@@ -394,9 +409,10 @@ async fn do_shasta_aggregation(
     let config = serde_json::to_value(request_entity.prover_args())
         .map_err(|err| format!("failed to serialize prover args: {err:?}"))?;
 
-    let proof = aggregate_shasta_proposals(proof_type, input, &output, &config, Some(pool))
-        .await
-        .map_err(|err| format!("failed to generate aggregation proof: {err:?}"))?;
+    let proof =
+        aggregate_shasta_proposals(proof_type, input, &output, &config, Some(pool), mock_key)
+            .await
+            .map_err(|err| format!("failed to generate aggregation proof: {err:?}"))?;
 
     Ok(proof)
 }
@@ -499,6 +515,7 @@ async fn do_prove_batch(
     request_key: RequestKey,
     request_entity: BatchProofRequestEntity,
     gpu_number: Option<u32>,
+    mock_key: Option<String>,
 ) -> Result<Proof, String> {
     tracing::info!("Generating proof for {request_key}");
 
@@ -522,7 +539,7 @@ async fn do_prove_batch(
         .map_err(|e| format!("failed to get guest batch output: {e:?}"))?;
     debug!("batch guest output: {output:?}");
     let proof = raiko
-        .batch_prove(input, &output, Some(pool))
+        .batch_prove(input, &output, Some(pool), mock_key)
         .await
         .map_err(|e| format!("failed to generate batch proof: {e:?}"))?;
 
@@ -624,6 +641,7 @@ pub async fn do_prove_shasta_proposal(
     request_key: RequestKey,
     request_entity: ShastaProofRequestEntity,
     gpu_number: Option<u32>,
+    mock_key: Option<String>,
 ) -> Result<Proof, String> {
     tracing::info!("generate shasta proposal proof for: {request_key:?}");
 
@@ -650,7 +668,7 @@ pub async fn do_prove_shasta_proposal(
 
     // Run the Shasta proposal prover
     let proof = raiko
-        .shasta_proposal_prove(input, &output, None)
+        .shasta_proposal_prove(input, &output, None, mock_key)
         .await
         .map_err(|err| format!("failed to run shasta proposal prover: {err:?}"))?;
 
@@ -680,7 +698,7 @@ mod tests {
         let queue = Arc::new(Mutex::new(Queue::new(1000)));
         let notifier = Arc::new(Notify::new());
 
-        let backend = Backend::new(pool, chain_specs, 1, queue.clone(), notifier.clone());
+        let backend = Backend::new(pool, chain_specs, 1, queue.clone(), notifier.clone(), None);
 
         let handle = tokio::spawn(async move {
             tokio::select! {
