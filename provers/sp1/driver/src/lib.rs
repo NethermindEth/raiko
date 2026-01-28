@@ -8,7 +8,9 @@ use raiko_lib::{
         GuestInput, GuestOutput, ShastaAggregationGuestInput, ShastaSp1AggregationGuestInput,
         ZkAggregationGuestInput,
     },
+    libhash::hash_shasta_subproof_input,
     proof_type::ProofType,
+    protocol_instance::validate_shasta_proof_carry_data_vec,
     prover::{
         IdStore, IdWrite, Proof, ProofCarryData, ProofKey, Prover, ProverConfig, ProverError,
         ProverResult,
@@ -480,33 +482,21 @@ impl Prover for Sp1Prover {
         let stark_vk = block_proof_vk.vk.clone();
         let image_id = block_proof_vk.hash_u32();
 
-        let block_inputs = input
-            .proofs
-            .iter()
-            .map(|proof| {
-                proof.input.ok_or_else(|| {
-                    ProverError::GuestError(
-                        "missing public input for shasta aggregation proof".to_string(),
-                    )
-                })
-            })
-            .collect::<Result<Vec<_>, _>>()?;
-
         let proof_carry_data_vec: Vec<ProofCarryData> = input
             .proofs
             .iter()
             .map(|proof| {
-                proof.extra_data
-                    .clone()
-                    .ok_or_else(|| ProverError::GuestError("missing shasta proof carry data".into()))
+                proof.extra_data.clone().ok_or_else(|| {
+                    ProverError::GuestError("missing shasta proof carry data".into())
+                })
             })
             .collect::<Result<Vec<_>, _>>()?;
+        let block_inputs = build_shasta_block_inputs(&input.proofs, &proof_carry_data_vec)?;
 
         let shasta_input = ShastaSp1AggregationGuestInput {
             image_id,
             block_inputs,
             proof_carry_data_vec,
-            prover_address: Address::ZERO,
         };
 
         let mut stdin = SP1Stdin::new();
@@ -635,6 +625,38 @@ impl Prover for Sp1Prover {
             }
         }))
     }
+}
+
+fn build_shasta_block_inputs(
+    proofs: &[Proof],
+    proof_carry_data_vec: &[ProofCarryData],
+) -> ProverResult<Vec<B256>> {
+    if proofs.len() != proof_carry_data_vec.len() {
+        return Err(ProverError::GuestError(
+            "shasta proofs length mismatch with carry data".to_string(),
+        ));
+    }
+    if !validate_shasta_proof_carry_data_vec(proof_carry_data_vec) {
+        return Err(ProverError::GuestError(
+            "invalid shasta proof carry data".to_string(),
+        ));
+    }
+
+    let mut block_inputs = Vec::with_capacity(proofs.len());
+    for (idx, (proof, carry)) in proofs.iter().zip(proof_carry_data_vec).enumerate() {
+        let proof_input = proof.input.ok_or_else(|| {
+            ProverError::GuestError("missing public input for shasta aggregation proof".to_string())
+        })?;
+        let expected = hash_shasta_subproof_input(carry);
+        if proof_input != expected {
+            return Err(ProverError::GuestError(format!(
+                "shasta proof input mismatch at index {idx}"
+            )));
+        }
+        block_inputs.push(proof_input);
+    }
+
+    Ok(block_inputs)
 }
 
 fn get_env_mock() -> ProverMode {

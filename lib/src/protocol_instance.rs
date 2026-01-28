@@ -20,8 +20,8 @@ use crate::{
         GuestInput, ShastaRawAggregationGuestInput, Transition,
     },
     libhash::{
-        hash_checkpoint, hash_commitment, hash_proposal, hash_public_input,
-        hash_shasta_subproof_input, hash_two_values,
+        hash_commitment, hash_proposal, hash_public_input, hash_shasta_subproof_input,
+        hash_two_values,
     },
     primitives::{
         eip4844::{self, commitment_to_version_hash},
@@ -303,7 +303,6 @@ pub struct ProtocolInstance {
     pub transition: TransitionFork,
     pub block_metadata: BlockMetaDataFork,
     pub prover: Address,
-    pub designated_prover: Option<Address>,
     pub sgx_instance: Address, // only used for SGX
     pub chain_id: u64,
     pub verifier_address: Address,
@@ -567,7 +566,6 @@ impl ProtocolInstance {
             block_metadata: BlockMetaDataFork::from(input, header, tx_list_hash),
             sgx_instance: Address::default(),
             prover: input.taiko.prover_data.actual_prover,
-            designated_prover: None,
             chain_id: input.chain_spec.chain_id,
             verifier_address,
         };
@@ -636,7 +634,6 @@ impl ProtocolInstance {
                     blockHash: last_block_hash,
                     stateRoot: last_block_state_root,
                 };
-                // let ref_checkpoint = batch_input.taiko.prover_data.checkpoint.as_ref().unwrap();
                 if let Some(ref_checkpoint) = &batch_input.taiko.prover_data.checkpoint {
                     assert_eq!(
                         current_transition_checkpoint, *ref_checkpoint,
@@ -644,20 +641,14 @@ impl ProtocolInstance {
                         current_transition_checkpoint, ref_checkpoint
                     );
                 }
-                let parent_checkpoint_hash = hash_checkpoint(&Checkpoint {
-                    blockNumber: Uint::from(batch_input.inputs[0].parent_header.number),
-                    blockHash: batch_input.inputs[0].parent_header.hash_slow(),
-                    stateRoot: batch_input.inputs[0].parent_header.state_root,
-                });
                 TransitionFork::Shasta(TransitionInputData {
                     proposal_id: event_data.proposal.id.to(),
                     proposal_hash: hash_proposal(&event_data.proposal),
                     parent_proposal_hash: event_data.proposal.parentProposalHash,
-                    parent_checkpoint_hash: parent_checkpoint_hash,
+                    parent_block_hash: batch_input.inputs[0].parent_header.hash_slow(),
                     actual_prover: batch_input.taiko.prover_data.actual_prover,
                     transition: ShastaTransitionInput {
                         proposer: event_data.proposal.proposer,
-                        designatedProver: batch_input.taiko.prover_data.designated_prover.unwrap(),
                         timestamp: event_data.proposal.timestamp.to(),
                     },
                     checkpoint: current_transition_checkpoint,
@@ -671,7 +662,6 @@ impl ProtocolInstance {
             block_metadata: BlockMetaDataFork::from_batch_inputs(batch_input, blocks),
             sgx_instance: Address::default(),
             prover: batch_input.taiko.prover_data.actual_prover,
-            designated_prover: batch_input.taiko.prover_data.designated_prover,
             chain_id: batch_input.taiko.chain_spec.chain_id,
             verifier_address,
         };
@@ -712,13 +702,12 @@ impl ProtocolInstance {
         info!(
             "calculate instance_hash from:
             chain_id: {:?}, verifier: {:?}, transition: {:?}, sgx_instance: {:?},
-            prover: {:?}, designated_prover: {:?}, block_meta: {:?}, meta_hash: {:?}",
+            prover: {:?}, block_meta: {:?}, meta_hash: {:?}",
             self.chain_id,
             self.verifier_address,
             &self.transition,
             &self.sgx_instance,
             &self.prover,
-            &self.designated_prover,
             &self.block_metadata,
             self.meta_hash(),
         );
@@ -869,9 +858,7 @@ pub fn validate_shasta_proof_carry_data_vec(proof_carry_data_vec: &[ProofCarryDa
         }
 
         // Continuity: prev checkpoint must match next parent checkpoint hash.
-        if hash_checkpoint(&prev.transition_input.checkpoint)
-            != next.transition_input.parent_checkpoint_hash
-        {
+        if prev.transition_input.checkpoint.blockHash != next.transition_input.parent_block_hash {
             return false;
         }
     }
@@ -891,18 +878,15 @@ pub fn build_shasta_commitment_from_proof_carry_data_vec(
         .iter()
         .map(|item| crate::input::shasta::Transition {
             proposer: item.transition_input.transition.proposer,
-            designatedProver: item.transition_input.transition.designatedProver,
             timestamp: Uint::from(item.transition_input.transition.timestamp),
-            checkpointHash: hash_checkpoint(&item.transition_input.checkpoint),
+            blockHash: item.transition_input.checkpoint.blockHash,
         })
         .collect();
 
     Some(Commitment {
         firstProposalId: Uint::from(proof_carry_data_vec[0].transition_input.proposal_id),
         // This field is a checkpoint hash in the latest Shasta contract; we store it as bytes32.
-        firstProposalParentBlockHash: proof_carry_data_vec[0]
-            .transition_input
-            .parent_checkpoint_hash,
+        firstProposalParentBlockHash: proof_carry_data_vec[0].transition_input.parent_block_hash,
         lastProposalHash: last.transition_input.proposal_hash,
         actualProver: proof_carry_data_vec[0].transition_input.actual_prover,
         endBlockNumber: last.transition_input.checkpoint.blockNumber,
@@ -911,19 +895,7 @@ pub fn build_shasta_commitment_from_proof_carry_data_vec(
     })
 }
 
-pub fn shasta_zk_aggregation_public_input_from_proof_carry_data_vec(
-    sub_image_id: B256,
-    proof_carry_data_vec: &[ProofCarryData],
-    prover_address: Address,
-) -> Option<B256> {
-    let commitment = build_shasta_commitment_from_proof_carry_data_vec(proof_carry_data_vec)?;
-    let first = proof_carry_data_vec.first()?;
-    let aggregation_hash =
-        shasta_aggregation_output(&commitment, first.chain_id, first.verifier, prover_address);
-    Some(shasta_zk_aggregation_output(sub_image_id, aggregation_hash))
-}
-
-pub fn shasta_aggregation_output(
+fn shasta_aggregation_commitment_hash(
     prove_input: &Commitment,
     chain_id: u64,
     verifier_address: Address,
@@ -933,10 +905,34 @@ pub fn shasta_aggregation_output(
     hash_public_input(prove_input_hash, chain_id, verifier_address, sgx_instance)
 }
 
-pub fn shasta_zk_aggregation_output(sub_image_id: B256, sub_input_hash: B256) -> B256 {
-    hash_two_values(sub_image_id, sub_input_hash)
+pub fn shasta_pcd_aggregation_hash(
+    proof_carry_data_vec: &[ProofCarryData],
+    sgx_instance: Address,
+) -> Option<B256> {
+    let commitment = build_shasta_commitment_from_proof_carry_data_vec(proof_carry_data_vec)?;
+    let first = proof_carry_data_vec.first()?;
+    let aggregation_hash = shasta_aggregation_commitment_hash(
+        &commitment,
+        first.chain_id,
+        first.verifier,
+        sgx_instance,
+    );
+    Some(aggregation_hash)
 }
 
+pub fn shasta_aggregation_hash_for_zk(
+    sub_image_id: B256,
+    proof_carry_data_vec: &[ProofCarryData],
+) -> Option<B256> {
+    shasta_pcd_aggregation_hash(proof_carry_data_vec, Address::ZERO).map(|aggregation_hash| {
+        bind_aggregate_hash_with_zk_image_id(sub_image_id, aggregation_hash)
+    })
+}
+
+/// only for zk, as tee does not have sub image id so far.
+fn bind_aggregate_hash_with_zk_image_id(sub_image_id: B256, sub_input_hash: B256) -> B256 {
+    hash_two_values(sub_image_id, sub_input_hash)
+}
 #[cfg(test)]
 mod tests {
     use alloy_primitives::{address, b256};
@@ -1066,8 +1062,12 @@ mod tests {
             actualProver: address!("1111111111111111111111111111111111111111"),
             transitions: vec![],
         };
-        let result =
-            shasta_aggregation_output(&prove_input, chain_id, verifier_address, sgx_instance);
+        let result = shasta_aggregation_commitment_hash(
+            &prove_input,
+            chain_id,
+            verifier_address,
+            sgx_instance,
+        );
 
         assert_eq!(
             result,
@@ -1079,7 +1079,6 @@ mod tests {
     fn test_validate_shasta_aggregate_proof_carry_data_basic() {
         use crate::{
             input::{RawProof, ShastaRawAggregationGuestInput},
-            libhash::hash_checkpoint,
             prover::{ProofCarryData, TransitionInputData},
         };
 
@@ -1100,12 +1099,12 @@ mod tests {
             blockHash: b256!("0000000000000000000000000000000000000000000000000000000000000003"),
             stateRoot: b256!("0000000000000000000000000000000000000000000000000000000000000004"),
         };
-        let cp0 = hash_checkpoint(&checkpoint0);
+        let cp0 = checkpoint0.clone().blockHash;
 
         let mk = |proposal_id: u64,
                   proposal_hash: B256,
                   parent_proposal_hash: B256,
-                  parent_checkpoint_hash: B256,
+                  parent_block_hash: B256,
                   checkpoint: Checkpoint| {
             ProofCarryData {
                 chain_id,
@@ -1114,12 +1113,11 @@ mod tests {
                     proposal_id,
                     proposal_hash,
                     parent_proposal_hash,
-                    parent_checkpoint_hash,
+                    parent_block_hash,
                     // Not relevant for these checks
                     actual_prover: address!("1111111111111111111111111111111111111111"),
                     transition: ShastaTransitionInput {
                         proposer: address!("2222222222222222222222222222222222222222"),
-                        designatedProver: address!("3333333333333333333333333333333333333333"),
                         timestamp: 123,
                     },
                     checkpoint,

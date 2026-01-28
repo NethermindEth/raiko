@@ -267,8 +267,21 @@ pub async fn batch_preflight<BDP: BlockDataProvider>(
         block_numbers.first().cloned().unwrap_or_default(),
     )
     .await?;
-
-    let block_parent_pairs = get_batch_blocks_and_parent_data(&provider, &block_numbers).await?;
+    let all_block_parent_pairs =
+        get_batch_blocks_and_parent_data(&provider, &block_numbers).await?;
+    let (l2_grandparent_header, block_parent_pairs) = if block_numbers[0] == 1 {
+        (None, all_block_parent_pairs)
+    } else {
+        // The first pair's parent is the grandparent (first block's parent's parent)
+        // Extract it and remove the first pair since we don't need it for subsequent processing
+        debug!("all_block_parent_pairs: {:?}", all_block_parent_pairs);
+        (
+            all_block_parent_pairs
+                .first()
+                .map(|(_, parent_block)| parent_block.header.clone().try_into().unwrap()),
+            all_block_parent_pairs.into_iter().skip(1).collect(),
+        )
+    };
 
     let l2_block_numbers: Vec<(u64, Option<u64>)> = block_numbers
         .iter()
@@ -294,6 +307,7 @@ pub async fn batch_preflight<BDP: BlockDataProvider>(
             prover_data,
             &blob_proof_type,
             cached_event_data,
+            l2_grandparent_header,
         )
         .await?
     } else {
@@ -369,15 +383,7 @@ pub async fn batch_preflight<BDP: BlockDataProvider>(
                         .blob_proof_type
                         .clone(),
                     extra_data: match taiko_guest_batch_input.batch_proposed {
-                        BlockProposedFork::Shasta(_) => {
-                            let extra_data = prove_block.header.extra_data.to_vec();
-                            let lowbond_proposal = util::decode_extra_data(extra_data.as_slice()).1;
-                            let designated_prover = taiko_guest_batch_input
-                                .prover_data
-                                .designated_prover
-                                .unwrap_or_default();
-                            Some((lowbond_proposal, designated_prover, is_force_inclusion))
-                        }
+                        BlockProposedFork::Shasta(_) => Some(is_force_inclusion),
                         _ => None,
                     },
                     grandparent_timestamp,

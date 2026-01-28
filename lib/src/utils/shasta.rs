@@ -4,12 +4,59 @@ use alloy_rlp::Decodable;
 use log::warn;
 use reth_primitives::TransactionSigned;
 
+use crate::consts::ForkCondition;
 use crate::input::GuestBatchInput;
 use crate::manifest::DerivationSourceManifest;
 #[cfg(not(feature = "std"))]
 use crate::no_std::*;
 use crate::utils::blobs::{decode_blob_data, zlib_decompress_data};
 use crate::utils::shasta_rules::*;
+
+fn make_default_manifest(
+    guest_batch_input: &GuestBatchInput,
+    last_parent_block_timestamp: u64,
+    last_parent_block_gas_limit: u64,
+    last_anchor_block_number: u64,
+) -> DerivationSourceManifest {
+    let taiko_guest_batch_input = &guest_batch_input.taiko;
+    let proposal_timestamp = taiko_guest_batch_input.batch_proposed.proposal_timestamp();
+    let shasta_fork_timestamp = match guest_batch_input
+        .taiko
+        .chain_spec
+        .hard_forks
+        .get(&TaikoSpecId::SHASTA)
+    {
+        Some(ForkCondition::Timestamp(timestamp)) => *timestamp,
+        _ => unreachable!("shasta fork should be a timestamp fork"),
+    };
+    let timestamp = clamp_timestamp_lower_bound(
+        last_parent_block_timestamp,
+        proposal_timestamp,
+        shasta_fork_timestamp,
+    );
+    let coinbase = taiko_guest_batch_input.batch_proposed.proposer();
+    let anchor_block_number = last_anchor_block_number;
+    let gas_limit = if guest_batch_input
+        .inputs
+        .first()
+        .unwrap()
+        .parent_header
+        .number
+        == 0
+    {
+        last_parent_block_gas_limit
+    } else {
+        last_parent_block_gas_limit - ANCHOR_V3_V4_GAS_LIMIT
+    };
+    let transactions = Vec::new();
+    DerivationSourceManifest::default_block_manifest(
+        timestamp,
+        coinbase,
+        anchor_block_number,
+        gas_limit,
+        transactions,
+    )
+}
 
 /// concat blob & decode a whole txlist, then
 /// each block will get a portion of the txlist by its tx_nums
@@ -81,35 +128,38 @@ pub fn generate_transactions_for_shasta_blocks(
                                 guest_batch_input.inputs[0].parent_header.timestamp,
                             )
                             .unwrap()
-                            == TaikoSpecId::PACAYA;
+                            == TaikoSpecId::PACAYA
+                            || guest_batch_input.inputs[0].parent_header.number == 0;
 
                         //TODO: move to validate_normal_proposal_manifest
                         if !validate_shasta_block_base_fee(
                             &guest_batch_input.inputs,
                             is_first_shasta_proposal,
+                            guest_batch_input.taiko.l2_grandparent_header.as_ref(),
                         ) {
                             warn!("shasta block base fee is invalid, need double check");
+                            make_default_manifest(
+                                guest_batch_input,
+                                last_parent_block_timestamp,
+                                last_parent_block_gas_limit,
+                                last_anchor_block_number,
+                            )
+                        } else {
+                            manifest
                         }
-
-                        manifest
                     }
                     _ => {
-                        warn!("shasta block manifest is invalid, use default manifest");
-                        let timestamp = clamp_timestamp_lower_bound(
+                        let manifest = make_default_manifest(
+                            guest_batch_input,
                             last_parent_block_timestamp,
-                            taiko_guest_batch_input.batch_proposed.proposal_timestamp(),
+                            last_parent_block_gas_limit,
+                            last_anchor_block_number,
                         );
-                        let coinbase = taiko_guest_batch_input.batch_proposed.proposer();
-                        let anchor_block_number = last_anchor_block_number;
-                        let gas_limit = last_parent_block_gas_limit;
-                        let transactions = Vec::new();
-                        DerivationSourceManifest::default_block_manifest(
-                            timestamp,
-                            coinbase,
-                            anchor_block_number,
-                            gas_limit - ANCHOR_V3_V4_GAS_LIMIT,
-                            transactions,
-                        )
+                        warn!(
+                            "shasta block manifest is invalid, use default manifest: {:?}",
+                            &manifest
+                        );
+                        manifest
                     }
                 };
 
@@ -117,15 +167,15 @@ pub fn generate_transactions_for_shasta_blocks(
                 .blocks
                 .iter()
                 .enumerate()
-                .for_each(|(offset, block)| {
+                .for_each(|(offset, block_manifest)| {
                     assert!(
                         validate_input_block_param(
-                            block,
+                            block_manifest,
                             &guest_batch_input.inputs[idx + offset].block
                         ),
                         "input block manifest is invalid"
                     );
-                    tx_list_bufs.push((block.transactions.clone(), false))
+                    tx_list_bufs.push((block_manifest.transactions.clone(), false))
                 });
         } else {
             assert!(
@@ -138,31 +188,37 @@ pub fn generate_transactions_for_shasta_blocks(
             let force_inc_source =
                 match DerivationSourceManifest::decode(&mut force_inc_source_bytes.as_ref()) {
                     Ok(manifest) if validate_force_inc_proposal_manifest(&manifest) => {
-                        last_parent_block_timestamp = manifest.blocks[0].timestamp;
-                        last_parent_block_gas_limit = manifest.blocks[0].gas_limit;
-                        manifest
+                        // overwrite force inc manifest
+                        let mut force_inc_manifest = make_default_manifest(
+                            guest_batch_input,
+                            last_parent_block_timestamp,
+                            last_parent_block_gas_limit,
+                            last_anchor_block_number,
+                        );
+                        force_inc_manifest.blocks[0].transactions =
+                            manifest.blocks[0].transactions.clone();
+                        force_inc_manifest
                     }
                     _ => {
-                        let timestamp = clamp_timestamp_lower_bound(
+                        let manifest = make_default_manifest(
+                            guest_batch_input,
                             last_parent_block_timestamp,
-                            taiko_guest_batch_input.batch_proposed.proposal_timestamp(),
+                            last_parent_block_gas_limit,
+                            last_anchor_block_number,
                         );
-                        last_parent_block_timestamp = timestamp;
-                        let coinbase = taiko_guest_batch_input.batch_proposed.proposer();
-                        let anchor_block_number = last_anchor_block_number;
-                        let gas_limit = last_parent_block_gas_limit;
-                        let transactions = Vec::new();
-                        DerivationSourceManifest::default_block_manifest(
-                            timestamp,
-                            coinbase,
-                            anchor_block_number,
-                            gas_limit - ANCHOR_V3_V4_GAS_LIMIT,
-                            transactions,
-                        )
+                        warn!(
+                            "force inclusion block manifest is invalid, use default manifest: {:?}",
+                            &manifest
+                        );
+                        manifest
                     }
                 };
+
             // force inc has only 1 block
             let force_inc_block_manifest = &force_inc_source.blocks[0];
+            // update last parent block timestamp for next iteration
+            last_parent_block_timestamp = force_inc_block_manifest.timestamp;
+            last_parent_block_gas_limit = force_inc_block_manifest.gas_limit;
             assert!(
                 validate_input_block_param(
                     force_inc_block_manifest,

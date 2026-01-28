@@ -76,12 +76,10 @@ sol! {
     struct Transition {
         /// @notice Address of the proposer.
         address proposer;
-        /// @notice Address of the designated prover.
-        address designatedProver;
         /// @notice Timestamp of the proposal.
         uint48 timestamp;
-        /// @notice checkpoint hash for the proposal.
-        bytes32 checkpointHash;
+        /// @notice end block hash for the proposal.
+        bytes32 blockHash;
     }
 
     #[derive(Debug, Default, Deserialize, Serialize, PartialEq)]
@@ -89,8 +87,8 @@ sol! {
     struct Commitment {
         /// @notice The ID of the first proposal being proven.
         uint48 firstProposalId;
-        /// @notice The checkpoint hash of the parent of the first proposal, this is used
-        /// to verify checkpoint continuity in the proof.
+        /// @notice The block hash of the parent of the first proposal, this is used
+        /// to verify block continuity in the proof.
         bytes32 firstProposalParentBlockHash;
         /// @notice The hash of the last proposal being proven.
         bytes32 lastProposalHash;
@@ -109,15 +107,17 @@ sol! {
     struct CoreState {
         /// @notice The next proposal ID to be assigned.
         uint48 nextProposalId;
-        /// @notice The last block ID where a proposal was made.
+        /// @notice The last L1 block ID where a proposal was made.
         uint48 lastProposalBlockId;
         /// @notice The ID of the last finalized proposal.
         uint48 lastFinalizedProposalId;
+        /// @notice The timestamp when the last proposal was finalized.
+        uint48 lastFinalizedTimestamp;
         /// @notice The timestamp when the last checkpoint was saved.
         /// @dev In genesis block, this is set to 0 to allow the first checkpoint to be saved.
         uint48 lastCheckpointTimestamp;
-        /// @notice The hash of the last finalized transition.
-        bytes32 lastFinalizedTransitionHash;
+        /// @notice The block hash of the last finalized proposal.
+        bytes32 lastFinalizedBlockHash;
     }
 
     #[derive(Debug, Default, Deserialize, Serialize)]
