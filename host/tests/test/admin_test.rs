@@ -24,7 +24,7 @@ async fn test_admin_ballot() {
     let updating_ballot = serde_json::json!({"Sp1": [0.123, 0], "Risc0": [0.456, 0]});
     let set_response = client
         .reqwest_client
-        .post(&client.build_url("/admin/set_ballot"))
+        .post(&client.build_url("/admin/set_ballot_zk"))
         .json(&updating_ballot)
         .send()
         .await
@@ -37,7 +37,7 @@ async fn test_admin_ballot() {
     // Verify the ballot was set correctly
     let updated_ballot: Value = client
         .reqwest_client
-        .get(client.build_url("/admin/get_ballot"))
+        .get(client.build_url("/admin/get_ballot_zk"))
         .send()
         .await
         .unwrap()

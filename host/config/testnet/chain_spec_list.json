@@ -9,7 +9,7 @@
             "base_fee_max_decrease_denominator": "0x8",
             "elasticity_multiplier": "0x2"
         },
-        "l1_contract": null,
+        "l1_contract": {},
         "l2_contract": null,
         "rpc": "https://l1-rpc-internal.hoodi.surge.wtf",
         "beacon_rpc": "https://l1-beacon-internal.hoodi.surge.wtf",
@@ -27,6 +27,9 @@
             },
             "PACAYA": {
                 "Block": 1
+            },
+            "SHASTA": {
+                "Block": 1
             }
         },
         "eip_1559_constants": {
@@ -35,12 +38,27 @@
             "base_fee_max_decrease_denominator": "0x8",
             "elasticity_multiplier": "0x2"
         },
-        "l1_contract": "0x624ec8F33DA83707f360D6d25136AA0741713BC4",
+        "l1_contract": {
+            "PACAYA": "0x624ec8F33DA83707f360D6d25136AA0741713BC4",
+            "SHASTA": "0x624ec8F33DA83707f360D6d25136AA0741713BC4"
+        },
         "l2_contract": "0x7633750000000000000000000000000000010001",
         "rpc": "https://l2-rpc.hoodi.surge.wtf",
         "beacon_rpc": null,
         "verifier_address_forks": {
             "ONTAKE": {
+                "SGX": "0x5A237047C090e086FD6eF3447e81086b42456DB8",
+                "SGXGETH": "0xd9fd6a7694C93d5Db47f1802F629362F1E2129d4",
+                "SP1": "0x56e229501eBAA5C288982dB34590f4D8547D019A",
+                "RISC0": "0x7D99Bf0d506352F7C84e5F0411a18c8d3dB397C8"
+            },
+            "PACAYA": {
+                "SGX": "0x5A237047C090e086FD6eF3447e81086b42456DB8",
+                "SGXGETH": "0xd9fd6a7694C93d5Db47f1802F629362F1E2129d4",
+                "SP1": "0x56e229501eBAA5C288982dB34590f4D8547D019A",
+                "RISC0": "0x7D99Bf0d506352F7C84e5F0411a18c8d3dB397C8"
+            },
+            "SHASTA": {
                 "SGX": "0x5A237047C090e086FD6eF3447e81086b42456DB8",
                 "SGXGETH": "0xd9fd6a7694C93d5Db47f1802F629362F1E2129d4",
                 "SP1": "0x56e229501eBAA5C288982dB34590f4D8547D019A",

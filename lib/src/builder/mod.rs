@@ -2,10 +2,11 @@ use core::mem;
 use std::sync::Arc;
 use std::sync::LazyLock;
 
-use crate::block_executor::TaikoWithOptimisticBlockExecutor;
+use crate::builder::consensus::RaikoBeaconConsensus;
 use crate::primitives::keccak::keccak;
 use crate::primitives::mpt::StateAccount;
-use crate::utils::{generate_transactions, generate_transactions_for_batch_blocks};
+use crate::utils::txs::generate_transactions;
+use crate::utils::txs::generate_transactions_for_batch_blocks;
 use crate::{
     consts::MAX_BLOCK_HASH_AGE,
     guest_mem_forget,
@@ -24,7 +25,6 @@ use alethia_reth_chainspec::reth_chainspec::Hardforks;
 use alethia_reth_chainspec::spec::TaikoChainSpec;
 use alethia_reth_chainspec::TAIKO_DEVNET;
 use alethia_reth_chainspec::TAIKO_MAINNET;
-use alethia_reth_consensus::validation::TaikoBeaconConsensus;
 use alethia_reth_evm::factory::TaikoEvmFactory;
 use alethia_reth_evm::spec::TaikoSpecId;
 use alloy_primitives::map::HashMap;
@@ -33,6 +33,7 @@ use alloy_primitives::Bytes;
 use alloy_primitives::B256;
 use alloy_primitives::U256;
 use anyhow::{bail, ensure, Result};
+use block_executor::TaikoWithOptimisticBlockExecutor;
 use reth_consensus::{Consensus, HeaderValidator};
 use reth_ethereum_consensus::validate_block_post_execution;
 use reth_evm::block::BlockExecutionResult;
@@ -42,7 +43,6 @@ use reth_evm::Database;
 use reth_primitives::RecoveredBlock;
 use reth_primitives::SealedHeader;
 use reth_primitives::{Block, Header, TransactionSigned};
-use reth_storage_api::noop::NoopProvider;
 use revm::primitives::KECCAK_EMPTY;
 use revm::state::Account;
 use revm::state::AccountInfo;
@@ -51,6 +51,9 @@ use revm::state::Bytecode;
 use revm::state::EvmStorageSlot;
 use revm::DatabaseCommit;
 use tracing::{debug, info};
+
+mod block_executor;
+mod consensus;
 
 /// Surge dev list of hardforks.
 pub static SURGE_DEV_HARDFORKS: LazyLock<ChainHardforks> = LazyLock::new(|| {
@@ -268,16 +271,17 @@ pub fn calculate_block_header(input: &GuestInput) -> Header {
 }
 
 pub fn calculate_batch_blocks_final_header(input: &GuestBatchInput) -> Vec<Block> {
-    let pool_txs_list = generate_transactions_for_batch_blocks(&input.taiko);
+    let pool_txs_list = generate_transactions_for_batch_blocks(&input);
     let mut final_blocks = Vec::new();
     for (i, pool_txs) in pool_txs_list.iter().enumerate() {
         let mut builder = RethBlockBuilder::new(
             &input.inputs[i],
             create_mem_db(&mut input.inputs[i].clone()).unwrap(),
-        );
+        )
+        .set_is_first_block_in_proposal(i == 0);
 
         let mut execute_tx = vec![input.inputs[i].taiko.anchor_tx.clone().unwrap()];
-        execute_tx.extend_from_slice(&pool_txs);
+        execute_tx.extend_from_slice(&pool_txs.0);
         builder
             .execute_transactions(execute_tx.clone(), false)
             .expect("execute");
@@ -288,6 +292,7 @@ pub fn calculate_batch_blocks_final_header(input: &GuestBatchInput) -> Vec<Block
         );
     }
     validate_final_batch_blocks(input, &final_blocks);
+
     final_blocks
 }
 
@@ -341,18 +346,29 @@ pub struct RethBlockBuilder<DB> {
     pub chain_spec: crate::consts::ChainSpec,
     pub input: GuestInput,
     pub db: Option<DB>,
+    /// Whether this is the first block in a proposal batch (for Shasta)
+    pub is_first_block_in_proposal: bool,
 }
 
 impl<DB: Database<Error = ProviderError> + DatabaseCommit + OptimisticDatabase + Clone>
     RethBlockBuilder<DB>
 {
     /// Creates a new block builder.
+    /// For single block execution, `is_first_block_in_proposal` defaults to `true`.
+    /// For batch execution, it should be set explicitly using `set_is_first_block_in_proposal`.
     pub fn new(input: &GuestInput, db: DB) -> RethBlockBuilder<DB> {
         RethBlockBuilder {
             chain_spec: input.chain_spec.clone(),
             db: Some(db),
             input: input.clone(),
+            is_first_block_in_proposal: true, // Default to true for single block execution
         }
+    }
+
+    /// Sets whether this is the first block in a proposal batch.
+    pub fn set_is_first_block_in_proposal(mut self, is_first: bool) -> Self {
+        self.is_first_block_in_proposal = is_first;
+        self
     }
 
     /// Executes all input transactions.
@@ -376,15 +392,11 @@ impl<DB: Database<Error = ProviderError> + DatabaseCommit + OptimisticDatabase +
 
         info!("execute_transactions: reth_chain_spec done");
 
-        let block_num = self.input.taiko.block_proposed.block_number();
-        // let block_timestamp = 0u64;
-        let block_timestamp = self.input.taiko.block_proposed.block_timestamp();
-
-        let taiko_fork = self
-            .input
-            .chain_spec
-            .spec_id(block_num, block_timestamp)
-            .unwrap();
+        // todo: shasta has decouple the connection between proposal & block id.
+        // need constraint for it.
+        let block_num = self.input.block.number;
+        let block_ts = self.input.block.timestamp;
+        let taiko_fork = self.input.chain_spec.spec_id(block_num, block_ts).unwrap();
 
         match taiko_fork {
             TaikoSpecId::ONTAKE => {
@@ -403,6 +415,15 @@ impl<DB: Database<Error = ProviderError> + DatabaseCommit + OptimisticDatabase +
                     "evm fork PACAYA is not active, please update the chain spec"
                 );
             }
+            TaikoSpecId::SHASTA => {
+                // shasta is activated by timestamp, not block number
+                assert!(
+                    chain_spec
+                        .fork(TaikoHardfork::Shasta)
+                        .active_at_timestamp(block_ts),
+                    "evm fork SHASTA is not active, please update the chain spec"
+                );
+            }
             _ => unimplemented!(),
         }
         info!("execute_transactions: is_taiko done");
@@ -410,6 +431,24 @@ impl<DB: Database<Error = ProviderError> + DatabaseCommit + OptimisticDatabase +
         // Generate the transactions from the tx list
         let mut block = self.input.block.clone();
         block.body.transactions = pool_txs;
+
+        // let shasta_data_opt = if let Some(extra_data) = &self.input.taiko.extra_data {
+        //     let last_anchor_block_number_opt =
+        //         self.input.taiko.prover_data.last_anchor_block_number;
+        //     assert!(
+        //         last_anchor_block_number_opt.is_some(),
+        //         "last_anchor_block_number is not set in shasta request"
+        //     );
+        //     Some(ShastaData {
+        //         proposal_id: self.input.taiko.block_proposed.proposal_id(),
+        //         is_low_bond_proposal: extra_data.0,
+        //         designated_prover: extra_data.1,
+        //         last_anchor_block_number: last_anchor_block_number_opt.unwrap(),
+        //         is_force_inclusion: extra_data.2,
+        //     })
+        // } else {
+        //     None
+        // };
 
         let taiko_evm_config = TaikoEvmConfig::new_with_evm_factory(
             chain_spec.clone(),
@@ -434,6 +473,7 @@ impl<DB: Database<Error = ProviderError> + DatabaseCommit + OptimisticDatabase +
                     receipts,
                     requests,
                     gas_used: _,
+                    blob_gas_used: _,
                 },
         } = executor.execute_with_state_closure(&recovered_block, |state| {
             tmp_db = Some(state.database.clone());
@@ -461,20 +501,25 @@ impl<DB: Database<Error = ProviderError> + DatabaseCommit + OptimisticDatabase +
         info!("execute_transactions: valid_transaction_indices done");
         // Header validation
         if !optimistic {
-            // TODO: change NoopProvider for Shasta
-            let consensus = TaikoBeaconConsensus::new(chain_spec.clone(), NoopProvider::default());
+            let consensus = RaikoBeaconConsensus::new(
+                chain_spec.clone(),
+                self.input.taiko.grandparent_timestamp,
+            );
+
             // Validates if some values are set that should not be set for the current HF
             consensus.validate_header(sealed_header)?;
             info!("execute_transactions: validate_header done");
+
             // Validates parent block hash, block number and timestamp
             let parent_sealed_header = SealedHeader::new_unhashed(self.input.parent_header.clone());
             consensus.validate_header_against_parent(sealed_header, &parent_sealed_header)?;
             info!("execute_transactions: validate_header_against_parent done");
+
             // Validates ommers hash, transaction root, withdrawals root
             consensus.validate_block_pre_execution(sealed_block)?;
             info!("execute_transactions: validate_block_pre_execution done");
-            // Validates the gas used, the receipts root and the logs bloom
 
+            // Validates the gas used, the receipts root and the logs bloom
             validate_block_post_execution(&recovered_block, &chain_spec, &receipts, &requests)?;
             info!("execute_transactions: validate_block_post_execution done");
         }
@@ -517,7 +562,6 @@ impl<DB: Database<Error = ProviderError> + DatabaseCommit + OptimisticDatabase +
                 (address, account)
             })
             .collect();
-        info!("execute_transactions: changes done");
         self.db.as_mut().unwrap().commit(changes);
         info!("execute_transactions: commit done");
         Ok(())
@@ -535,6 +579,7 @@ impl RethBlockBuilder<MemDb> {
     /// Finalizes the block building and returns the header
     pub fn finalize_block(&mut self) -> Result<Block> {
         let state_root = self.calculate_state_root()?;
+        assert_eq!(self.input.block.state_root, state_root);
         ensure!(self.input.block.state_root == state_root);
         Ok(self.input.block.clone())
     }

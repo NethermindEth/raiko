@@ -130,11 +130,28 @@ where
     fn evm(&self) -> &Self::Evm {
         self.inner.evm()
     }
+
+    fn execute_transaction_without_commit(
+        &mut self,
+        tx: impl ExecutableTx<Self>,
+    ) -> Result<
+        revm::context::result::ResultAndState<<Self::Evm as Evm>::HaltReason>,
+        BlockExecutionError,
+    > {
+        self.inner.execute_transaction_without_commit(tx)
+    }
+
+    fn commit_transaction(
+        &mut self,
+        output: revm::context::result::ResultAndState<<Self::Evm as Evm>::HaltReason>,
+        tx: impl ExecutableTx<Self>,
+    ) -> Result<u64, BlockExecutionError> {
+        self.inner.commit_transaction(output, tx)
+    }
 }
 
 /// A generic block executor that uses a [`BlockExecutor`] to
 /// execute blocks.
-#[expect(missing_debug_implementations)]
 pub struct TaikoWithOptimisticBlockExecutor<F, DB> {
     pub strategy_factory: F,
     pub db: State<DB>,
@@ -175,7 +192,8 @@ where
     {
         let block_executor = self
             .strategy_factory
-            .executor_for_block(&mut self.db, block);
+            .executor_for_block(&mut self.db, block)
+            .map_err(|e| BlockExecutionError::other(e))?;
 
         let block_executor_with_optimistic =
             BlockExecutorWithOptimistic::new(block_executor, self.is_optimistic);
@@ -198,7 +216,8 @@ where
     {
         let block_executor = self
             .strategy_factory
-            .executor_for_block(&mut self.db, block);
+            .executor_for_block(&mut self.db, block)
+            .map_err(|e| BlockExecutionError::other(e))?;
 
         let mut block_executor_with_optimistic =
             BlockExecutorWithOptimistic::new(block_executor, self.is_optimistic);

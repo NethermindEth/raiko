@@ -1,5 +1,6 @@
 services:
   raiko-zk:
+    platform: linux/amd64
     build:
       context: ..
       dockerfile: Dockerfile.zk

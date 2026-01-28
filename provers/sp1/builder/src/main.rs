@@ -5,14 +5,12 @@ use std::{env, path::PathBuf};
 
 fn main() {
     let pipeline = Sp1Pipeline::new("provers/sp1/guest", "release");
-    pipeline.bins(&["sp1-aggregation", "sp1-batch"], "provers/sp1/guest/elf");
-    #[cfg(feature = "test")]
-    pipeline.tests(&["sp1-batch"], "provers/sp1/guest/elf");
-    #[cfg(feature = "bench")]
     pipeline.bins(
-        &["ecdsa", "sha256", "bn254_add", "bn254_mul"],
+        &["sp1-aggregation", "sp1-batch", "sp1-shasta-aggregation"],
         "provers/sp1/guest/elf",
     );
+    #[cfg(feature = "test")]
+    pipeline.tests(&["sp1-batch"], "provers/sp1/guest/elf");
 }
 
 pub struct Sp1Pipeline {
@@ -38,7 +36,7 @@ impl Pipeline for Sp1Pipeline {
                 "link-arg=-Ttext=0x00200800",
                 "panic=abort",
             ])
-            .rust_cfgs(&["getrandom_backend=\"custom\""])
+            .rust_cfgs(&["getrandom_backend=\"unsupported\""])
             .cc_compiler("gcc".into())
             .c_flags(&[
                 &gcc_path,
