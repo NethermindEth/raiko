@@ -155,12 +155,10 @@ sol! {
 
     /// @notice Processes a block within a proposal and anchors L1 data.
     /// @dev Core function that processes blocks sequentially within a proposal:
-    ///      1. Designates prover when a new proposal starts (i.e. the first block of a proposal)
-    ///      2. Anchors L1 block data for cross-chain verification
+    ///      1. Anchors L1 block data for cross-chain verification
     /// @param _proposalParams Proposal-level parameters that define the overall batch.
     /// @param _checkpoint Checkpoint data for the L1 block being anchored.
     function anchorV4(
-        ProposalParams calldata _proposalParams,
         Checkpoint calldata _checkpoint
     )
         external
