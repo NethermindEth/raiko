@@ -375,6 +375,10 @@ pub async fn batch_preflight<BDP: BlockDataProvider>(
                     grandparent_timestamp,
                 };
 
+                // Update grandparent timestamp for next block
+                // Current block's parent becomes next block's grandparent
+                grandparent_timestamp = Some(parent_header.timestamp);
+
                 // Create the guest input
                 let input = GuestInput {
                     block: prove_block.clone(),
@@ -383,10 +387,6 @@ pub async fn batch_preflight<BDP: BlockDataProvider>(
                     taiko: taiko_input.clone(),
                     ..Default::default()
                 };
-
-                // Update grandparent timestamp for next block
-                // Current block's parent becomes next block's grandparent
-                grandparent_timestamp = Some(prove_block.header.timestamp);
 
                 let provider = RpcBlockDataProvider::new(&taiko_chain_spec.rpc)
                     .await
