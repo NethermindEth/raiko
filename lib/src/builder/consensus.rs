@@ -127,6 +127,11 @@ where
                     "Calculating expected base fee with parent number {}",
                     parent.number()
                 );
+                debug!("EXPECTED BASE FEE parent header: {:#?}", parent.header());
+                debug!(
+                    "EXPECTED BASE FEE grandparent blocktime: {:#?}",
+                    self.grandparent_timestamp
+                );
                 calculate_next_block_eip4396_base_fee(
                     parent.header(),
                     parent_block_time(
