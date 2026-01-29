@@ -97,7 +97,7 @@ pub static SURGE_DEV_HARDFORKS: LazyLock<ChainHardforks> = LazyLock::new(|| {
             ),
         ),
         (TaikoHardfork::Pacaya.boxed(), ForkCondition::Block(1)),
-        (TaikoHardfork::Shasta.boxed(), ForkCondition::Block(1)),
+        (TaikoHardfork::Shasta.boxed(), ForkCondition::Timestamp(0)),
     ])
 });
 
@@ -142,7 +142,7 @@ pub static SURGE_TEST_HARDFORKS: LazyLock<ChainHardforks> = LazyLock::new(|| {
             ),
         ),
         (TaikoHardfork::Pacaya.boxed(), ForkCondition::Block(1)),
-        (TaikoHardfork::Shasta.boxed(), ForkCondition::Block(1)),
+        (TaikoHardfork::Shasta.boxed(), ForkCondition::Timestamp(0)),
     ])
 });
 
@@ -187,7 +187,7 @@ pub static SURGE_STAGE_HARDFORKS: LazyLock<ChainHardforks> = LazyLock::new(|| {
             ),
         ),
         (TaikoHardfork::Pacaya.boxed(), ForkCondition::Block(1)),
-        (TaikoHardfork::Shasta.boxed(), ForkCondition::Block(1)),
+        (TaikoHardfork::Shasta.boxed(), ForkCondition::Timestamp(0)),
     ])
 });
 
