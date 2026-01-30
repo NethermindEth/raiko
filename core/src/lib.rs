@@ -579,7 +579,7 @@ mod tests {
             &output,
         );
         let config = Value::default();
-        aggregate_shasta_proposals(proof_type, input, &output, &config, None)
+        aggregate_shasta_proposals(proof_type, input, &output, &config, None, None)
             .await
             .expect("failed to generate aggregation proof")
     }
