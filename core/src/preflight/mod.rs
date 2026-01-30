@@ -247,12 +247,6 @@ pub async fn batch_preflight<BDP: BlockDataProvider>(
 ) -> RaikoResult<GuestBatchInput> {
     let measurement = Measurement::start("Fetching block data...", false);
 
-    // Get grandparent timestamp. This value is needed in consensus validation of the block after execution.
-    let mut grandparent_timestamp = get_grandparent_timestamp(
-        &provider,
-        block_numbers.first().cloned().unwrap_or_default(),
-    )
-    .await?;
     let all_block_parent_pairs =
         get_batch_blocks_and_parent_data(&provider, &block_numbers).await?;
     let (l2_grandparent_header, block_parent_pairs) = if block_numbers[0] == 1 {
@@ -342,6 +336,17 @@ pub async fn batch_preflight<BDP: BlockDataProvider>(
         let task_batch_vec = task_batch.to_vec();
         let taiko_guest_batch_input = taiko_guest_batch_input.clone();
         let taiko_chain_spec = taiko_chain_spec.clone();
+
+        // Get first block number in batch, needed for grandparent timestamp fetch
+        let first_block_number_in_batch = task_batch_vec
+            .first()
+            .map(|((block, _), _)| block.header.number)
+            .unwrap_or(0);
+
+        // Get grandparent timestamp. This value is needed in consensus validation of the block after execution.
+        let mut grandparent_timestamp =
+            get_grandparent_timestamp(&provider, first_block_number_in_batch).await?;
+
         let handle = tokio::spawn(async move {
             let mut chunk_guest_input = Vec::new();
             for ((prove_block, parent_block), txs_with_force_inc_flag) in task_batch_vec {
