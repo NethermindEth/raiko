@@ -8,8 +8,8 @@ use raiko_lib::{
     primitives::{keccak::keccak, Address, B256},
     proof_type::ProofType,
     protocol_instance::{
-        aggregation_output_combine, build_shasta_commitment_from_proof_carry_data_vec,
-        shasta_aggregation_output, validate_shasta_aggregate_proof_carry_data, ProtocolInstance,
+        aggregation_output_combine, shasta_pcd_aggregation_hash,
+        validate_shasta_aggregate_proof_carry_data, ProtocolInstance,
     },
 };
 use rand::Rng;
@@ -353,24 +353,9 @@ pub fn prove_shasta_aggregation(
         }
     }
 
-    let commitment = build_shasta_commitment_from_proof_carry_data_vec(&input.proof_carry_data_vec)
-        .ok_or_else(|| anyhow!("Invalid shasta proof carry data for aggregation"))?;
-
-    // The aggregator must be the same instance as the sub-proof signer.
-    if expected_instance != new_instance {
-        return Err(anyhow!(
-            "Shasta aggregation instance mismatch: proofs are from {}, but current instance is {}",
-            expected_instance,
-            new_instance
-        ));
-    }
-
-    let aggregation_hash = shasta_aggregation_output(
-        &commitment,
-        input.proof_carry_data_vec[0].chain_id,
-        input.proof_carry_data_vec[0].verifier,
-        new_instance,
-    );
+    let aggregation_hash =
+        shasta_pcd_aggregation_hash(&input.proof_carry_data_vec, new_instance)
+            .ok_or_else(|| anyhow!("invalid shasta proof carry data for aggregation"))?;
 
     let signature = sign_message(&private_key, &aggregation_hash)?;
     let proof = TdxProof::new(instance_id, &new_instance, &signature).to_vec();
