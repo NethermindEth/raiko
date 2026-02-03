@@ -186,7 +186,8 @@ impl Prover for MockProver {
     }
 
     fn proof_type(&self) -> ProofType {
-        unimplemented!("MockProver does not define a proof type");
+        // Mock prover doesn't have a specific proof type, return Native as default
+        ProofType::Native
     }
 }
 

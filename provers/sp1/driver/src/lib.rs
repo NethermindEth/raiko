@@ -1,6 +1,6 @@
 #![cfg(feature = "enable")]
 
-use alloy_primitives::{hex, Address, B256};
+use alloy_primitives::{hex, B256};
 use once_cell::sync::Lazy;
 use raiko_lib::{
     input::{

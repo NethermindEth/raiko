@@ -236,7 +236,7 @@ pub async fn run_shasta_proposal_prover(
     if let Some(mock_key) = mock_key {
         info!("Using mock prover with mock key");
         return MockProver::new(mock_key.clone())?
-            .batch_run(input.clone(), output, config, store)
+            .proposal_run(input.clone(), output, config, store)
             .await
             .map_err(<ProverError as Into<RaikoError>>::into);
     }
