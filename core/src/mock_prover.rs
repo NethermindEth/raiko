@@ -54,18 +54,6 @@ impl Prover for MockProver {
         unimplemented!()
     }
 
-    /// Run the prover for Shasta proposals (delegates to batch_run for now)
-    async fn proposal_run(
-        &self,
-        input: GuestBatchInput,
-        output: &GuestBatchOutput,
-        config: &ProverConfig,
-        store: Option<&mut dyn IdWrite>,
-    ) -> ProverResult<Proof> {
-        // Default implementation delegates to batch_run
-        self.batch_run(input.clone(), output, config, store).await
-    }
-
     async fn run(
         &self,
         _input: GuestInput,
