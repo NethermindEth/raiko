@@ -4,10 +4,14 @@ use raiko_lib::{
         AggregationGuestInput, AggregationGuestOutput, GuestBatchInput, GuestBatchOutput,
         GuestInput, GuestOutput, ShastaAggregationGuestInput,
     },
+    libhash::hash_commitment,
     primitives::{keccak256, Signature},
     proof_type::ProofType,
-    protocol_instance::aggregation_output,
-    prover::{IdStore, IdWrite, Proof, ProofKey, Prover, ProverConfig, ProverError, ProverResult},
+    protocol_instance::{aggregation_output, build_shasta_commitment_from_proof_carry_data_vec},
+    prover::{
+        IdStore, IdWrite, Proof, ProofCarryData, ProofKey, Prover, ProverConfig, ProverError,
+        ProverResult,
+    },
 };
 use secp256k1::{Message, SecretKey, SECP256K1};
 use tracing::trace;
@@ -155,32 +159,36 @@ impl Prover for MockProver {
     ) -> ProverResult<Proof> {
         trace!("Running the mock prover for aggregation input");
 
-        // Extract block inputs from the proofs
-        let block_inputs: Vec<B256> = input
+        // Extract the useful parts of the proof
+        let proof_carry_data_vec: Vec<_> = input
             .proofs
             .iter()
-            .map(|proof| proof.input.unwrap())
+            .map(|proof| {
+                let extra_data = proof.extra_data.clone().unwrap();
+                ProofCarryData {
+                    chain_id: extra_data.chain_id,
+                    verifier: extra_data.verifier,
+                    transition_input: extra_data.transition_input,
+                }
+            })
             .collect();
 
-        // For mock mode, use a dummy program hash (all zeros)
-        let program_hash = B256::ZERO;
-
-        // Generate the same aggregation output as in aggregation.rs
-        let aggregation_output_bytes = aggregation_output(program_hash, block_inputs);
-
-        // Hash the aggregation output to get the message to sign
-        let message_hash = keccak256(&aggregation_output_bytes);
+        let commitment_hash = hash_commitment(
+            &build_shasta_commitment_from_proof_carry_data_vec(&proof_carry_data_vec).ok_or(
+                ProverError::GuestError("Failed to build shasta commitment".to_string()),
+            )?,
+        );
 
         // Sign the message hash using the private key
         let signature = self
-            .sign_hash(&message_hash)
+            .sign_hash(&commitment_hash)
             .map_err(|e| ProverError::GuestError(format!("Failed to sign aggregation: {}", e)))?;
 
         // Encode signature as hex string
         let proof_data = alloy_primitives::hex::encode_prefixed(signature.as_bytes());
 
         Ok(Proof {
-            input: Some(message_hash),
+            input: Some(commitment_hash),
             proof: Some(proof_data),
             quote: None,
             uuid: None,
