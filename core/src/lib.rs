@@ -7,6 +7,7 @@ use raiko_lib::{
     builder::{create_mem_db, RethBlockBuilder},
     consts::ChainSpec,
     input::{GuestBatchInput, GuestBatchOutput, GuestInput, GuestOutput, TaikoProverData},
+    l1_precompiles::{clear_l1sload_cache, verify_and_populate_l1sload_proofs},
     protocol_instance::ProtocolInstance,
     prover::{IdStore, IdWrite, Proof, ProofKey},
     utils::{generate_transactions, generate_transactions_for_batch_blocks},
@@ -109,6 +110,31 @@ impl Raiko {
             &input.taiko.tx_data,
             &input.taiko.anchor_tx,
         );
+
+        // If there are L1SLOAD proofs, clear the L1SLOAD cache before executing
+        // the transactions and verify them against the anchor state root.
+        // L1 ancestor headers are used to walk back from the anchor block and derive
+        // trusted state roots for blocks older than the anchor.
+        if !input.l1_storage_proofs.is_empty() {
+            clear_l1sload_cache();
+            let anchor_state_root = input.taiko.l1_header.state_root;
+            let anchor_block_number = input.taiko.l1_header.number;
+            info!(
+                "get_output: Verifying and populating L1SLOAD proofs with {} proofs, \
+                 anchor block={}, {} L1 ancestor headers",
+                input.l1_storage_proofs.len(),
+                anchor_block_number,
+                input.l1_ancestor_headers.len()
+            );
+            verify_and_populate_l1sload_proofs(
+                &input.l1_storage_proofs,
+                anchor_state_root,
+                anchor_block_number,
+                &input.l1_ancestor_headers,
+            )
+            .expect("Failed to verify and populate L1SLOAD proofs");
+        }
+
         builder
             .execute_transactions(pool_tx, false)
             .expect("execute");
@@ -181,6 +207,29 @@ impl Raiko {
     ) -> RaikoResult<Block> {
         let db = create_mem_db(&mut input.clone()).unwrap();
         let mut builder = RethBlockBuilder::new(input, db);
+
+        // If there are L1SLOAD proofs, populate the L1SLOAD cache before executing
+        // the transactions and verify them against the anchor state root.
+        // L1 ancestor headers enable verification of L1SLOAD at non-anchor blocks.
+        if !input.l1_storage_proofs.is_empty() {
+            clear_l1sload_cache();
+            let anchor_state_root = input.taiko.l1_header.state_root;
+            let anchor_block_number = input.taiko.l1_header.number;
+            info!(
+                "single_output_for_batch: Verifying and populating L1SLOAD proofs with {} proofs, \
+                 anchor block={}, {} L1 ancestor headers",
+                input.l1_storage_proofs.len(),
+                anchor_block_number,
+                input.l1_ancestor_headers.len()
+            );
+            verify_and_populate_l1sload_proofs(
+                &input.l1_storage_proofs,
+                anchor_state_root,
+                anchor_block_number,
+                &input.l1_ancestor_headers,
+            )
+            .expect("Failed to verify and populate L1SLOAD proofs for batch block");
+        }
 
         let mut pool_txs = vec![input.taiko.anchor_tx.clone().unwrap()];
         pool_txs.extend_from_slice(&origin_pool_txs);

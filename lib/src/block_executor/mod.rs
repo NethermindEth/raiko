@@ -6,17 +6,21 @@ use core::ops::Deref;
 
 use reth_evm::{
     block::{
-        BlockExecutionError, BlockExecutionResult, BlockExecutor, BlockValidationError,
-        CommitChanges, ExecutableTx,
+        BlockExecutionError, BlockExecutionResult, BlockExecutor, BlockExecutorFactory,
+        BlockExecutorFor, BlockValidationError, CommitChanges, ExecutableTx,
     },
     execute::Executor,
-    ConfigureEvm, Database, Evm, OnStateHook,
+    ConfigureEvm, Database, Evm, EvmFactory, OnStateHook,
 };
 use reth_primitives::{NodePrimitives, RecoveredBlock};
 use reth_revm::{
-    context::result::ExecutionResult, db::states::bundle_state::BundleRetention, State,
+    context::result::ExecutionResult, db::states::bundle_state::BundleRetention, Inspector, State,
 };
 use tracing::warn;
+
+pub use l1sload_inspector::{L1SloadInspector, L1SLOAD_ADDRESS};
+
+mod l1sload_inspector;
 
 /// A wrapper around any [`BlockExecutor`] that adds an `is_optimistic` flag to indicate whether
 /// the execution is optimistic or not for Raiko proofs.
@@ -139,6 +143,8 @@ pub struct TaikoWithOptimisticBlockExecutor<F, DB> {
     pub strategy_factory: F,
     pub db: State<DB>,
     pub is_optimistic: bool,
+    /// Whether to enable inspector or not. Useful for turning off for zk execution.
+    pub inspect: bool,
 }
 
 impl<F, DB> TaikoWithOptimisticBlockExecutor<F, DB>
@@ -146,7 +152,7 @@ where
     DB: Database,
 {
     /// Creates a new `BasicBlockExecutor` with the given strategy.
-    pub fn new(strategy_factory: F, db: DB, is_optimistic: bool) -> Self {
+    pub fn new(strategy_factory: F, db: DB, is_optimistic: bool, inspect: bool) -> Self {
         let db = State::builder()
             .with_database(db)
             .with_bundle_update()
@@ -156,7 +162,38 @@ where
             strategy_factory,
             db,
             is_optimistic,
+            inspect,
         }
+    }
+}
+
+impl<'a, F, DB> TaikoWithOptimisticBlockExecutor<F, DB>
+where
+    DB: Database,
+    F: ConfigureEvm,
+{
+    /// Creates a block executor with inspector for the given block.
+    //
+    // Note, ConfigureEvm ('self.strategy_factory') doesn't have build in
+    // method for creating block_executor with inspector in evm, so we create it manually here.
+    fn create_block_executor_with_inspector<I>(
+        &'a mut self,
+        block: &'a RecoveredBlock<<F::Primitives as NodePrimitives>::Block>,
+        inspector: I,
+    ) -> impl BlockExecutorFor<'a, F::BlockExecutorFactory, DB, I>
+    where
+    I: Inspector<
+            <<F::BlockExecutorFactory as BlockExecutorFactory>::EvmFactory as EvmFactory>::Context<
+                &'a mut State<DB>,
+            >,
+        > + 'a,
+    {
+        let evm_env = self.strategy_factory.evm_env(block.header());
+        let evm =
+            self.strategy_factory
+                .evm_with_env_and_inspector(&mut self.db, evm_env, inspector);
+        let ctx = self.strategy_factory.context_for_block(block);
+        self.strategy_factory.create_executor(evm, ctx)
     }
 }
 
@@ -173,12 +210,18 @@ where
         block: &RecoveredBlock<<Self::Primitives as NodePrimitives>::Block>,
     ) -> Result<BlockExecutionResult<<Self::Primitives as NodePrimitives>::Receipt>, Self::Error>
     {
-        let block_executor = self
-            .strategy_factory
-            .executor_for_block(&mut self.db, block);
+        let is_optimistic = self.is_optimistic;
+        let inspect = self.inspect;
+
+        // Create block executor with inspector
+        let mut block_executor =
+            self.create_block_executor_with_inspector(block, L1SloadInspector::default());
+
+        // Enable or disable inspector based on the flag
+        block_executor.evm_mut().set_inspector_enabled(inspect);
 
         let block_executor_with_optimistic =
-            BlockExecutorWithOptimistic::new(block_executor, self.is_optimistic);
+            BlockExecutorWithOptimistic::new(block_executor, is_optimistic);
 
         let result =
             block_executor_with_optimistic.execute_block(block.transactions_recovered())?;
@@ -196,12 +239,18 @@ where
     where
         H: OnStateHook + 'static,
     {
-        let block_executor = self
-            .strategy_factory
-            .executor_for_block(&mut self.db, block);
+        let is_optimistic = self.is_optimistic;
+        let inspect = self.inspect;
+
+        // Create block executor with inspector
+        let mut block_executor =
+            self.create_block_executor_with_inspector(block, L1SloadInspector::default());
+
+        // Enable or disable inspector based on the flag
+        block_executor.evm_mut().set_inspector_enabled(inspect);
 
         let mut block_executor_with_optimistic =
-            BlockExecutorWithOptimistic::new(block_executor, self.is_optimistic);
+            BlockExecutorWithOptimistic::new(block_executor, is_optimistic);
 
         block_executor_with_optimistic.set_state_hook(Some(Box::new(state_hook)));
 
