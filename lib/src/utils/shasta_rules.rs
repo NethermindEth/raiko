@@ -14,7 +14,7 @@ use crate::no_std::*;
 
 pub const BOND_PROCESSING_DELAY: usize = 6;
 
-pub const ANCHOR_MAX_OFFSET: usize = 128;
+pub const ANCHOR_MAX_OFFSET: usize = 256;
 
 pub(crate) fn valid_anchor_in_normal_proposal(
     blocks: &[ProtocolBlockManifest],
