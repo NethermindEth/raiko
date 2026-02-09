@@ -2,7 +2,7 @@ use std::{fs, path::PathBuf};
 
 use anyhow::{anyhow, Context, Result};
 use raiko_lib::{primitives::Address, proof_type::ProofType};
-use serde::{Serialize, Deserialize};
+use serde::{Deserialize, Serialize};
 
 use crate::TdxConfig;
 
@@ -24,7 +24,7 @@ pub fn bootstrap_exists() -> Result<bool> {
     let config_dir = get_config_dir()?;
     let bootstrap_file = config_dir.join("bootstrap.json");
     let key_file = config_dir.join("secrets").join("priv.key");
-    
+
     Ok(bootstrap_file.exists() && key_file.exists())
 }
 
@@ -80,12 +80,19 @@ pub struct BootstrapData {
 pub fn read_bootstrap() -> Result<BootstrapData> {
     let config_dir = get_config_dir()?;
     let bootstrap_file = config_dir.join("bootstrap.json");
-    let bootstrap_data: BootstrapData = serde_json::from_str(&fs::read_to_string(&bootstrap_file)?)?;
+    let bootstrap_data: BootstrapData =
+        serde_json::from_str(&fs::read_to_string(&bootstrap_file)?)?;
 
     Ok(bootstrap_data)
 }
 
-pub fn write_bootstrap(issuer_type: &str, quote: &Vec<u8>, public_key: &Address, nonce: &Vec<u8>, metadata: serde_json::Value) -> Result<()> {
+pub fn write_bootstrap(
+    issuer_type: &str,
+    quote: &Vec<u8>,
+    public_key: &Address,
+    nonce: &Vec<u8>,
+    metadata: serde_json::Value,
+) -> Result<()> {
     let config_dir = get_config_dir()?;
     let bootstrap_file = config_dir.join("bootstrap.json");
 
@@ -96,16 +103,24 @@ pub fn write_bootstrap(issuer_type: &str, quote: &Vec<u8>, public_key: &Address,
         nonce: hex::encode(nonce),
         metadata,
     };
-    fs::write(&bootstrap_file, serde_json::to_string_pretty(&bootstrap_data)?)?;
+    fs::write(
+        &bootstrap_file,
+        serde_json::to_string_pretty(&bootstrap_data)?,
+    )?;
     Ok(())
 }
 
 pub fn get_issuer_type() -> Result<ProofType> {
     let bootstrap_data = read_bootstrap()?;
     let proof_type = match bootstrap_data.issuer_type.as_str() {
-        "tdx" => ProofType::Tdx,
+        "tdx" | "simulator" => ProofType::Tdx,
         "azure" => ProofType::AzureTdx,
-        _ => return Err(anyhow!("Invalid issuer type: {}", bootstrap_data.issuer_type)),
+        _ => {
+            return Err(anyhow!(
+                "Invalid issuer type: {}",
+                bootstrap_data.issuer_type
+            ))
+        }
     };
     Ok(proof_type)
 }
@@ -113,7 +128,8 @@ pub fn get_issuer_type() -> Result<ProofType> {
 pub fn validate_issuer_type(proof_type: ProofType) -> Result<()> {
     let expected_issuer = get_issuer_type()?;
     if expected_issuer != proof_type {
-        return Err(anyhow!("Bootstrap issuer type '{}' does not match expected '{}'",
+        return Err(anyhow!(
+            "Bootstrap issuer type '{}' does not match expected '{}'",
             expected_issuer,
             proof_type,
         ));

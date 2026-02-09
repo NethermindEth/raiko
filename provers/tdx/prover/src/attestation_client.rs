@@ -65,9 +65,10 @@ impl<T> Response<T> {
             (Some(data), None) => Ok(data),
             (None, Some(error)) => Err(anyhow!("Attestation service error: {}", error)),
             (None, None) => Err(anyhow!("Invalid response: neither data nor error present")),
-            (Some(_), Some(error)) => {
-                Err(anyhow!("Invalid response: both data and error present. Error: {}", error))
-            }
+            (Some(_), Some(error)) => Err(anyhow!(
+                "Invalid response: both data and error present. Error: {}",
+                error
+            )),
         }
     }
 }
@@ -110,7 +111,7 @@ pub fn issue_attestation(socket_path: &str, user_data: &[u8], nonce: &[u8]) -> R
         .context("Failed to parse attestation service response")?;
 
     let data = response.into_result()?;
-    
+
     hex::decode(&data.document).context("Failed to decode attestation document from hex")
 }
 
@@ -149,7 +150,7 @@ pub fn metadata(socket_path: &str) -> Result<MetadataResponseData> {
         .context("Failed to parse attestation service response")?;
 
     let data = response.into_result()?;
-    
+
     Ok(data)
 }
 
@@ -195,9 +196,8 @@ pub fn validate_document(
         .context("Failed to parse attestation service response")?;
 
     let data = response.into_result()?;
-    
-    let user_data = hex::decode(&data.user_data)
-        .context("Failed to decode user data from hex")?;
+
+    let user_data = hex::decode(&data.user_data).context("Failed to decode user data from hex")?;
 
     Ok((user_data, data.valid))
 }
