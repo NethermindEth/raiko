@@ -80,12 +80,14 @@ pub struct TaikoGuestBatchInput {
     #[serde_as(as = "BincodeCompactHeader")]
     pub l1_header: Header,
     /// List of at most MAX ANCHOR OFFSET previous block headers
+    #[serde_as(as = "Vec<BincodeCompactHeader>")]
     pub l1_ancestor_headers: Vec<Header>,
     pub batch_proposed: BlockProposedFork,
     pub chain_spec: ChainSpec,
     pub prover_data: TaikoProverData,
     pub data_sources: Vec<InputDataSource>,
     /// L2 grandparent header for the first block in the batch (used for EIP-4396 base fee calculation)
+    #[serde_as(as = "Option<BincodeCompactHeader>")]
     pub l2_grandparent_header: Option<Header>,
 }
 
