@@ -42,6 +42,7 @@ once_cell = { workspace = true }
 url = { workspace = true }
 hex = { workspace = true }
 bls12_381 = { workspace = true }
+base64 = { workspace = true }
 kzg = { workspace = true }
 kzg_traits = { workspace = true }
 sha2 = { workspace = true }
@@ -68,6 +69,7 @@ lazy_static = { workspace = true }
 reth-ethereum-consensus = { workspace = true }
 reth-storage-api = { workspace = true }
 reth-consensus = { workspace = true }
+reth-consensus-common = { workspace = true }
 
 alethia-reth-consensus = { workspace = true }
 alethia-reth-evm = { workspace = true }

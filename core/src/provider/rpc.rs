@@ -18,40 +18,17 @@ use crate::{
 pub struct RpcBlockDataProvider {
     pub provider: RootProvider,
     pub client: RpcClient,
-    block_numbers: Vec<u64>,
 }
 
 impl RpcBlockDataProvider {
     /// async will be used for future preflight optimization
-    pub async fn new(url: &str, block_number: u64) -> RaikoResult<Self> {
+    pub async fn new(url: &str) -> RaikoResult<Self> {
         let url =
             reqwest::Url::parse(url).map_err(|_| RaikoError::RPC("Invalid RPC URL".to_owned()))?;
-        debug!(
-            "provider rpc url: {:?} for block_number {}",
-            url, block_number
-        );
+        debug!("provider rpc url: {:?}", url);
         Ok(Self {
             provider: RootProvider::new_http(url.clone()),
             client: ClientBuilder::default().http(url),
-            block_numbers: vec![block_number, block_number + 1],
-        })
-    }
-
-    pub async fn new_batch(url: &str, block_numbers: Vec<u64>) -> RaikoResult<Self> {
-        assert!(
-            !block_numbers.is_empty() && block_numbers.len() > 1,
-            "batch block_numbers should have at least 2 elements"
-        );
-        let url =
-            reqwest::Url::parse(url).map_err(|_| RaikoError::RPC("Invalid RPC URL".to_owned()))?;
-        debug!(
-            "Batch provider rpc: {:?} for block_number {}",
-            url, block_numbers[0]
-        );
-        Ok(Self {
-            provider: RootProvider::new_http(url.clone()),
-            client: ClientBuilder::default().http(url),
-            block_numbers,
         })
     }
 
@@ -233,12 +210,6 @@ impl BlockDataProvider for RpcBlockDataProvider {
         block_number: u64,
         accounts: &[Address],
     ) -> RaikoResult<Vec<AccountInfo>> {
-        assert!(
-            self.block_numbers.contains(&block_number),
-            "Block number {} not found in {:?}",
-            block_number,
-            self.block_numbers
-        );
         let mut all_accounts = Vec::with_capacity(accounts.len());
 
         let max_batch_size = 250;
@@ -330,12 +301,6 @@ impl BlockDataProvider for RpcBlockDataProvider {
         block_number: u64,
         accounts: &[(Address, U256)],
     ) -> RaikoResult<Vec<U256>> {
-        assert!(
-            self.block_numbers.contains(&block_number),
-            "Block number {} not found in {:?}",
-            block_number,
-            self.block_numbers
-        );
         let mut all_values = Vec::with_capacity(accounts.len());
 
         let max_batch_size = 1000;
@@ -387,12 +352,6 @@ impl BlockDataProvider for RpcBlockDataProvider {
         offset: usize,
         num_storage_proofs: usize,
     ) -> RaikoResult<MerkleProof> {
-        assert!(
-            self.block_numbers.contains(&block_number),
-            "Block number {} not found in {:?}",
-            block_number,
-            self.block_numbers
-        );
         self.fetch_storage_proofs_internal(block_number, accounts, offset, num_storage_proofs)
             .await
     }

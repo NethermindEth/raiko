@@ -134,11 +134,28 @@ where
     fn evm(&self) -> &Self::Evm {
         self.inner.evm()
     }
+
+    fn execute_transaction_without_commit(
+        &mut self,
+        tx: impl ExecutableTx<Self>,
+    ) -> Result<
+        revm::context::result::ResultAndState<<Self::Evm as Evm>::HaltReason>,
+        BlockExecutionError,
+    > {
+        self.inner.execute_transaction_without_commit(tx)
+    }
+
+    fn commit_transaction(
+        &mut self,
+        output: revm::context::result::ResultAndState<<Self::Evm as Evm>::HaltReason>,
+        tx: impl ExecutableTx<Self>,
+    ) -> Result<u64, BlockExecutionError> {
+        self.inner.commit_transaction(output, tx)
+    }
 }
 
 /// A generic block executor that uses a [`BlockExecutor`] to
 /// execute blocks.
-#[expect(missing_debug_implementations)]
 pub struct TaikoWithOptimisticBlockExecutor<F, DB> {
     pub strategy_factory: F,
     pub db: State<DB>,
@@ -188,11 +205,17 @@ where
             >,
         > + 'a,
     {
-        let evm_env = self.strategy_factory.evm_env(block.header());
+        let evm_env = self
+            .strategy_factory
+            .evm_env(block.header())
+            .expect("Failed to create EVM environment");
         let evm =
             self.strategy_factory
                 .evm_with_env_and_inspector(&mut self.db, evm_env, inspector);
-        let ctx = self.strategy_factory.context_for_block(block);
+        let ctx = self
+            .strategy_factory
+            .context_for_block(block)
+            .expect("Failed to create execution context");
         self.strategy_factory.create_executor(evm, ctx)
     }
 }

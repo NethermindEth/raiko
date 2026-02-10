@@ -2,14 +2,14 @@
     {
         "name": "hoodi",
         "chain_id": 560048,
-        "hard_forks": { },
+        "hard_forks": {},
         "eip_1559_constants": {
             "base_fee_change_denominator": "0x8",
             "base_fee_max_increase_denominator": "0x8",
             "base_fee_max_decrease_denominator": "0x8",
             "elasticity_multiplier": "0x2"
         },
-        "l1_contract": null,
+        "l1_contract": {},
         "l2_contract": null,
         "rpc": "https://l1-rpc-internal.staging.surge.wtf",
         "beacon_rpc": "https://l1-beacon-internal.staging.surge.wtf",
@@ -22,25 +22,41 @@
         "name": "surge_dev",
         "chain_id": 763374,
         "hard_forks": {
-			      "ONTAKE": {
-			        "Block": 1
-			      },
-			      "PACAYA": {
-			        "Block": 1
-			      }
-		    },
+            "ONTAKE": {
+                "Block": 1
+            },
+            "PACAYA": {
+                "Block": 1
+            },
+            "SHASTA": {
+                "Timestamp": 1
+            }
+        },
         "eip_1559_constants": {
             "base_fee_change_denominator": "0x8",
             "base_fee_max_increase_denominator": "0x8",
             "base_fee_max_decrease_denominator": "0x8",
             "elasticity_multiplier": "0x2"
         },
-        "l1_contract": "0xA6f38572271f6e251BA8d7a1992ded1d1f05f3bd",
+        "l1_contract": {
+            "PACAYA": "0xA6f38572271f6e251BA8d7a1992ded1d1f05f3bd",
+            "SHASTA": "0xA6f38572271f6e251BA8d7a1992ded1d1f05f3bd"
+        },
         "l2_contract": "0x7633740000000000000000000000000000010001",
         "rpc": "https://l2-rpc.staging.surge.wtf",
         "beacon_rpc": null,
         "verifier_address_forks": {
             "ONTAKE": {
+                "SGX": "0x82689c09B5F47592311A13cDB66caF912d78F496",
+                "SP1": "0x839D50BD8c20B660ED26bcF3Ed7366fC0D4000cf",
+                "RISC0": "0x2EDB2d4aec06A25A3b715D5Dcbf63A1d021952DE"
+            },
+            "PACAYA": {
+                "SGX": "0x82689c09B5F47592311A13cDB66caF912d78F496",
+                "SP1": "0x839D50BD8c20B660ED26bcF3Ed7366fC0D4000cf",
+                "RISC0": "0x2EDB2d4aec06A25A3b715D5Dcbf63A1d021952DE"
+            },
+            "SHASTA": {
                 "SGX": "0x82689c09B5F47592311A13cDB66caF912d78F496",
                 "SP1": "0x839D50BD8c20B660ED26bcF3Ed7366fC0D4000cf",
                 "RISC0": "0x2EDB2d4aec06A25A3b715D5Dcbf63A1d021952DE"

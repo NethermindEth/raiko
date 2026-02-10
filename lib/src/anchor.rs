@@ -1,10 +1,9 @@
 //! Taiko's anchor related functionality and checks.
 
-use alloy_consensus::{BlockHeader, TxEip1559};
-use alloy_primitives::{uint, Address, TxKind, U256};
-use anyhow::{anyhow, bail, ensure, Context, Result};
+use alloy_primitives::{uint, Address, U256};
+use anyhow::{anyhow, bail, Result};
 use once_cell::sync::Lazy;
-use reth_primitives::{Header, RecoveredBlock, TransactionSigned};
+use reth_primitives::{Header, TransactionSigned};
 use std::str::FromStr;
 
 #[derive(Clone, Debug, Default)]
@@ -136,6 +135,47 @@ sol! {
         external
         nonReentrant
     {}
+
+    /// @notice Proposal-level data that applies to the entire batch of blocks.
+    struct ProposalParams {
+        uint48 proposalId; // Unique identifier of the proposal
+        address proposer; // Address of the entity that proposed this batch
+        bytes proverAuth; // Encoded ProverAuth for prover designation
+    }
+
+    /// @notice Represents a synced checkpoint
+    struct Checkpoint {
+        /// @notice The block number associated with the checkpoint.
+        uint48 blockNumber;
+        /// @notice The block hash for the end (last) L2 block in this proposal.
+        bytes32 blockHash;
+        /// @notice The state root for the end (last) L2 block in this proposal.
+        bytes32 stateRoot;
+    }
+
+    /// @notice Processes a block within a proposal and anchors L1 data.
+    /// @dev Core function that processes blocks sequentially within a proposal:
+    ///      1. Anchors L1 block data for cross-chain verification
+    /// @param _proposalParams Proposal-level parameters that define the overall batch.
+    /// @param _checkpoint Checkpoint data for the L1 block being anchored.
+    function anchorV4(
+        Checkpoint calldata _checkpoint
+    )
+        external
+        onlyValidSender
+        nonReentrant
+    {}
+
+    // event emitted by anchorV4
+    event Anchored(
+        uint48 indexed proposalId,
+        bool indexed isNewProposal,
+        bool indexed isLowBondProposal,
+        address designatedProver,
+        uint48 prevAnchorBlockNumber,
+        uint48 anchorBlockNumber,
+        bytes32 ancestorsHash
+    );
 }
 
 // todo, use compiled abi once test passes
@@ -144,246 +184,20 @@ sol! {
 
 /// Decode anchor tx data
 pub fn decode_anchor(bytes: &[u8]) -> Result<anchorCall> {
-    anchorCall::abi_decode(bytes).map_err(|e| anyhow!(e))
-}
-
-/// decodes an ontake block's extradata, returns `basefee_ratio` configurations,
-/// the corresponding encoding function in protocol is `LibProposing._encodeGasConfigs`.
-pub fn decode_ontake_extra_data(extradata: &[u8]) -> u8 {
-    let basefee_ratio = U256::from_be_slice(extradata);
-    let val: u64 = basefee_ratio.try_into().unwrap();
-    val as u8
-}
-
-/// Verifyes the common conditions for all anchor transactions
-pub fn check_common_anchor_conditions<B: reth_primitives_traits::Block>(
-    anchor: &TxEip1559,
-    tx: &TransactionSigned,
-    from: &Address,
-    block: &RecoveredBlock<B>,
-    taiko_data: &TaikoData,
-    anchor_gas_limit: u64,
-) -> Result<()> {
-    // Check the signature
-    check_anchor_signature(tx).context(anyhow!("failed to check anchor signature"))?;
-
-    // Extract the `to` address
-    let TxKind::Call(to) = anchor.to else {
-        return Err(anyhow!("anchor tx not a smart contract call"));
-    };
-    // Check that it's from the golden touch address
-    ensure!(
-        *from == *GOLDEN_TOUCH_ACCOUNT,
-        "anchor transaction from mismatch"
-    );
-    // Check that the L2 contract is being called
-    ensure!(
-        to == taiko_data.l2_contract,
-        "anchor transaction to mismatch"
-    );
-    // Tx can't have any ETH attached
-    ensure!(
-        anchor.value == U256::from(0),
-        "anchor transaction value mismatch"
-    );
-    // Tx needs to have the expected gas limit
-    ensure!(
-        anchor.gas_limit == anchor_gas_limit,
-        "anchor transaction gas price mismatch"
-    );
-    // Check needs to have the base fee set to the block base fee
-    ensure!(
-        anchor.max_fee_per_gas
-            == <u64 as Into<u128>>::into(
-                block
-                    .base_fee_per_gas()
-                    .expect("base_fee_per_gas should be present")
-            ),
-        "anchor transaction gas mismatch"
-    );
-
-    Ok(())
-}
-
-/// Verifies the anchor tx correctness
-pub fn check_anchor_tx<B: reth_primitives_traits::Block>(
-    tx: &TransactionSigned,
-    from: &Address,
-    block: &RecoveredBlock<B>,
-    taiko_data: TaikoData,
-) -> Result<()> {
-    let anchor = tx
-        .as_eip1559()
-        .context(anyhow!("anchor tx is not an EIP1559 tx"))?
-        .tx();
-
-    // Default checks for anchor tx
-    check_common_anchor_conditions(anchor, tx, from, block, &taiko_data, ANCHOR_GAS_LIMIT)?;
-
-    // Okay now let's decode the anchor tx to verify the inputs
-    let anchor_call = decode_anchor(&anchor.input)?;
-    // The L1 blockhash needs to match the expected value
-    ensure!(
-        anchor_call.l1Hash == taiko_data.l1_header.hash_slow(),
-        "L1 hash mismatch"
-    );
-    ensure!(
-        anchor_call.l1StateRoot == taiko_data.l1_header.state_root,
-        "L1 state root mismatch"
-    );
-    ensure!(
-        anchor_call.l1BlockId == taiko_data.l1_header.number,
-        "L1 block number mismatch"
-    );
-    // The parent gas used input needs to match the gas used value of the parent block
-    ensure!(
-        anchor_call.parentGasUsed == taiko_data.parent_header.gas_used as u32,
-        "parentGasUsed mismatch"
-    );
-
-    Ok(())
+    anchorCall::abi_decode_validate(bytes).map_err(|e| anyhow!(e))
 }
 
 /// Decode anchor tx data for ontake fork, using anchorV2
 pub fn decode_anchor_ontake(bytes: &[u8]) -> Result<anchorV2Call> {
-    anchorV2Call::abi_decode(bytes).map_err(|e| anyhow!(e))
-}
-
-/// Verifies the anchor tx correctness in ontake fork
-pub fn check_anchor_tx_ontake<B: reth_primitives_traits::Block>(
-    tx: &TransactionSigned,
-    from: &Address,
-    block: &RecoveredBlock<B>,
-    taiko_data: TaikoData,
-) -> Result<()> {
-    let anchor = tx
-        .as_eip1559()
-        .context(anyhow!("anchor tx is not an EIP1559 tx"))?
-        .tx();
-
-    // Default checks for anchor tx
-    check_common_anchor_conditions(anchor, tx, from, block, &taiko_data, ANCHOR_GAS_LIMIT)?;
-
-    // Okay now let's decode the anchor tx to verify the inputs
-    let anchor_call = decode_anchor_ontake(&anchor.input)?;
-    ensure!(
-        anchor_call._anchorBlockId == taiko_data.l1_header.number,
-        "L1 block number mismatch"
-    );
-    ensure!(
-        anchor_call._anchorStateRoot == taiko_data.l1_header.state_root,
-        "L1 state root mismatch"
-    );
-    // The parent gas used input needs to match the gas used value of the parent block
-    ensure!(
-        anchor_call._parentGasUsed == taiko_data.parent_header.gas_used as u32,
-        "parentGasUsed mismatch"
-    );
-    ensure!(
-        anchor_call._baseFeeConfig.gasIssuancePerSecond
-            == taiko_data.base_fee_config.gas_issuance_per_second,
-        "gas issuance per second mismatch"
-    );
-    ensure!(
-        anchor_call._baseFeeConfig.adjustmentQuotient
-            == taiko_data.base_fee_config.adjustment_quotient,
-        "basefee adjustment quotient mismatch"
-    );
-    ensure!(
-        anchor_call._baseFeeConfig.sharingPctg == taiko_data.base_fee_config.sharing_pctg,
-        "basefee ratio mismatch"
-    );
-    ensure!(
-        anchor_call._baseFeeConfig.minGasExcess == taiko_data.base_fee_config.min_gas_excess,
-        "min gas excess mismatch"
-    );
-    ensure!(
-        anchor_call._baseFeeConfig.maxGasIssuancePerBlock
-            == taiko_data.base_fee_config.max_gas_issuance_per_block,
-        "max gas issuance per block mismatch"
-    );
-    Ok(())
+    anchorV2Call::abi_decode_validate(bytes).map_err(|e| anyhow!(e))
 }
 
 /// Decode anchor tx data for pacaya fork, using anchorV3
 pub fn decode_anchor_pacaya(bytes: &[u8]) -> Result<anchorV3Call> {
-    anchorV3Call::abi_decode(bytes).map_err(|e| anyhow!(e))
+    anchorV3Call::abi_decode_validate(bytes).map_err(|e| anyhow!(e))
 }
 
-/// Verifies the anchor tx correctness in pacaya fork
-pub fn check_anchor_tx_pacaya<B: reth_primitives_traits::Block>(
-    tx: &TransactionSigned,
-    from: &Address,
-    block: &RecoveredBlock<B>,
-    taiko_data: TaikoData,
-) -> Result<()> {
-    let anchor = tx
-        .as_eip1559()
-        .context(anyhow!("anchor tx is not an EIP1559 tx"))?
-        .tx();
-
-    // Default checks for anchor tx
-    check_common_anchor_conditions(anchor, tx, from, block, &taiko_data, ANCHOR_V3_GAS_LIMIT)?;
-
-    // Okay now let's decode the anchor tx to verify the inputs
-    let anchor_call = decode_anchor_pacaya(&anchor.input)?;
-    ensure!(
-        anchor_call._anchorBlockId == taiko_data.l1_header.number,
-        "L1 block number mismatch"
-    );
-    ensure!(
-        anchor_call._anchorStateRoot == taiko_data.l1_header.state_root,
-        "L1 state root mismatch"
-    );
-    // The parent gas used input needs to match the gas used value of the parent block
-    ensure!(
-        anchor_call._parentGasUsed == taiko_data.parent_header.gas_used as u32,
-        "parentGasUsed mismatch"
-    );
-    ensure!(
-        anchor_call._baseFeeConfig.gasIssuancePerSecond
-            == taiko_data.base_fee_config.gas_issuance_per_second,
-        "gas issuance per second mismatch"
-    );
-    ensure!(
-        anchor_call._baseFeeConfig.adjustmentQuotient
-            == taiko_data.base_fee_config.adjustment_quotient,
-        "basefee adjustment quotient mismatch"
-    );
-    ensure!(
-        anchor_call._baseFeeConfig.sharingPctg == taiko_data.base_fee_config.sharing_pctg,
-        "basefee ratio mismatch"
-    );
-    ensure!(
-        anchor_call._baseFeeConfig.minGasExcess == taiko_data.base_fee_config.min_gas_excess,
-        "min gas excess mismatch"
-    );
-    ensure!(
-        anchor_call._baseFeeConfig.maxGasIssuancePerBlock
-            == taiko_data.base_fee_config.max_gas_issuance_per_block,
-        "max gas issuance per block mismatch"
-    );
-
-    Ok(())
+/// Decode anchor tx data for shasta fork, using anchorV4
+pub fn decode_anchor_shasta(bytes: &[u8]) -> Result<anchorV4Call> {
+    anchorV4Call::abi_decode_validate(bytes).map_err(|e| anyhow!(e))
 }
-
-// /// Verifies the anchor tx correctness based on the spec id
-// pub fn check_anchor_tx_by_spec_id(
-//     spec_id: SpecId,
-//     transaction: &TransactionSigned,
-//     sender: &Address,
-//     block: &RecoveredBlock<Block>,
-//     taiko_data: TaikoData,
-// ) -> Result<()> {
-//     if spec_id.is_enabled_in(SpecId::PACAYA) {
-//         check_anchor_tx_pacaya(transaction, sender, &block, taiko_data)?;
-//     } else if spec_id.is_enabled_in(SpecId::ONTAKE) {
-//         check_anchor_tx_ontake(transaction, sender, &block, taiko_data)?;
-//     } else if spec_id.is_enabled_in(SpecId::HEKLA) {
-//         check_anchor_tx(transaction, sender, &block, taiko_data)?;
-//     } else {
-//         return Err(anyhow!("unknown spec id for anchor"));
-//     }
-
-//     Ok(())
-// }

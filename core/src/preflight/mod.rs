@@ -2,6 +2,7 @@ use std::{collections::HashSet, env};
 
 use crate::{
     interfaces::{RaikoError, RaikoResult},
+    preflight::util::get_grandparent_timestamp,
     provider::{db::ProviderDb, rpc::RpcBlockDataProvider, BlockDataProvider},
 };
 use alloy_primitives::Bytes;
@@ -9,10 +10,13 @@ use futures::future::join_all;
 use raiko_lib::{
     builder::RethBlockBuilder,
     consts::ChainSpec,
-    input::{BlobProofType, GuestBatchInput, GuestInput, TaikoGuestInput, TaikoProverData},
+    input::{
+        BlobProofType, BlockProposedFork, GuestBatchInput, GuestInput, TaikoGuestInput,
+        TaikoProverData,
+    },
     l1_precompiles::{clear_l1sload_cache, populate_l1sload_cache},
     primitives::mpt::proofs_to_tries,
-    utils::{generate_transactions, generate_transactions_for_batch_blocks},
+    utils::txs::{generate_transactions, generate_transactions_for_batch_blocks},
     Measurement,
 };
 use reth_primitives::TransactionSigned;
@@ -24,7 +28,9 @@ use util::{
     prepare_taiko_chain_input,
 };
 
-pub use util::parse_l1_batch_proposal_tx_for_pacaya_fork;
+pub use util::{
+    parse_l1_batch_proposal_tx_for_pacaya_fork, parse_l1_batch_proposal_tx_for_shasta_fork,
+};
 
 #[cfg(feature = "statedb_lru")]
 use lru::{load_state_db, save_state_db};
@@ -50,6 +56,8 @@ pub struct BatchPreflightData {
     pub taiko_chain_spec: ChainSpec,
     pub prover_data: TaikoProverData,
     pub blob_proof_type: BlobProofType,
+    /// Cached event data to avoid duplicate RPC calls
+    pub cached_event_data: Option<raiko_lib::input::BlockProposedFork>,
 }
 
 impl PreflightData {
@@ -129,7 +137,7 @@ pub async fn preflight<BDP: BlockDataProvider>(
 
     // Collect L1 storage proofs with anchor block validation.
     let (l1_storage_proofs, l1_ancestor_headers, anchor_block_id) = if taiko_chain_spec.is_taiko() {
-        let l1_provider = RpcBlockDataProvider::new(&l1_chain_spec.rpc, 0).await?;
+        let l1_provider = RpcBlockDataProvider::new(&l1_chain_spec.rpc).await?;
 
         // Extract anchor info from TaikoGuestInput
         let anchor_tx = taiko_guest_input
@@ -299,11 +307,26 @@ pub async fn batch_preflight<BDP: BlockDataProvider>(
         prover_data,
         blob_proof_type,
         l1_inclusion_block_number,
+        cached_event_data,
     }: BatchPreflightData,
 ) -> RaikoResult<GuestBatchInput> {
     let measurement = Measurement::start("Fetching block data...", false);
 
-    let block_parent_pairs = get_batch_blocks_and_parent_data(&provider, &block_numbers).await?;
+    let all_block_parent_pairs =
+        get_batch_blocks_and_parent_data(&provider, &block_numbers).await?;
+    let (l2_grandparent_header, block_parent_pairs) = if block_numbers[0] == 1 {
+        (None, all_block_parent_pairs)
+    } else {
+        // The first pair's parent is the grandparent (first block's parent's parent)
+        // Extract it and remove the first pair since we don't need it for subsequent processing
+        debug!("all_block_parent_pairs: {:?}", all_block_parent_pairs);
+        (
+            all_block_parent_pairs
+                .first()
+                .map(|(_, parent_block)| parent_block.header.clone().try_into().unwrap()),
+            all_block_parent_pairs.into_iter().skip(1).collect(),
+        )
+    };
 
     let l2_block_numbers: Vec<(u64, Option<u64>)> = block_numbers
         .iter()
@@ -328,6 +351,8 @@ pub async fn batch_preflight<BDP: BlockDataProvider>(
             &all_prove_blocks,
             prover_data,
             &blob_proof_type,
+            cached_event_data,
+            l2_grandparent_header,
         )
         .await?
     } else {
@@ -339,9 +364,22 @@ pub async fn batch_preflight<BDP: BlockDataProvider>(
 
     debug!("proven (block, parent) pairs: {:?}", block_parent_pairs);
 
+    let mock_guest_batch_input = GuestBatchInput {
+        inputs: block_parent_pairs
+            .iter()
+            .map(|(block, parent_block)| GuestInput {
+                block: block.clone(),
+                parent_header: parent_block.header.clone().try_into().unwrap(),
+                chain_spec: taiko_chain_spec.clone(),
+                ..Default::default()
+            })
+            .collect(),
+        taiko: taiko_guest_batch_input.clone(),
+    };
+
     // distribute txs to each block
-    let pool_txs_list: Vec<Vec<TransactionSigned>> =
-        generate_transactions_for_batch_blocks(&taiko_guest_batch_input);
+    let pool_txs_list: Vec<(Vec<TransactionSigned>, bool)> =
+        generate_transactions_for_batch_blocks(&mock_guest_batch_input);
 
     assert_eq!(block_parent_pairs.len(), pool_txs_list.len());
 
@@ -352,22 +390,34 @@ pub async fn batch_preflight<BDP: BlockDataProvider>(
         .unwrap_or(10);
     let tasks: Vec<(
         (reth_primitives::Block, alloy_rpc_types::Block),
-        Vec<TransactionSigned>,
+        (Vec<TransactionSigned>, bool),
     )> = block_parent_pairs
         .iter()
         .cloned()
         .zip(pool_txs_list.iter().cloned())
         .collect();
+
     for task_batch in tasks.chunks(chunk_size) {
         let task_batch_vec = task_batch.to_vec();
         let taiko_guest_batch_input = taiko_guest_batch_input.clone();
         let taiko_chain_spec = taiko_chain_spec.clone();
         let l1_chain_spec = l1_chain_spec.clone();
+
+        // Get first block number in batch, needed for grandparent timestamp fetch
+        let first_block_number_in_batch = task_batch_vec
+            .first()
+            .map(|((block, _), _)| block.header.number)
+            .unwrap_or(0);
+
+        // Get grandparent timestamp. This value is needed in consensus validation of the block after execution.
+        let mut grandparent_timestamp =
+            get_grandparent_timestamp(&provider, first_block_number_in_batch).await?;
+
         let handle = tokio::spawn(async move {
             let mut chunk_guest_input = Vec::new();
-            let l1_provider = RpcBlockDataProvider::new(&l1_chain_spec.rpc, 0).await?;
+            let l1_provider = RpcBlockDataProvider::new(&l1_chain_spec.rpc).await?;
 
-            for ((prove_block, parent_block), pure_pool_txs) in task_batch_vec {
+            for ((prove_block, parent_block), txs_with_force_inc_flag) in task_batch_vec {
                 let taiko_chain_spec = taiko_chain_spec.clone();
                 let taiko_guest_batch_input = taiko_guest_batch_input.clone();
 
@@ -378,6 +428,7 @@ pub async fn batch_preflight<BDP: BlockDataProvider>(
                 #[cfg(not(feature = "statedb_lru"))]
                 let initial_db = None;
 
+                let (pure_pool_txs, is_force_inclusion) = txs_with_force_inc_flag;
                 let anchor_tx = prove_block.body.transactions.first().unwrap().clone();
                 let taiko_input = TaikoGuestInput {
                     l1_header: taiko_guest_batch_input.l1_header.clone(),
@@ -387,7 +438,14 @@ pub async fn batch_preflight<BDP: BlockDataProvider>(
                     prover_data: taiko_guest_batch_input.prover_data.clone(),
                     blob_commitment: None,
                     blob_proof: None,
-                    blob_proof_type: taiko_guest_batch_input.blob_proof_type.clone(),
+                    blob_proof_type: taiko_guest_batch_input.data_sources[0]
+                        .blob_proof_type
+                        .clone(),
+                    extra_data: match taiko_guest_batch_input.batch_proposed {
+                        BlockProposedFork::Shasta(_) => Some(is_force_inclusion),
+                        _ => None,
+                    },
+                    grandparent_timestamp,
                 };
 
                 // Clear L1SLOAD cache before collecting L1 storage proofs
@@ -403,28 +461,13 @@ pub async fn batch_preflight<BDP: BlockDataProvider>(
                         // Extract anchor info for this specific block
                         let fork = taiko_chain_spec
                             .active_fork(prove_block.header.number, prove_block.timestamp)?;
-                        let (anchor_block_id, anchor_state_root) =
+                        let (anchor_block_id, _anchor_state_root) =
                             get_anchor_tx_info_by_fork(fork, &anchor_tx)?;
 
-                        // Validate anchor state root matches this block's L1 header
-                        if anchor_state_root != taiko_input.l1_header.state_root {
-                            return Err(RaikoError::Preflight(format!(
-                                "Anchor state root mismatch for block {}: expected {:?}, got {:?}",
-                                prove_block.header.number,
-                                anchor_state_root,
-                                taiko_input.l1_header.state_root
-                            )));
-                        }
-
                         // Create provider for this specific block
-                        let provider_target_blocks_trace =
-                            vec![parent_block_number, parent_block_number + 1];
-                        let provider_trace = RpcBlockDataProvider::new_batch(
-                            &taiko_chain_spec.rpc,
-                            provider_target_blocks_trace,
-                        )
-                        .await
-                        .expect("Could not create RpcBlockDataProvider for tracing");
+                        let provider_trace = RpcBlockDataProvider::new(&taiko_chain_spec.rpc)
+                            .await
+                            .expect("Could not create RpcBlockDataProvider for tracing");
 
                         let collection = collect_l1_storage_proofs(
                             &provider_trace,
@@ -451,6 +494,10 @@ pub async fn batch_preflight<BDP: BlockDataProvider>(
                     populate_l1sload_cache(&l1_storage_proofs, anchor_block_id);
                 }
 
+                // Update grandparent timestamp for next block
+                // Current block's parent becomes next block's grandparent
+                grandparent_timestamp = Some(parent_header.timestamp);
+
                 // Create the guest input
                 let input = GuestInput {
                     block: prove_block.clone(),
@@ -462,11 +509,9 @@ pub async fn batch_preflight<BDP: BlockDataProvider>(
                     ..Default::default()
                 };
 
-                let provider_target_blocks = vec![parent_block_number, parent_block_number + 1];
-                let provider =
-                    RpcBlockDataProvider::new_batch(&taiko_chain_spec.rpc, provider_target_blocks)
-                        .await
-                        .expect("Could not create RpcBlockDataProvider");
+                let provider = RpcBlockDataProvider::new(&taiko_chain_spec.rpc)
+                    .await
+                    .expect("Could not create RpcBlockDataProvider");
 
                 // Create the block builder, run the transactions and extract the DB
                 let provider_db = ProviderDb::new(
@@ -582,7 +627,7 @@ mod test {
     use ethers_core::types::Transaction;
     use raiko_lib::{
         consts::{Network, SupportedChainSpecs},
-        utils::decode_transactions,
+        utils::txs::decode_transactions,
     };
 
     use crate::preflight::util::{blob_to_bytes, block_time_to_block_slot};

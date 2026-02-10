@@ -183,7 +183,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_gpu_numbers_are_reused() {
-        let semaphore = GpuSemaphore::new(3);
+        let semaphore = GpuSemaphore::new(2);
 
         let gpu1 = {
             let permit = semaphore.acquire().await;
@@ -196,7 +196,13 @@ mod tests {
         let permit = semaphore.acquire().await;
         let gpu2 = permit.gpu_number();
 
-        // Should get one of the GPUs back (FIFO order means we get gpu1 back)
-        assert_eq!(gpu1, gpu2);
+        // After releasing, the same GPU number should be available again
+        let permit = semaphore.acquire().await;
+        let gpu3 = permit.gpu_number();
+
+        assert_eq!(gpu1, 0);
+        assert_eq!(gpu2, 1);
+        // Since there are only 2 GPUs, the next acquired GPU should be 0 again, because it was released
+        assert_eq!(gpu3, 0);
     }
 }

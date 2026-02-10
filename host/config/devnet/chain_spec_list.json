@@ -9,7 +9,7 @@
             "base_fee_max_decrease_denominator": "0x8",
             "elasticity_multiplier": "0x2"
         },
-        "l1_contract": null,
+        "l1_contract": {},
         "l2_contract": null,
         "rpc": "http://173.255.233.27:32003",
         "beacon_rpc": "http://173.255.233.27:33001",
@@ -27,6 +27,9 @@
             },
             "PACAYA": {
                 "Block": 1
+            },
+            "SHASTA": {
+                "Timestamp": 0
             }
         },
         "eip_1559_constants": {
@@ -35,12 +38,27 @@
             "base_fee_max_decrease_denominator": "0x8",
             "elasticity_multiplier": "0x2"
         },
-        "l1_contract": "0xC3c933d714FbD79e1D6cA89AA1126FC52a64873b",
+        "l1_contract": {
+            "PACAYA": "0xC3c933d714FbD79e1D6cA89AA1126FC52a64873b",
+            "SHASTA": "0xC3c933d714FbD79e1D6cA89AA1126FC52a64873b"
+        },
         "l2_contract": "0x7633740000000000000000000000000000010001",
         "rpc": "https://l2-rpc.staging.surge.wtf",
         "beacon_rpc": null,
         "verifier_address_forks": {
             "ONTAKE": {
+                "SGX": "0x61795f62aDFCa83539B391667bba4Ffec338d146",
+                "SGXGETH": "0xCD6ADac7ca8D05788563359a83B4B1C53c427736",
+                "SP1": "0xC63aAfc2a65020c4d1090F69158964c35b456fed",
+                "RISC0": "0xa9E77deA8D86AE55F6181472246c9157E85A7F7E"
+            },
+            "PACAYA": {
+                "SGX": "0x61795f62aDFCa83539B391667bba4Ffec338d146",
+                "SGXGETH": "0xCD6ADac7ca8D05788563359a83B4B1C53c427736",
+                "SP1": "0xC63aAfc2a65020c4d1090F69158964c35b456fed",
+                "RISC0": "0xa9E77deA8D86AE55F6181472246c9157E85A7F7E"
+            },
+            "SHASTA": {
                 "SGX": "0x61795f62aDFCa83539B391667bba4Ffec338d146",
                 "SGXGETH": "0xCD6ADac7ca8D05788563359a83B4B1C53c427736",
                 "SP1": "0xC63aAfc2a65020c4d1090F69158964c35b456fed",

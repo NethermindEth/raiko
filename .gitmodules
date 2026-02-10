@@ -1,3 +1,4 @@
 [submodule "gaiko"]
 	path = gaiko
-	url = https://github.com/NethermindEth/surge-gaiko
+	url = https://github.com/taikoxyz/gaiko
+	branch = feat/shasta
