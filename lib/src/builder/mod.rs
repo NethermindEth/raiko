@@ -523,7 +523,13 @@ impl<DB: Database<Error = ProviderError> + DatabaseCommit + OptimisticDatabase +
             info!("execute_transactions: validate_block_pre_execution done");
 
             // Validates the gas used, the receipts root and the logs bloom
-            validate_block_post_execution(&recovered_block, &chain_spec, &receipts, &requests)?;
+            validate_block_post_execution(
+                &recovered_block,
+                &chain_spec,
+                &receipts,
+                &requests,
+                None,
+            )?;
             info!("execute_transactions: validate_block_post_execution done");
         }
 
@@ -534,8 +540,14 @@ impl<DB: Database<Error = ProviderError> + DatabaseCommit + OptimisticDatabase +
             .state
             .into_iter()
             .map(|(address, bundle_account)| {
+                let is_original_none = bundle_account.original_info.is_none();
+                let is_info_none = bundle_account.info.is_none();
+                let account_info = bundle_account.account_info().unwrap_or_default();
+                let original_info = bundle_account.original_info.unwrap_or_default();
+
                 let mut account = Account {
-                    info: bundle_account.account_info().unwrap_or_default(),
+                    original_info: Box::new(original_info),
+                    info: account_info,
                     storage: bundle_account
                         .storage
                         .into_iter()
@@ -556,10 +568,10 @@ impl<DB: Database<Error = ProviderError> + DatabaseCommit + OptimisticDatabase +
                     transaction_id: 0,
                 };
                 account.mark_touch();
-                if bundle_account.info.is_none() {
+                if is_info_none {
                     account.mark_selfdestruct();
                 }
-                if bundle_account.original_info.is_none() {
+                if is_original_none {
                     account.mark_created();
                 }
                 (address, account)
@@ -723,6 +735,7 @@ pub fn create_mem_db(input: &mut GuestInput) -> Result<MemDb> {
 
         let mem_account = DbAccount {
             info: AccountInfo {
+                account_id: None,
                 balance: state_account.balance,
                 nonce: state_account.nonce,
                 code_hash: state_account.code_hash,

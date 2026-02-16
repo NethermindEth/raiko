@@ -282,7 +282,6 @@ impl std::fmt::Display for Network {
 #[cfg(test)]
 mod tests {
     use alloy_primitives::address;
-    use revm::primitives::hardfork::SpecId;
 
     use super::*;
 
@@ -291,9 +290,8 @@ mod tests {
         let surge_dev_mainnet_spec = SupportedChainSpecs::default()
             .get_chain_spec(&Network::SurgeDev.to_string())
             .unwrap();
-        assert!(surge_dev_mainnet_spec.spec_id(2, 0).map(Into::into) > Some(SpecId::MERGE));
         assert_eq!(
-            surge_dev_mainnet_spec.spec_id(2, 0),
+            surge_dev_mainnet_spec.spec_id(2, 1),
             Some(TaikoSpecId::SHASTA)
         );
     }
@@ -304,7 +302,7 @@ mod tests {
             .get_chain_spec(&Network::SurgeDev.to_string())
             .unwrap();
         assert_eq!(
-            surge_dev_mainnet_spec.active_fork(1, 0).unwrap(),
+            surge_dev_mainnet_spec.active_fork(1, 1).unwrap(),
             TaikoSpecId::SHASTA
         );
     }

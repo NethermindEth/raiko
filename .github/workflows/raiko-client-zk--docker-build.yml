@@ -3,7 +3,7 @@ name: "[Nethermind] Raiko Client ZK - Docker build and push"
 on:
   workflow_dispatch:
   push:
-    branches: [main]
+    branches: [main, master]
     tags:
       - "v*-surge"
     paths:

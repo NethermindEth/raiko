@@ -173,6 +173,7 @@ impl Backend {
                             &mut pool_,
                             request_key_.clone(),
                             entity,
+                            Some(gpu_permit.gpu_number()),
                             mock_key.clone(),
                         )
                         .await
@@ -399,6 +400,7 @@ async fn do_shasta_aggregation(
     pool: &mut dyn IdWrite,
     request_key: RequestKey,
     request_entity: AggregationRequestEntity,
+    gpu_number: Option<u32>,
     mock_key: Option<String>,
 ) -> Result<Proof, String> {
     let proof_type = request_key.proof_type().clone();
@@ -406,8 +408,13 @@ async fn do_shasta_aggregation(
 
     let input = ShastaAggregationGuestInput { proofs };
     let output = AggregationGuestOutput { hash: B256::ZERO };
-    let config = serde_json::to_value(request_entity.prover_args())
+    let mut config = serde_json::to_value(request_entity.prover_args())
         .map_err(|err| format!("failed to serialize prover args: {err:?}"))?;
+
+    if let Some(gpu_number) = gpu_number {
+        // If gpu_number is provided, we set it in the config
+        config["gpu_number"] = gpu_number.into();
+    }
 
     let proof =
         aggregate_shasta_proposals(proof_type, input, &output, &config, Some(pool), mock_key)
@@ -518,7 +525,6 @@ async fn do_prove_batch(
     mock_key: Option<String>,
 ) -> Result<Proof, String> {
     tracing::info!("Generating proof for {request_key}");
-
     let raiko = new_raiko_for_batch_request(chain_specs, request_entity, gpu_number).await?;
     let input = if let Some(batch_guest_input) = raiko.request.prover_args.get("batch_guest_input")
     {

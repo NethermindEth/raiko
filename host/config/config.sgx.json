@@ -14,6 +14,16 @@
         "prove": true,
         "input_path": null
     },
+    "tdx": {
+        "instance_ids": {
+          "HEKLA": 0,
+          "ONTAKE": 0,
+          "PACAYA": 0
+        },
+        "bootstrap": false,
+        "prove": true,
+        "input_path": null
+    },
     "sgxgeth": {
         "instance_ids": {
             "PACAYA": 0,

@@ -771,7 +771,9 @@ fn get_blob_proof_type(
     // due to performance considerations
     match proof_type {
         ProofType::Native => blob_proof_type_hint,
-        ProofType::Sgx | ProofType::SgxGeth => BlobProofType::KzgVersionedHash,
+        ProofType::Sgx | ProofType::SgxGeth | ProofType::Tdx | ProofType::AzureTdx => {
+            BlobProofType::KzgVersionedHash
+        }
         ProofType::Sp1 | ProofType::Risc0 => BlobProofType::ProofOfEquivalence,
     }
 }

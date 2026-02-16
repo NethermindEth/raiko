@@ -34,3 +34,6 @@ jobs:
 
   build-test-sgx-all:
     uses: ./.github/workflows/ci-sgx-all.yml
+
+  build-test-tdx-all:
+    uses: ./.github/workflows/ci-tdx-all.yml

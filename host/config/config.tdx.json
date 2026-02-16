@@ -1,0 +1,9 @@
+{
+    "network": "taiko_a7",
+    "l1_network": "holesky",
+    "tdx": {
+        "instance_id": 123456,
+        "bootstrap": false,
+        "prove": true
+    }
+}

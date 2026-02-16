@@ -36,10 +36,6 @@ sha2 = { git = "https://github.com/sp1-patches/RustCrypto-hashes", package = "sh
 harness-core = { path = "../../../harness/core" }
 harness = { path = "../../../harness/macro", features = ["sp1"] }
 substrate-bn = { git = "https://github.com/sp1-patches/bn", tag = "patch-0.6.0-sp1-5.0.0" }
-revm-precompile = { version = "26.0.0", default-features = false, features = [
-    "std",
-    "c-kzg",
-] }
 
 
 bincode = "1.3.3"
