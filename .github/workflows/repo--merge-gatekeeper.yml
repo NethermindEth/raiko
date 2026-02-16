@@ -4,6 +4,7 @@ on:
   pull_request:
     branches:
       - main
+      - master
   merge_group: # Trigger in merge queue to pass the required status check
 
 jobs:
