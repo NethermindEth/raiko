@@ -4,7 +4,7 @@ use alethia_reth_consensus::{
     eip4396::{calculate_next_block_eip4396_base_fee, SHASTA_INITIAL_BASE_FEE},
     validation::TaikoBeaconConsensus,
 };
-use reth_consensus::{Consensus, ConsensusError, FullConsensus, HeaderValidator};
+use reth_consensus::{Consensus, ConsensusError, FullConsensus, HeaderValidator, ReceiptRootBloom};
 use reth_consensus_common::validation::validate_against_parent_hash_number;
 use reth_evm::block::BlockExecutionResult;
 use reth_primitives::{NodePrimitives, SealedBlock};
@@ -49,19 +49,19 @@ where
         &self,
         block: &RecoveredBlock<N::Block>,
         result: &BlockExecutionResult<N::Receipt>,
+        receipt_root_bloom: Option<ReceiptRootBloom>,
     ) -> Result<(), ConsensusError> {
         <TaikoBeaconConsensus as FullConsensus<N>>::validate_block_post_execution(
             &self.taiko_beacon_consensus,
             block,
             result,
+            receipt_root_bloom,
         )
     }
 }
 
 /// Just pass invocations to TaikoBeaconConsensus
 impl<B: Block> Consensus<B> for RaikoBeaconConsensus {
-    type Error = ConsensusError;
-
     fn validate_body_against_header(
         &self,
         body: &B::Body,
@@ -134,6 +134,10 @@ where
                             .expect("Grandparent timestamp missing"),
                         parent,
                     ),
+                    parent
+                        .header()
+                        .base_fee_per_gas()
+                        .expect("parent base fee per gas should be available"),
                 )
             };
 

@@ -162,7 +162,13 @@ impl Backend {
                         .await
                     }
                     RequestEntity::ShastaAggregation(entity) => {
-                        do_shasta_aggregation(&mut pool_, request_key_.clone(), entity).await
+                        do_shasta_aggregation(
+                            &mut pool_,
+                            request_key_.clone(),
+                            entity,
+                            Some(gpu_permit.gpu_number()),
+                        )
+                        .await
                     }
                 };
 
@@ -385,14 +391,20 @@ async fn do_shasta_aggregation(
     pool: &mut dyn IdWrite,
     request_key: RequestKey,
     request_entity: AggregationRequestEntity,
+    gpu_number: Option<u32>,
 ) -> Result<Proof, String> {
     let proof_type = request_key.proof_type().clone();
     let proofs = request_entity.proofs().clone();
 
     let input = ShastaAggregationGuestInput { proofs };
     let output = AggregationGuestOutput { hash: B256::ZERO };
-    let config = serde_json::to_value(request_entity.prover_args())
+    let mut config = serde_json::to_value(request_entity.prover_args())
         .map_err(|err| format!("failed to serialize prover args: {err:?}"))?;
+
+    if let Some(gpu_number) = gpu_number {
+        // If gpu_number is provided, we set it in the config
+        config["gpu_number"] = gpu_number.into();
+    }
 
     let proof = aggregate_shasta_proposals(proof_type, input, &output, &config, Some(pool))
         .await
