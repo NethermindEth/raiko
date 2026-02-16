@@ -86,7 +86,7 @@ elif [ "$chain" == "taiko_dev" ]; then
     l1_network="taiko_dev_l1"
 else
     echo "Using customized chain name $1. Please double check the RPCs."
-    l1_network="holesky"
+    l1_network="$chain"
 fi
 
 if [ "$proof" == "native" ]; then

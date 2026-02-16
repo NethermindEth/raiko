@@ -32,7 +32,7 @@ opt-level = 3
 
 [profile.release]
 debug = 1
-lto = true
+lto = false
 
 [profile.release.build-override]
 opt-level = 3

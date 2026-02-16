@@ -32,6 +32,10 @@ pub struct Opts {
     /// [default: 0.0.0.0:8080]
     pub address: String,
 
+    #[arg(long, require_equals = true, env = "MOCK_KEY")]
+    /// Private key used for mock proof. If set, the prover will generate mock proofs.
+    pub mock_key: Option<String>,
+
     #[arg(long, require_equals = true, default_value = "8")]
     #[serde(default = "Opts::default_concurrency_limit")]
     /// Limit the max number of in-flight requests

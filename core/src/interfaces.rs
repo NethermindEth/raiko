@@ -1,4 +1,4 @@
-use crate::{merge, prover::NativeProver};
+use crate::{merge, mock_prover::MockProver, prover::NativeProver};
 use alloy_primitives::{Address, B256};
 use clap::Args;
 use raiko_lib::{
@@ -199,7 +199,16 @@ pub async fn run_batch_prover(
     output: &GuestBatchOutput,
     config: &Value,
     store: Option<&mut dyn IdWrite>,
+    mock_key: Option<String>,
 ) -> RaikoResult<Proof> {
+    if let Some(mock_key) = mock_key {
+        info!("Using mock prover with mock key");
+        return MockProver::new(mock_key.clone())?
+            .batch_run(input.clone(), output, config, store)
+            .await
+            .map_err(<ProverError as Into<RaikoError>>::into);
+    }
+
     match proof_type {
         ProofType::Native => NativeProver
             .batch_run(input.clone(), output, config, store)
@@ -251,7 +260,16 @@ pub async fn run_shasta_proposal_prover(
     output: &GuestBatchOutput,
     config: &Value,
     store: Option<&mut dyn IdWrite>,
+    mock_key: Option<String>,
 ) -> RaikoResult<Proof> {
+    if let Some(mock_key) = mock_key {
+        info!("Using mock prover with mock key");
+        return MockProver::new(mock_key.clone())?
+            .proposal_run(input.clone(), output, config, store)
+            .await
+            .map_err(<ProverError as Into<RaikoError>>::into);
+    }
+
     match proof_type {
         ProofType::Native => NativeProver
             .proposal_run(input.clone(), output, config, store)
@@ -303,7 +321,16 @@ pub async fn aggregate_proofs(
     output: &AggregationGuestOutput,
     config: &Value,
     store: Option<&mut dyn IdWrite>,
+    mock_key: Option<String>,
 ) -> RaikoResult<Proof> {
+    if let Some(mock_key) = mock_key {
+        info!("Using mock prover with mock key");
+        return MockProver::new(mock_key.clone())?
+            .aggregate(input.clone(), output, config, store)
+            .await
+            .map_err(<ProverError as Into<RaikoError>>::into);
+    }
+
     let proof = match proof_type {
         ProofType::Native => NativeProver
             .aggregate(input.clone(), output, config, store)
@@ -356,7 +383,16 @@ pub async fn aggregate_shasta_proposals(
     output: &AggregationGuestOutput,
     config: &Value,
     store: Option<&mut dyn IdWrite>,
+    mock_key: Option<String>,
 ) -> RaikoResult<Proof> {
+    if let Some(mock_key) = mock_key {
+        info!("Using mock prover with mock key");
+        return MockProver::new(mock_key.clone())?
+            .shasta_aggregate(input.clone(), output, config, store)
+            .await
+            .map_err(<ProverError as Into<RaikoError>>::into);
+    }
+
     let proof = match proof_type {
         ProofType::Native => NativeProver
             .shasta_aggregate(input.clone(), output, config, store)
