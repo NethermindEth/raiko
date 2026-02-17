@@ -4,6 +4,7 @@
 //!
 use core::ops::Deref;
 
+use alloy_consensus::TransactionEnvelope;
 use reth_evm::{
     block::{
         BlockExecutionError, BlockExecutionResult, BlockExecutor, BlockValidationError,
@@ -45,13 +46,15 @@ impl<BE> BlockExecutorWithOptimistic<BE> {
 
 impl<BE> BlockExecutor for BlockExecutorWithOptimistic<BE>
 where
-    BE: BlockExecutor,
+    BE: BlockExecutor<Transaction: TransactionEnvelope>,
 {
     type Transaction = BE::Transaction;
 
     type Receipt = BE::Receipt;
 
     type Evm = BE::Evm;
+
+    type Result = BE::Result;
 
     /// Executes block with optimistic execution, if set
     fn execute_block(
@@ -138,19 +141,12 @@ where
     fn execute_transaction_without_commit(
         &mut self,
         tx: impl ExecutableTx<Self>,
-    ) -> Result<
-        revm::context::result::ResultAndState<<Self::Evm as Evm>::HaltReason>,
-        BlockExecutionError,
-    > {
+    ) -> Result<Self::Result, BlockExecutionError> {
         self.inner.execute_transaction_without_commit(tx)
     }
 
-    fn commit_transaction(
-        &mut self,
-        output: revm::context::result::ResultAndState<<Self::Evm as Evm>::HaltReason>,
-        tx: impl ExecutableTx<Self>,
-    ) -> Result<u64, BlockExecutionError> {
-        self.inner.commit_transaction(output, tx)
+    fn commit_transaction(&mut self, output: Self::Result) -> Result<u64, BlockExecutionError> {
+        self.inner.commit_transaction(output)
     }
 }
 
@@ -185,6 +181,7 @@ impl<F, DB> Executor<DB> for TaikoWithOptimisticBlockExecutor<F, DB>
 where
     F: ConfigureEvm,
     DB: Database,
+    <<F as ConfigureEvm>::Primitives as NodePrimitives>::SignedTx: TransactionEnvelope,
 {
     type Primitives = F::Primitives;
     type Error = BlockExecutionError;

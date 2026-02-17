@@ -1,7 +1,7 @@
 use std::{fmt::Debug, sync::Arc};
 
 use alethia_reth_consensus::{
-    eip4396::{calculate_next_block_eip4396_base_fee, SHASTA_INITIAL_BASE_FEE},
+    eip4396::{calculate_next_block_eip4396_base_fee, MIN_BASE_FEE, SHASTA_INITIAL_BASE_FEE},
     validation::TaikoBeaconConsensus,
 };
 use reth_consensus::{Consensus, ConsensusError, FullConsensus, HeaderValidator, ReceiptRootBloom};
@@ -138,6 +138,7 @@ where
                         .header()
                         .base_fee_per_gas()
                         .expect("parent base fee per gas should be available"),
+                    MIN_BASE_FEE,
                 )
             };
 

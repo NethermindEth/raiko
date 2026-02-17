@@ -48,10 +48,6 @@ risc0-zkvm-platform = { version = "=2.2.1", default-features = false, features =
 ] }
 harness-core = { path = "../../../harness/core" }
 harness = { path = "../../../harness/macro", features = ["risc0"] }
-revm-precompile = { version = "26.0.0", default-features = false, features = [
-    "std",
-    "c-kzg",
-] }
 # Explicitly adding c-kzg with feature eip-7594 to fix 
 # error[E0599]: no method named `compute_cells_and_kzg_proofs` found for reference `&KzgSettings` in the current scope
 # in alloy-eips
