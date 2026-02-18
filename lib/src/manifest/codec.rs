@@ -79,7 +79,7 @@ impl Decodable for ProtocolBlockManifest {
             coinbase: alloy_primitives::Address::decode(buf)?,
             anchor_block_number: u64::decode(buf)?,
             gas_limit: u64::decode(buf)?,
-            transactions: Vec::<reth_primitives::TransactionSigned>::decode(buf)?,
+            transactions: Vec::<alethia_reth_consensus::transaction::TaikoTxEnvelope>::decode(buf)?,
         })
     }
 }

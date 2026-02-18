@@ -1,7 +1,7 @@
 // code logic comes from: packages/protocol/contracts/layer1/shasta/libs/LibManifest.sol
 
+use alethia_reth_consensus::transaction::TaikoTxEnvelope;
 use alloy_primitives::{Address, U256};
-use reth_primitives::TransactionSigned;
 use serde::{Deserialize, Serialize};
 
 /// Protocol block manifest - corresponds to Go's ProtocolBlockManifest
@@ -17,7 +17,7 @@ pub struct ProtocolBlockManifest {
     /// The block's gas limit
     pub gas_limit: u64,
     /// The transactions for this block
-    pub transactions: Vec<TransactionSigned>,
+    pub transactions: Vec<TaikoTxEnvelope>,
 }
 
 /// Bond instruction - corresponds to Go's LibBondsBondInstruction
@@ -42,7 +42,7 @@ impl DerivationSourceManifest {
         coinbase: Address,
         anchor_block_number: u64,
         gas_limit: u64,
-        transactions: Vec<TransactionSigned>,
+        transactions: Vec<TaikoTxEnvelope>,
     ) -> Self {
         Self {
             blocks: vec![ProtocolBlockManifest {

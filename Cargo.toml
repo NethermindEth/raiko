@@ -71,11 +71,14 @@ reth-revm = { git = "https://github.com/paradigmxyz/reth.git", tag = "v1.11.0", 
 reth-provider = { git = "https://github.com/paradigmxyz/reth.git", tag = "v1.11.0", default-features = false }
 reth-storage-api = { git = "https://github.com/paradigmxyz/reth.git", tag = "v1.11.0", default-features = false }
 
-alethia-reth-block = { git = "https://github.com/NethermindEth/alethia-reth.git", branch = "feat/raiko-support-shasta", default-features = false }
-alethia-reth-chainspec = { git = "https://github.com/NethermindEth/alethia-reth.git", branch = "feat/raiko-support-shasta", default-features = false }
-alethia-reth-consensus = { git = "https://github.com/NethermindEth/alethia-reth.git", branch = "feat/raiko-support-shasta", default-features = false }
-alethia-reth-evm = { git = "https://github.com/NethermindEth/alethia-reth.git", branch = "feat/raiko-support-shasta", default-features = false, features = [
+alethia-reth-block = { git = "https://github.com/NethermindEth/alethia-reth.git", branch = "main", default-features = false }
+alethia-reth-chainspec = { git = "https://github.com/NethermindEth/alethia-reth.git", branch = "main", default-features = false }
+alethia-reth-consensus = { git = "https://github.com/NethermindEth/alethia-reth.git", branch = "main", default-features = false }
+alethia-reth-evm = { git = "https://github.com/NethermindEth/alethia-reth.git", branch = "main", default-features = false, features = [
     "serde",
+] }
+alethia-reth-primitives = { git = "https://github.com/NethermindEth/alethia-reth.git", branch = "main", default-features = false, features = [
+    "serde-bincode-compat",
 ] }
 
 

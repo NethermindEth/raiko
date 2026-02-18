@@ -5,6 +5,7 @@ use crate::{
     preflight::util::get_grandparent_timestamp,
     provider::{db::ProviderDb, rpc::RpcBlockDataProvider, BlockDataProvider},
 };
+use alethia_reth_primitives::{TaikoBlock, TaikoTxEnvelope};
 use alloy_primitives::Bytes;
 use futures::future::join_all;
 use raiko_lib::{
@@ -19,7 +20,6 @@ use raiko_lib::{
     utils::txs::{generate_transactions, generate_transactions_for_batch_blocks},
     Measurement,
 };
-use reth_primitives::TransactionSigned;
 use tracing::{debug, info};
 
 use util::{
@@ -327,7 +327,7 @@ pub async fn batch_preflight<BDP: BlockDataProvider>(
     };
 
     // distribute txs to each block
-    let pool_txs_list: Vec<(Vec<TransactionSigned>, bool)> =
+    let pool_txs_list: Vec<(Vec<TaikoTxEnvelope>, bool)> =
         generate_transactions_for_batch_blocks(&mock_guest_batch_input);
 
     assert_eq!(block_parent_pairs.len(), pool_txs_list.len());
@@ -338,8 +338,8 @@ pub async fn batch_preflight<BDP: BlockDataProvider>(
         .parse()
         .unwrap_or(10);
     let tasks: Vec<(
-        (reth_primitives::Block, alloy_rpc_types::Block),
-        (Vec<TransactionSigned>, bool),
+        (TaikoBlock, alloy_rpc_types::Block),
+        (Vec<TaikoTxEnvelope>, bool),
     )> = block_parent_pairs
         .iter()
         .cloned()

@@ -1,7 +1,9 @@
 use core::{fmt::Debug, str::FromStr};
 use std::collections::HashMap;
 
+use alethia_reth_consensus::transaction::TaikoTxEnvelope;
 use alethia_reth_evm::spec::TaikoSpecId;
+use alethia_reth_primitives::TaikoBlock;
 use alloy_consensus::serde_bincode_compat;
 use alloy_primitives::Address;
 use alloy_primitives::Bytes;
@@ -10,7 +12,7 @@ use alloy_primitives::U256;
 use anyhow::{anyhow, Error, Result};
 use ontake::BlockProposedV2;
 use pacaya::{BatchInfo, BatchProposed};
-use reth_primitives::{Block, Header, TransactionSigned};
+use reth_primitives::Header;
 use serde::{Deserialize, Serialize};
 use serde_with::serde_as;
 use shasta::ShastaEventData;
@@ -29,6 +31,7 @@ use crate::{
     prover::{Proof, ProofCarryData},
     utils::blobs::zlib_compress_data,
 };
+use alethia_reth_primitives::serde_bincode_compat::TaikoTxEnvelope as BincodeCompactTaikoTxEnvelope;
 use alloy_consensus::serde_bincode_compat::Header as BincodeCompactHeader;
 use reth_primitives::serde_bincode_compat::Block as BincodeCompactBlock;
 
@@ -41,9 +44,9 @@ pub type StorageEntry = (MptNode, Vec<U256>);
 #[serde_as]
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
 pub struct GuestInput {
-    #[serde_as(as = "BincodeCompactBlock<TransactionSigned, Header>")]
+    #[serde_as(as = "BincodeCompactBlock<'_, TaikoTxEnvelope, Header>")]
     /// Reth block
-    pub block: Block,
+    pub block: TaikoBlock,
     /// The network to generate the proof for
     pub chain_spec: ChainSpec,
     #[serde_as(as = "BincodeCompactHeader")]
@@ -411,8 +414,8 @@ pub struct TaikoGuestInput {
     /// header
     pub l1_header: Header,
     pub tx_data: Vec<u8>,
-    #[serde_as(as = "Option<serde_bincode_compat::EthereumTxEnvelope>")]
-    pub anchor_tx: Option<TransactionSigned>,
+    #[serde_as(as = "Option<BincodeCompactTaikoTxEnvelope<'_>>")]
+    pub anchor_tx: Option<TaikoTxEnvelope>,
     pub block_proposed: BlockProposedFork,
     pub prover_data: TaikoProverData,
     pub blob_commitment: Option<Vec<u8>>,
@@ -429,10 +432,10 @@ pub struct ZlibCompressError(pub String);
 
 // for non-taiko chain use only. As we need to decompress txs buffer in raiko, if txs comes from non-taiko chain,
 // we simply compress before sending to raiko, then, decompress will give the same txs inside raiko.
-impl TryFrom<Vec<TransactionSigned>> for TaikoGuestInput {
+impl TryFrom<Vec<TaikoTxEnvelope>> for TaikoGuestInput {
     type Error = ZlibCompressError;
 
-    fn try_from(value: Vec<TransactionSigned>) -> Result<Self, Self::Error> {
+    fn try_from(value: Vec<TaikoTxEnvelope>) -> Result<Self, Self::Error> {
         let tx_data = zlib_compress_data(&alloy_rlp::encode(&value))
             .map_err(|e| ZlibCompressError(e.to_string()))?;
         Ok(Self {
@@ -488,7 +491,7 @@ pub struct GuestOutput {
 #[serde_as]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct GuestBatchOutput {
-    pub blocks: Vec<Block>,
+    pub blocks: Vec<TaikoBlock>,
     pub hash: B256,
 }
 

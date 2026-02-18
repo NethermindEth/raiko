@@ -1,4 +1,4 @@
-use reth_primitives::TransactionSigned;
+use alethia_reth_consensus::transaction::TaikoTxEnvelope;
 use tracing::warn;
 
 use crate::input::{BlockProposedFork, GuestBatchInput};
@@ -11,7 +11,7 @@ use crate::utils::txs::decode_transactions;
 /// each block will get a portion of the txlist by its tx_nums
 pub fn generate_transactions_for_pacaya_blocks(
     taiko_guest_batch_input: &GuestBatchInput,
-) -> Vec<(Vec<TransactionSigned>, bool)> {
+) -> Vec<(Vec<TaikoTxEnvelope>, bool)> {
     let taiko_guest_batch_input = &taiko_guest_batch_input.taiko;
     let batch_proposal = &taiko_guest_batch_input.batch_proposed;
     let data_source = &taiko_guest_batch_input.data_sources[0];

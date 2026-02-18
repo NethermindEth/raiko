@@ -1,8 +1,8 @@
+use alethia_reth_consensus::transaction::TaikoTxEnvelope;
 use alethia_reth_consensus::validation::ANCHOR_V3_V4_GAS_LIMIT;
 use alethia_reth_evm::spec::TaikoSpecId;
 use alloy_rlp::Decodable;
 use log::warn;
-use reth_primitives::TransactionSigned;
 
 use crate::consts::ForkCondition;
 use crate::input::GuestBatchInput;
@@ -62,7 +62,7 @@ fn make_default_manifest(
 /// each block will get a portion of the txlist by its tx_nums
 pub fn generate_transactions_for_shasta_blocks(
     guest_batch_input: &GuestBatchInput,
-) -> Vec<(Vec<TransactionSigned>, bool)> {
+) -> Vec<(Vec<TaikoTxEnvelope>, bool)> {
     let taiko_guest_batch_input = &guest_batch_input.taiko;
     let batch_proposal = &taiko_guest_batch_input.batch_proposed;
     let data_sources = &taiko_guest_batch_input.data_sources;

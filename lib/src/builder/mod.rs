@@ -25,8 +25,10 @@ use alethia_reth_chainspec::reth_chainspec::Hardforks;
 use alethia_reth_chainspec::spec::TaikoChainSpec;
 use alethia_reth_chainspec::TAIKO_DEVNET;
 use alethia_reth_chainspec::TAIKO_MAINNET;
+use alethia_reth_consensus::transaction::TaikoTxEnvelope;
 use alethia_reth_evm::factory::TaikoEvmFactory;
 use alethia_reth_evm::spec::TaikoSpecId;
+use alethia_reth_primitives::TaikoBlock;
 use alloy_primitives::map::HashMap;
 use alloy_primitives::Address;
 use alloy_primitives::Bytes;
@@ -40,9 +42,9 @@ use reth_evm::block::BlockExecutionResult;
 use reth_evm::execute::Executor;
 use reth_evm::execute::{BlockExecutionOutput, ProviderError};
 use reth_evm::Database;
+use reth_primitives::Header;
 use reth_primitives::RecoveredBlock;
 use reth_primitives::SealedHeader;
-use reth_primitives::{Block, Header, TransactionSigned};
 use revm::primitives::KECCAK_EMPTY;
 use revm::state::Account;
 use revm::state::AccountInfo;
@@ -273,7 +275,7 @@ pub fn calculate_block_header(input: &GuestInput) -> Header {
     header
 }
 
-pub fn calculate_batch_blocks_final_header(input: &GuestBatchInput) -> Vec<Block> {
+pub fn calculate_batch_blocks_final_header(input: &GuestBatchInput) -> Vec<TaikoBlock> {
     let pool_txs_list = generate_transactions_for_batch_blocks(&input);
     let mut final_blocks = Vec::new();
     for (i, pool_txs) in pool_txs_list.iter().enumerate() {
@@ -302,7 +304,7 @@ pub fn calculate_batch_blocks_final_header(input: &GuestBatchInput) -> Vec<Block
 // to check the linkages between the blocks
 // 1. connect parent hash & state root
 // 2. block number should be in sequence
-fn validate_final_batch_blocks(input: &GuestBatchInput, final_blocks: &[Block]) {
+fn validate_final_batch_blocks(input: &GuestBatchInput, final_blocks: &[TaikoBlock]) {
     input
         .inputs
         .iter()
@@ -377,7 +379,7 @@ impl<DB: Database<Error = ProviderError> + DatabaseCommit + OptimisticDatabase +
     /// Executes all input transactions.
     pub fn execute_transactions(
         &mut self,
-        pool_txs: Vec<TransactionSigned>,
+        pool_txs: Vec<TaikoTxEnvelope>,
         optimistic: bool,
     ) -> Result<()> {
         info!("execute_transactions: start");
@@ -592,7 +594,7 @@ impl RethBlockBuilder<MemDb> {
     }
 
     /// Finalizes the block building and returns the header
-    pub fn finalize_block(&mut self) -> Result<Block> {
+    pub fn finalize_block(&mut self) -> Result<TaikoBlock> {
         let state_root = self.calculate_state_root()?;
         assert_eq!(self.input.block.state_root, state_root);
         ensure!(self.input.block.state_root == state_root);

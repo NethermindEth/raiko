@@ -1,12 +1,13 @@
 use core::fmt::Display;
 use std::collections::HashSet;
 
+use alethia_reth_primitives::TaikoBlock;
 use alloy_consensus::Transaction;
 use alloy_primitives::{b256, Address, TxHash, Uint, B256};
 use alloy_sol_types::SolValue;
 use anyhow::{ensure, Ok, Result};
 use pretty_assertions::Comparison;
-use reth_primitives::{Block, Header};
+use reth_primitives::Header;
 
 #[cfg(not(feature = "std"))]
 use crate::no_std::*;
@@ -153,7 +154,7 @@ impl BlockMetaDataFork {
         keccak(abi_encode_data).into()
     }
 
-    fn from_batch_inputs(batch_input: &GuestBatchInput, final_blocks: Vec<Block>) -> Self {
+    fn from_batch_inputs(batch_input: &GuestBatchInput, final_blocks: Vec<TaikoBlock>) -> Self {
         match &batch_input.taiko.batch_proposed {
             BlockProposedFork::Pacaya(batch_proposed) => {
                 // todo: review the calculation 1 by 1 to make sure all of them are rooted from a trustable source
@@ -586,7 +587,7 @@ impl ProtocolInstance {
 
     pub fn new_batch(
         batch_input: &GuestBatchInput,
-        blocks: Vec<Block>,
+        blocks: Vec<TaikoBlock>,
         proof_type: ProofType,
     ) -> Result<Self> {
         // verify blob usage, either by commitment or proof equality.
@@ -594,7 +595,7 @@ impl ProtocolInstance {
 
         // todo: move chain_spec into the batch input
         let input = &batch_input.inputs[0];
-        let first_block: &Block = blocks.first().unwrap();
+        let first_block: &TaikoBlock = blocks.first().unwrap();
         let verifier_address = input
             .chain_spec
             .get_fork_verifier_address(input.block.number, first_block.header.timestamp, proof_type)

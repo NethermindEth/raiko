@@ -1,5 +1,6 @@
 use std::{collections::HashMap, hint::black_box};
 
+use alethia_reth_primitives::{TaikoBlock, TaikoTxEnvelope};
 use alloy_primitives::Address;
 use alloy_rpc_types::EIP1186AccountProofResponse;
 use interfaces::{cancel_proof, run_batch_prover, run_prover};
@@ -11,7 +12,7 @@ use raiko_lib::{
     prover::{IdStore, IdWrite, Proof, ProofKey},
     utils::txs::{generate_transactions, generate_transactions_for_batch_blocks},
 };
-use reth_primitives::{Block, Header};
+use reth_primitives::Header;
 use serde_json::Value;
 use tracing::{debug, error, info, warn};
 
@@ -166,7 +167,7 @@ impl Raiko {
         let pool_txs_list = generate_transactions_for_batch_blocks(&batch_input);
         let blocks = batch_input.inputs.iter().zip(pool_txs_list).try_fold(
             Vec::new(),
-            |mut acc, input_and_txs| -> RaikoResult<Vec<Block>> {
+            |mut acc, input_and_txs| -> RaikoResult<Vec<TaikoBlock>> {
                 let (input, txs_with_flag) = input_and_txs;
                 let (pool_txs, _) = txs_with_flag;
                 let output = self.single_output_for_batch(pool_txs, input)?;
@@ -195,9 +196,9 @@ impl Raiko {
 
     fn single_output_for_batch(
         &self,
-        origin_pool_txs: Vec<reth_primitives::TransactionSigned>,
+        origin_pool_txs: Vec<TaikoTxEnvelope>,
         input: &GuestInput,
-    ) -> RaikoResult<Block> {
+    ) -> RaikoResult<TaikoBlock> {
         if self.should_execute_transactions() {
             self.execute_transaction_batch(origin_pool_txs, input)?;
         }
@@ -207,14 +208,14 @@ impl Raiko {
 
     fn execute_transaction_batch(
         &self,
-        origin_pool_txs: Vec<reth_primitives::TransactionSigned>,
+        origin_pool_txs: Vec<TaikoTxEnvelope>,
         input: &GuestInput,
     ) -> RaikoResult<()> {
         let db = create_mem_db(&mut input.clone()).unwrap();
         let mut builder = RethBlockBuilder::new(input, db);
 
         let mut pool_txs = vec![input.taiko.anchor_tx.clone().unwrap()];
-        pool_txs.extend_from_slice(&origin_pool_txs);
+        pool_txs.extend_from_slice(&origin_pool_txs.as_slice());
 
         builder
             .execute_transactions(pool_txs, false)

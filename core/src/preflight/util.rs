@@ -1,3 +1,4 @@
+use alethia_reth_primitives::{TaikoBlock, TaikoTxEnvelope};
 use alloy_consensus::{Blob, Transaction};
 use alloy_primitives::{hex, Log as LogStruct, Uint, B256};
 use alloy_provider::{Provider, RootProvider};
@@ -23,7 +24,6 @@ use raiko_lib::{
     primitives::eip4844::{self, commitment_to_version_hash, KZG_SETTINGS},
     utils::shasta_rules::ANCHOR_MAX_OFFSET,
 };
-use reth_primitives::{Block as RethBlock, TransactionSigned};
 use serde::{Deserialize, Serialize};
 use std::iter;
 use tracing::{debug, error, info, instrument, warn};
@@ -37,7 +37,7 @@ use crate::{
 /// Optimize data gathering by executing the transactions multiple times so data can be requested in batches
 pub async fn execute_txs<'a, BDP>(
     builder: &mut RethBlockBuilder<ProviderDb<'a, BDP>>,
-    pool_txs: Vec<reth_primitives::TransactionSigned>,
+    pool_txs: Vec<TaikoTxEnvelope>,
 ) -> RaikoResult<()>
 where
     BDP: BlockDataProvider,
@@ -83,7 +83,7 @@ pub async fn prepare_taiko_chain_input(
     taiko_chain_spec: &ChainSpec,
     block_number: u64,
     l1_inclusion_block_number: Option<u64>,
-    block: &RethBlock,
+    block: &TaikoBlock,
     prover_data: TaikoProverData,
     blob_proof_type: &BlobProofType,
 ) -> RaikoResult<TaikoGuestInput> {
@@ -232,7 +232,7 @@ pub async fn prepare_taiko_chain_input(
 // get fork corresponding anchor block height and state root
 fn get_anchor_tx_info_by_fork(
     fork: TaikoSpecId,
-    anchor_tx: &TransactionSigned,
+    anchor_tx: &TaikoTxEnvelope,
 ) -> RaikoResult<(u64, B256)> {
     match fork {
         TaikoSpecId::SHASTA => {
@@ -582,7 +582,7 @@ pub async fn prepare_taiko_chain_batch_input(
     taiko_chain_spec: &ChainSpec,
     l1_inclusion_block_number: u64,
     batch_id: u64,
-    batch_blocks: &[RethBlock],
+    batch_blocks: &[TaikoBlock],
     prover_data: TaikoProverData,
     blob_proof_type: &BlobProofType,
     cached_event_data: Option<BlockProposedFork>,
@@ -1045,7 +1045,7 @@ pub async fn get_block_proposed_event_by_traversal(
 pub async fn get_block_and_parent_data<BDP>(
     provider: &BDP,
     block_number: u64,
-) -> RaikoResult<(RethBlock, alloy_rpc_types::Block)>
+) -> RaikoResult<(TaikoBlock, alloy_rpc_types::Block)>
 where
     BDP: BlockDataProvider,
 {
@@ -1074,7 +1074,7 @@ where
     debug!("block transactions: {:?}", block.transactions.len());
 
     // Convert the alloy block to a reth block
-    let block = RethBlock::try_from(block.clone())
+    let block = TaikoBlock::try_from(block.clone())
         .map_err(|e| RaikoError::Conversion(format!("Failed converting to reth block: {e}")))?;
     Ok((block, parent_block.clone()))
 }
@@ -1105,7 +1105,7 @@ pub async fn get_grandparent_timestamp<BDP: BlockDataProvider>(
 pub async fn get_batch_blocks_and_parent_data<BDP>(
     provider: &BDP,
     block_numbers: &[u64],
-) -> RaikoResult<Vec<(RethBlock, alloy_rpc_types::Block)>>
+) -> RaikoResult<Vec<(TaikoBlock, alloy_rpc_types::Block)>>
 where
     BDP: BlockDataProvider,
 {
@@ -1145,7 +1145,7 @@ where
         .windows(2)
         .map(|window_blocks| {
             let parent_block = &window_blocks[0];
-            let prove_block = RethBlock::try_from(window_blocks[1].clone())
+            let prove_block = TaikoBlock::try_from(window_blocks[1].clone())
                 .map_err(|e| {
                     RaikoError::Conversion(format!("Failed converting to reth block: {e}"))
                 })

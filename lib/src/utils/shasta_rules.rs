@@ -1,8 +1,8 @@
 use alethia_reth_consensus::validation::ANCHOR_V3_V4_GAS_LIMIT;
 use alethia_reth_evm::spec::TaikoSpecId;
+use alethia_reth_primitives::TaikoBlock;
 use alloy_consensus::Header;
 use core::cmp::{max, min};
-use reth_primitives::Block;
 use std::cmp::max as std_max;
 use tracing::warn;
 
@@ -130,7 +130,7 @@ pub(crate) fn validate_force_inc_proposal_manifest(manifest: &DerivationSourceMa
 
 pub(crate) fn validate_input_block_param(
     manifest_block: &ProtocolBlockManifest,
-    input_block: &Block,
+    input_block: &TaikoBlock,
 ) -> bool {
     if manifest_block.timestamp != input_block.header.timestamp {
         warn!(

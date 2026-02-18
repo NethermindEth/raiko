@@ -21,6 +21,12 @@ reth-evm = { workspace = true }
 reth-revm = { workspace = true }
 reth-provider = { workspace = true }
 
+# alethia-reth
+alethia-reth-primitives = { workspace = true, features = [
+    "reth-codec",
+    "alloy-compat",
+] }
+
 # alloy
 alloy-rlp = { workspace = true }
 alloy-rlp-derive = { workspace = true }

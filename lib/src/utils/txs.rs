@@ -1,6 +1,6 @@
 // utils fns for tx procerssing.
+use alethia_reth_consensus::transaction::TaikoTxEnvelope;
 use alloy_rlp::Decodable;
-use reth_primitives::TransactionSigned;
 use tracing::{debug, error, warn};
 
 use crate::consts::{ChainSpec, Network};
@@ -14,9 +14,9 @@ use crate::utils::blobs::{
 use crate::utils::pacaya::generate_transactions_for_pacaya_blocks;
 use crate::utils::shasta::generate_transactions_for_shasta_blocks;
 
-pub fn decode_transactions(tx_list: &[u8]) -> Vec<TransactionSigned> {
+pub fn decode_transactions(tx_list: &[u8]) -> Vec<TaikoTxEnvelope> {
     #[allow(clippy::useless_asref)]
-    Vec::<TransactionSigned>::decode(&mut tx_list.as_ref()).unwrap_or_else(|e| {
+    Vec::<TaikoTxEnvelope>::decode(&mut tx_list.as_ref()).unwrap_or_else(|e| {
         // If decoding fails we need to make an empty block
         warn!("decode_transactions not successful: {e:?}, use empty tx_list");
         vec![]
@@ -83,8 +83,8 @@ pub fn generate_transactions(
     chain_spec: &ChainSpec,
     block_proposal: &BlockProposedFork,
     tx_list_data_buf: &[u8],
-    anchor_tx: &Option<TransactionSigned>,
-) -> Vec<TransactionSigned> {
+    anchor_tx: &Option<TaikoTxEnvelope>,
+) -> Vec<TaikoTxEnvelope> {
     let is_blob_data = block_proposal.blob_used();
     let blob_slice_param = block_proposal.blob_tx_slice_param();
     // Decode the tx list from the raw data posted onchain
@@ -103,7 +103,7 @@ pub fn generate_transactions(
 /// each block will get a portion of the txlist by its tx_nums
 pub fn generate_transactions_for_batch_blocks(
     guest_batch_input: &GuestBatchInput,
-) -> Vec<(Vec<TransactionSigned>, bool)> {
+) -> Vec<(Vec<TaikoTxEnvelope>, bool)> {
     let taiko_guest_batch_input = &guest_batch_input.taiko;
     assert!(
         taiko_guest_batch_input.data_sources.len() > 0,
