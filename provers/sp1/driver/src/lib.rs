@@ -1,7 +1,6 @@
 #![cfg(feature = "enable")]
 
 use alloy_primitives::{hex, B256};
-use once_cell::sync::Lazy;
 use raiko_lib::{
     input::{
         AggregationGuestInput, AggregationGuestOutput, GuestBatchInput, GuestBatchOutput,
@@ -31,6 +30,7 @@ use sp1_sdk::{HashableKey, ProverClient, SP1Stdin};
 #[cfg(feature = "network")]
 use std::time::Duration;
 use std::{borrow::BorrowMut, env};
+use tokio::sync::OnceCell;
 use tracing::info;
 
 mod proof_verify;
@@ -164,25 +164,23 @@ async fn prove_network(
     Ok((prove_result, vk))
 }
 
-static AGGREGATION_PROGRAM_HASH: Lazy<String> = Lazy::new(|| {
-    let prover = sp1_sdk::blocking::CpuProver::new();
-    let key_pair =
-        sp1_sdk::blocking::Prover::setup(&prover, AGGREGATION_ELF).expect("should not panic");
-    key_pair.verifying_key().bytes32()
-});
+static AGGREGATION_PROGRAM_HASH: OnceCell<String> = OnceCell::const_new();
+static BLOCK_PROGRAM_HASH: OnceCell<String> = OnceCell::const_new();
+static SHASTA_AGGREGATION_PROGRAM_HASH: OnceCell<String> = OnceCell::const_new();
 
-static BLOCK_PROGRAM_HASH: Lazy<String> = Lazy::new(|| {
-    let prover = sp1_sdk::blocking::CpuProver::new();
-    let key_pair = sp1_sdk::blocking::Prover::setup(&prover, BATCH_ELF).expect("should not panic");
-    hex::encode(key_pair.verifying_key().hash_bytes())
-});
+/// Helper: get program hash from env or use default mock hash.
+async fn vk_bytes32(elf: Elf) -> String {
+    let client = ProverClient::builder().cpu().build().await;
+    let pk = client.setup(elf).await.expect("ELF setup failed");
+    pk.verifying_key().bytes32()
+}
 
-static SHASTA_AGGREGATION_PROGRAM_HASH: Lazy<String> = Lazy::new(|| {
-    let prover = sp1_sdk::blocking::CpuProver::new();
-    let key_pair =
-        sp1_sdk::blocking::Prover::setup(&prover, SHASTA_AGG_ELF).expect("should not panic");
-    hex::encode(key_pair.verifying_key().hash_bytes())
-});
+/// Helper: get program hash from env or use default mock hash.
+async fn vk_hash_hex(elf: Elf) -> String {
+    let client = ProverClient::builder().cpu().build().await;
+    let pk = client.setup(elf).await.expect("ELF setup failed");
+    hex::encode(pk.verifying_key().hash_bytes())
+}
 
 impl Prover for Sp1Prover {
     async fn run(
@@ -692,11 +690,20 @@ impl Prover for Sp1Prover {
     }
 
     async fn get_guest_data() -> ProverResult<serde_json::Value> {
+        let agg = AGGREGATION_PROGRAM_HASH
+            .get_or_init(|| vk_bytes32(AGGREGATION_ELF))
+            .await;
+        let block = BLOCK_PROGRAM_HASH
+            .get_or_init(|| vk_hash_hex(BATCH_ELF))
+            .await;
+        let shasta = SHASTA_AGGREGATION_PROGRAM_HASH
+            .get_or_init(|| vk_hash_hex(SHASTA_AGG_ELF))
+            .await;
         Ok(json!({
             "sp1": {
-                "aggregation_program_hash": AGGREGATION_PROGRAM_HASH.to_string(),
-                "block_program_hash": BLOCK_PROGRAM_HASH.to_string(),
-                "shasta_aggregation_program_hash": SHASTA_AGGREGATION_PROGRAM_HASH.to_string(),
+                "aggregation_program_hash": agg,
+                "block_program_hash": block,
+                "shasta_aggregation_program_hash": shasta,
             }
         }))
     }
