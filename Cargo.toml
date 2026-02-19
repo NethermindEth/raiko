@@ -93,10 +93,10 @@ reqwest_alloy = { package = "reqwest", version = "0.12.4", features = ["json"] }
 
 
 # risc zero
-risc0-zkvm = { version = "=3.0.3", features = ["prove", "getrandom"] }
-bonsai-sdk = { version = "=1.4.1" }
-risc0-binfmt = { version = "=3.0.2" }
-risc0-zkos-v1compat = { version = "=2.2.0" }
+risc0-zkvm = { version = "=3.0.5", features = ["prove", "getrandom"] }
+bonsai-sdk = { version = "=1.4.2" }
+risc0-binfmt = { version = "=3.0.4" }
+risc0-zkos-v1compat = { version = "=2.2.2" }
 
 # SP1
 sp1-sdk = { version = "6.0.0", features = ["cuda"] }
