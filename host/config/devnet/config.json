@@ -38,6 +38,7 @@
 		"prove": true
 	},
 	"risc0": {
+		"boundless": false,
 		"bonsai": true,
 		"snark": true,
 		"profile": false,
