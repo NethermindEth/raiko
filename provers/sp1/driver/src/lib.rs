@@ -347,7 +347,7 @@ impl Prover for Sp1Prover {
         input: GuestBatchInput,
         output: &GuestBatchOutput,
         config: &ProverConfig,
-        id_store: Option<&mut dyn IdWrite>,
+        #[allow(unused_variables)] id_store: Option<&mut dyn IdWrite>,
     ) -> ProverResult<Proof> {
         let mut param = Sp1Param::deserialize(config.get("sp1").unwrap()).unwrap();
 
