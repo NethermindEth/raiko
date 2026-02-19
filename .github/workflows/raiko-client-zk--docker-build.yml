@@ -99,7 +99,7 @@ jobs:
         with:
           platforms: ${{ matrix.platform }}
           context: .
-          file: ./Dockerfile-new.zk
+          file: ./Dockerfile.zk
           push: true
           tags: ${{ env.DOCKER_REGISTRY }}/${{ env.DOCKER_REPOSITORY }}
           labels: ${{ steps.meta.outputs.labels }}
