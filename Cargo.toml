@@ -99,12 +99,11 @@ risc0-binfmt = { version = "=3.0.2" }
 risc0-zkos-v1compat = { version = "=2.2.0" }
 
 # SP1
-sp1-sdk = { version = "5.2.0", features = ["cuda"] }
-sp1-prover = { version = "5.2.0" }
-sp1-zkvm = { version = "5.2.0" }
-sp1-helper = { version = "5.2.0" }
-sp1-primitives = { version = "5.2.0" }
-
+sp1-sdk = { version = "6.0.0", features = ["cuda"] }
+sp1-prover = { version = "6.0.0" }
+sp1-zkvm = { version = "6.0.0" }
+sp1-helper = { version = "6.0.0" }
+sp1-primitives = { version = "6.0.0" }
 
 # alloy
 alloy-rlp = { version = "0.3.10", default-features = false }
