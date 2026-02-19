@@ -272,7 +272,7 @@ impl Prover for Sp1Prover {
             ProverMode::Local => {
                 let client = ProverClient::builder()
                     .cuda()
-                    .with_device_id(gpu_number)
+                    // .with_device_id(gpu_number)
                     .build()
                     .await;
                 let (pk, vk) = setup_prover(&client, AGGREGATION_ELF).await?;
@@ -410,7 +410,7 @@ impl Prover for Sp1Prover {
             ProverMode::Local => {
                 let client = ProverClient::builder()
                     .cuda()
-                    .with_device_id(gpu_number)
+                    // .with_device_id(gpu_number)
                     .build()
                     .await;
                 let (pk, vk) = setup_prover(&client, BATCH_ELF).await?;
@@ -623,7 +623,7 @@ impl Prover for Sp1Prover {
             ProverMode::Local => {
                 let client = ProverClient::builder()
                     .cuda()
-                    .with_device_id(gpu_number)
+                    // .with_device_id(gpu_number)
                     .build()
                     .await;
                 let (pk, vk) = setup_prover(&client, SHASTA_AGG_ELF).await?;
