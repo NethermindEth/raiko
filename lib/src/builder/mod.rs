@@ -476,7 +476,6 @@ impl<DB: Database<Error = ProviderError> + DatabaseCommit + OptimisticDatabase +
             taiko_evm_config,
             self.db.take().unwrap(),
             optimistic,
-            true, // Enable inspector for L1sload functionality
         );
 
         // Recover senders

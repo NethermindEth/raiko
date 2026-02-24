@@ -129,18 +129,6 @@ pub async fn preflight<BDP: BlockDataProvider>(
     // Clear L1SLOAD cache before collecting L1 storage proofs
     clear_l1sload_cache();
 
-    // Generate transactions for tracing
-    let pool_tx_for_tracing = if taiko_chain_spec.is_taiko() {
-        generate_transactions(
-            &taiko_chain_spec,
-            &taiko_guest_input.block_proposed,
-            &taiko_guest_input.tx_data,
-            &taiko_guest_input.anchor_tx,
-        )
-    } else {
-        Vec::new()
-    };
-
     // Collect L1 storage proofs with anchor block validation.
     let (l1_storage_proofs, l1_ancestor_headers, anchor_block_id) = if taiko_chain_spec.is_taiko() {
         let l1_provider = RpcBlockDataProvider::new(&l1_chain_spec.rpc, 0).await?;
@@ -162,13 +150,9 @@ pub async fn preflight<BDP: BlockDataProvider>(
         }
 
         let collection = collect_l1_storage_proofs(
-            &provider,
-            &taiko_chain_spec,
             &block,
-            &parent_block,
             &l1_provider,
             anchor_block_id,
-            pool_tx_for_tracing,
         )
         .await?;
 
@@ -469,10 +453,6 @@ pub async fn batch_preflight<BDP: BlockDataProvider>(
                 // Clear L1SLOAD cache before collecting L1 storage proofs
                 clear_l1sload_cache();
 
-                // Generate pool transactions for this block
-                let mut pool_txs_batch = vec![anchor_tx.clone()];
-                pool_txs_batch.extend_from_slice(&pure_pool_txs);
-
                 // Collect L1 storage proofs for this specific block's anchor
                 let (l1_storage_proofs, l1_ancestor_headers, anchor_block_id) =
                     if taiko_chain_spec.is_taiko() {
@@ -492,24 +472,10 @@ pub async fn batch_preflight<BDP: BlockDataProvider>(
                             )));
                         }
 
-                        // Create provider for this specific block
-                        let provider_target_blocks_trace =
-                            vec![parent_block_number, parent_block_number + 1];
-                        let provider_trace = RpcBlockDataProvider::new_batch(
-                            &taiko_chain_spec.rpc,
-                            provider_target_blocks_trace,
-                        )
-                        .await
-                        .expect("Could not create RpcBlockDataProvider for tracing");
-
                         let collection = collect_l1_storage_proofs(
-                            &provider_trace,
-                            &taiko_chain_spec,
                             &prove_block,
-                            &parent_block,
                             &l1_provider,
                             anchor_block_id,
-                            pool_txs_batch.clone(),
                         )
                         .await?;
 

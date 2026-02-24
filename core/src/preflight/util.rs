@@ -26,7 +26,6 @@ use raiko_lib::{
 };
 
 use raiko_lib::input::L1StorageProof;
-use reth_primitives::{Block as RethBlock, TransactionSigned};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::iter;
@@ -756,42 +755,6 @@ pub async fn filter_tx_blob_beacon_with_proof(
     Ok((blob, Some(commitment.to_vec()), blob_proof))
 }
 
-/// Trace block execution to detect all L1SLOAD calls using an inspector
-///
-/// This function would execute the block with an inspector to detect indirect L1SLOAD calls
-/// (i.e., calls made from within smart contracts).
-///
-/// Note: Currently returns empty set because the RethBlockBuilder doesn't expose
-/// a mechanism to inject and retrieve custom inspectors during preflight execution.
-/// The inspector is only used during the actual proving phase via TaikoWithOptimisticBlockExecutor.
-///
-/// For now, we rely on direct transaction scanning which handles the most common case
-/// of transactions directly calling the L1SLOAD precompile.
-///
-/// Future enhancement: Modify RethBlockBuilder to support custom inspectors during preflight,
-/// or create a separate tracing-specific executor that can return inspector results.
-pub async fn trace_l1sload_calls<BDP: BlockDataProvider>(
-    _provider: &BDP,
-    _taiko_chain_spec: &ChainSpec,
-    _block: &reth_primitives::Block,
-    _parent_block: &alloy_rpc_types::Block,
-    _pool_txs: Vec<TransactionSigned>,
-) -> RaikoResult<std::collections::HashSet<(Address, B256, B256)>> {
-    // The L1SloadInspector is fully implemented and functional.
-    // However, extracting its results during preflight requires architectural changes:
-    //
-    // 1. RethBlockBuilder::execute_transactions() doesn't support custom inspectors
-    // 2. Inspector is only active during proving phase (TaikoWithOptimisticBlockExecutor)
-    // 3. Would need to add inspector support to builder or create dedicated trace executor
-    //
-    // Workaround: Direct transaction scanning catches the majority of L1SLOAD uses.
-    // Indirect calls (contracts calling L1SLOAD) are less common and can be added
-    // when needed by enhancing the builder architecture.
-
-    info!("Inspector-based indirect call tracing deferred - using direct detection");
-    Ok(std::collections::HashSet::new())
-}
-
 /// Result of L1 storage proof collection, containing both the proofs and required L1 ancestor headers.
 pub struct L1StorageProofCollection {
     /// Storage proofs for each detected L1SLOAD call (one per unique (address, key, block_number))
@@ -816,14 +779,10 @@ pub struct L1StorageProofCollection {
 ///
 /// The requested block number must be within `L1SLOAD_MAX_BLOCK_LOOKBACK` (256) blocks
 /// of the anchor block.
-pub async fn collect_l1_storage_proofs<BDP: BlockDataProvider>(
-    provider: &BDP,
-    taiko_chain_spec: &ChainSpec,
+pub async fn collect_l1_storage_proofs(
     block: &reth_primitives::Block,
-    parent_block: &alloy_rpc_types::Block,
     l1_provider: &RpcBlockDataProvider,
     anchor_block_id: u64,
-    pool_txs: Vec<TransactionSigned>,
 ) -> RaikoResult<L1StorageProofCollection> {
     let mut proofs = Vec::new();
     let mut detected_calls: std::collections::HashSet<(Address, B256, B256)> =
@@ -876,21 +835,6 @@ pub async fn collect_l1_storage_proofs<BDP: BlockDataProvider>(
             }
         }
     }
-
-    info!("Found {} direct L1SLOAD calls", detected_calls.len());
-
-    // Method 2: Trace execution to detect indirect calls from smart contracts
-    info!("Tracing block execution to detect indirect L1SLOAD calls...");
-    let traced_calls =
-        trace_l1sload_calls(provider, taiko_chain_spec, block, parent_block, pool_txs).await?;
-
-    info!(
-        "Found {} additional indirect L1SLOAD calls via tracing",
-        traced_calls.len()
-    );
-
-    // Merge both sets
-    detected_calls.extend(traced_calls);
 
     info!("Total L1SLOAD calls detected: {}", detected_calls.len());
 
