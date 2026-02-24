@@ -402,8 +402,7 @@ pub fn prove_locally(
             .map_err(|e| ProverError::GuestError(e.to_string()))?
     };
 
-    let prover = get_prover_server(opts)
-        .map_err(|e| ProverError::GuestError(e.to_string()))?;
+    let prover = get_prover_server(opts).map_err(|e| ProverError::GuestError(e.to_string()))?;
 
     let receipt = prover
         .prove_session(&VerifierContext::default(), &session)

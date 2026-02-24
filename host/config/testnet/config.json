@@ -34,10 +34,10 @@
     },
     "risc0": {
         "boundless": false,
-        "bonsai": true,
+        "bonsai": false,
         "snark": true,
         "profile": false,
-        "execution_po2": 20
+        "execution_po2": 22
     },
     "sp1": {
         "recursion": "core",
