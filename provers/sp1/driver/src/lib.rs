@@ -170,14 +170,14 @@ static SHASTA_AGGREGATION_PROGRAM_HASH: OnceCell<String> = OnceCell::const_new()
 
 /// Helper: get program hash from env or use default mock hash.
 async fn vk_bytes32(elf: Elf) -> String {
-    let client = ProverClient::builder().cpu().build().await;
+    let client = ProverClient::builder().light().build().await;
     let pk = client.setup(elf).await.expect("ELF setup failed");
     pk.verifying_key().bytes32()
 }
 
 /// Helper: get program hash from env or use default mock hash.
 async fn vk_hash_hex(elf: Elf) -> String {
-    let client = ProverClient::builder().cpu().build().await;
+    let client = ProverClient::builder().light().build().await;
     let pk = client.setup(elf).await.expect("ELF setup failed");
     hex::encode(pk.verifying_key().hash_bytes())
 }

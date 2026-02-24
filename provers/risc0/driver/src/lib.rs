@@ -39,6 +39,12 @@ pub mod boundless;
 pub mod methods;
 pub mod snarks;
 
+static SHASTA_AGGREGATION_PROGRAM_HASH: Lazy<String> = Lazy::new(|| {
+    hex::encode(
+        Digest::from(methods::risc0_shasta_aggregation::RISC0_SHASTA_AGGREGATION_ID).as_bytes(),
+    )
+});
+
 static AGGREGATION_PROGRAM_HASH: Lazy<String> = Lazy::new(|| {
     hex::encode(Digest::from(methods::risc0_aggregation::RISC0_AGGREGATION_ID).as_bytes())
 });
@@ -289,6 +295,7 @@ impl Prover for Risc0Prover {
             "risc0": {
                 "aggregation_program_hash": AGGREGATION_PROGRAM_HASH.to_string(),
                 "block_program_hash": BLOCK_PROGRAM_HASH.to_string(),
+                "shasta_aggregation_program_hash": SHASTA_AGGREGATION_PROGRAM_HASH.to_string(),
             }
         }))
     }
