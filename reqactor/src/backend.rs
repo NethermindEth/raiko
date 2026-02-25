@@ -64,64 +64,76 @@ impl Backend {
         }
     }
 
+    /// Drain all completed requests from the channel (non-blocking).
+    async fn drain_completions(&self, done_rx: &mut mpsc::Receiver<RequestKey>) {
+        while let Ok(request_key) = done_rx.try_recv() {
+            self.complete_request(request_key).await;
+        }
+    }
+
+    /// Mark a single request as complete in the queue.
+    async fn complete_request(&self, request_key: RequestKey) {
+        let mut queue = self.queue.lock().await;
+        queue.complete(request_key);
+    }
+
     pub async fn serve_in_background(self) {
         let (done_tx, mut done_rx) = mpsc::channel(1000);
 
         loop {
-            // Handle completed requests
-            while let Ok(request_key) = done_rx.try_recv() {
-                let mut queue = self.queue.lock().await;
-                queue.complete(request_key);
-            }
+            // Drain all completions first (non-blocking)
+            self.drain_completions(&mut done_rx).await;
 
-            // Check if there are requests in the queue (non-blocking)
+            // Check if there are requests in the queue
             let has_requests = {
                 let queue = self.queue.lock().await;
                 !queue.is_empty()
             };
 
             if !has_requests {
-                // No requests in queue, wait for new requests
-                self.notifier.notified().await;
-                continue;
+                // Nothing to do — wait for new work or a completion
+                tokio::select! {
+                    _ = self.notifier.notified() => continue,
+                    Some(key) = done_rx.recv() => {
+                        self.complete_request(key).await;
+                        continue;
+                    }
+                }
             }
 
-            // Spawn a coordinator task that:
-            // 1. Acquires GPU permit (blocks until available)
-            // 2. Pulls next request from priority queue
-            // 3. Spawns the actual work
-            let queue = self.queue.clone();
-            let pool_ = self.pool.clone();
+            // There are requests — wait for a GPU slot while staying responsive
+            let gpu_permit = loop {
+                tokio::select! {
+                    permit = self.gpu_semaphore.acquire() => break permit,
+                    Some(key) = done_rx.recv() => self.complete_request(key).await,
+                }
+            };
+
+            // Pull highest-priority request with GPU slot in hand
+            let next = {
+                let mut queue = self.queue.lock().await;
+                queue.try_next()
+            };
+            let (request_key, request_entity) = match next {
+                Some(pair) => pair,
+                None => {
+                    drop(gpu_permit);
+                    continue;
+                }
+            };
+
+            let request_key_ = request_key.clone();
+            let mut pool_ = self.pool.clone();
             let chain_specs = self.chain_specs.clone();
-            let gpu_semaphore = self.gpu_semaphore.clone();
             let mock_key = self.mock_key.clone();
             let done_tx_ = done_tx.clone();
             let notifier_ = self.notifier.clone();
 
             tokio::spawn(async move {
-                // Acquire GPU permit first - this blocks until a slot is available
-                let gpu_permit = gpu_semaphore.acquire().await;
-
-                // Now pull from the priority queue while holding the permit
-                let (request_key, request_entity) = {
-                    let mut q = queue.lock().await;
-                    match q.try_next() {
-                        Some((key, entity)) => (key, entity),
-                        None => {
-                            // Queue became empty, release permit and return
-                            drop(gpu_permit);
-                            return;
-                        }
-                    }
-                };
-
-                let request_key_ = request_key.clone();
-                let mut pool_clone = pool_.clone();
-
                 let result = match request_entity {
                     RequestEntity::SingleProof(entity) => {
                         do_prove_single(
-                            &mut pool_clone,
+                            &mut pool_,
                             &chain_specs,
                             request_key_.clone(),
                             entity,
@@ -131,7 +143,7 @@ impl Backend {
                     }
                     RequestEntity::Aggregation(entity) => {
                         do_prove_aggregation(
-                            &mut pool_clone,
+                            &mut pool_,
                             request_key_.clone(),
                             entity,
                             Some(gpu_permit.gpu_number()),
@@ -141,7 +153,7 @@ impl Backend {
                     }
                     RequestEntity::BatchProof(entity) => {
                         do_prove_batch(
-                            &mut pool_clone,
+                            &mut pool_,
                             &chain_specs,
                             request_key_.clone(),
                             entity,
@@ -152,7 +164,7 @@ impl Backend {
                     }
                     RequestEntity::GuestInput(entity) => {
                         do_generate_guest_input(
-                            &mut pool_clone,
+                            &mut pool_,
                             &chain_specs,
                             request_key_.clone(),
                             entity,
@@ -161,7 +173,7 @@ impl Backend {
                     }
                     RequestEntity::BatchGuestInput(entity) => {
                         do_generate_batch_guest_input(
-                            &mut pool_clone,
+                            &mut pool_,
                             &chain_specs,
                             request_key_.clone(),
                             entity,
@@ -170,7 +182,7 @@ impl Backend {
                     }
                     RequestEntity::ShastaGuestInput(entity) => {
                         do_generate_shasta_proposal_guest_input(
-                            &mut pool_clone,
+                            &mut pool_,
                             &chain_specs,
                             request_key_.clone(),
                             entity,
@@ -179,7 +191,7 @@ impl Backend {
                     }
                     RequestEntity::ShastaProof(entity) => {
                         do_prove_shasta_proposal(
-                            &mut pool_clone,
+                            &mut pool_,
                             &chain_specs,
                             request_key_.clone(),
                             entity,
@@ -190,7 +202,7 @@ impl Backend {
                     }
                     RequestEntity::ShastaAggregation(entity) => {
                         do_shasta_aggregation(
-                            &mut pool_clone,
+                            &mut pool_,
                             request_key_.clone(),
                             entity,
                             Some(gpu_permit.gpu_number()),
@@ -212,7 +224,7 @@ impl Backend {
                         error: e.to_string(),
                     },
                 };
-                let _ = pool_clone.update_status(
+                let _ = pool_.update_status(
                     request_key_.clone(),
                     StatusWithContext::new(status, chrono::Utc::now()),
                 );
