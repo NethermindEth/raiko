@@ -74,34 +74,54 @@ impl Backend {
                 queue.complete(request_key);
             }
 
-            // Try to get a request from queue first (non-blocking check)
-            let (request_key, request_entity) = {
-                let mut queue = self.queue.lock().await;
-                if let Some((request_key, request_entity)) = queue.try_next() {
-                    (request_key, request_entity)
-                } else {
-                    drop(queue);
-                    // No requests in queue, wait for new requests
-                    self.notifier.notified().await;
-                    continue;
-                }
+            // Check if there are requests in the queue (non-blocking)
+            let has_requests = {
+                let queue = self.queue.lock().await;
+                !queue.is_empty()
             };
 
-            let request_key_ = request_key.clone();
-            let mut pool_ = self.pool.clone();
+            if !has_requests {
+                // No requests in queue, wait for new requests
+                self.notifier.notified().await;
+                continue;
+            }
+
+            // Spawn a coordinator task that:
+            // 1. Acquires GPU permit (blocks until available)
+            // 2. Pulls next request from priority queue
+            // 3. Spawns the actual work
+            let queue = self.queue.clone();
+            let pool_ = self.pool.clone();
             let chain_specs = self.chain_specs.clone();
             let gpu_semaphore = self.gpu_semaphore.clone();
             let mock_key = self.mock_key.clone();
+            let done_tx_ = done_tx.clone();
+            let notifier_ = self.notifier.clone();
 
-            let handle = tokio::spawn(async move {
-                // Acquire GPU permit (combines semaphore permit + optional GPU number assignment)
-                // This ensures concurrency control and GPU allocation in one step
+            tokio::spawn(async move {
+                // Acquire GPU permit first - this blocks until a slot is available
                 let gpu_permit = gpu_semaphore.acquire().await;
+
+                // Now pull from the priority queue while holding the permit
+                let (request_key, request_entity) = {
+                    let mut q = queue.lock().await;
+                    match q.try_next() {
+                        Some((key, entity)) => (key, entity),
+                        None => {
+                            // Queue became empty, release permit and return
+                            drop(gpu_permit);
+                            return;
+                        }
+                    }
+                };
+
+                let request_key_ = request_key.clone();
+                let mut pool_clone = pool_.clone();
 
                 let result = match request_entity {
                     RequestEntity::SingleProof(entity) => {
                         do_prove_single(
-                            &mut pool_,
+                            &mut pool_clone,
                             &chain_specs,
                             request_key_.clone(),
                             entity,
@@ -111,7 +131,7 @@ impl Backend {
                     }
                     RequestEntity::Aggregation(entity) => {
                         do_prove_aggregation(
-                            &mut pool_,
+                            &mut pool_clone,
                             request_key_.clone(),
                             entity,
                             Some(gpu_permit.gpu_number()),
@@ -121,7 +141,7 @@ impl Backend {
                     }
                     RequestEntity::BatchProof(entity) => {
                         do_prove_batch(
-                            &mut pool_,
+                            &mut pool_clone,
                             &chain_specs,
                             request_key_.clone(),
                             entity,
@@ -132,7 +152,7 @@ impl Backend {
                     }
                     RequestEntity::GuestInput(entity) => {
                         do_generate_guest_input(
-                            &mut pool_,
+                            &mut pool_clone,
                             &chain_specs,
                             request_key_.clone(),
                             entity,
@@ -141,7 +161,7 @@ impl Backend {
                     }
                     RequestEntity::BatchGuestInput(entity) => {
                         do_generate_batch_guest_input(
-                            &mut pool_,
+                            &mut pool_clone,
                             &chain_specs,
                             request_key_.clone(),
                             entity,
@@ -150,7 +170,7 @@ impl Backend {
                     }
                     RequestEntity::ShastaGuestInput(entity) => {
                         do_generate_shasta_proposal_guest_input(
-                            &mut pool_,
+                            &mut pool_clone,
                             &chain_specs,
                             request_key_.clone(),
                             entity,
@@ -159,7 +179,7 @@ impl Backend {
                     }
                     RequestEntity::ShastaProof(entity) => {
                         do_prove_shasta_proposal(
-                            &mut pool_,
+                            &mut pool_clone,
                             &chain_specs,
                             request_key_.clone(),
                             entity,
@@ -170,7 +190,7 @@ impl Backend {
                     }
                     RequestEntity::ShastaAggregation(entity) => {
                         do_shasta_aggregation(
-                            &mut pool_,
+                            &mut pool_clone,
                             request_key_.clone(),
                             entity,
                             Some(gpu_permit.gpu_number()),
@@ -192,26 +212,16 @@ impl Backend {
                         error: e.to_string(),
                     },
                 };
-                let _ = pool_.update_status(
+                let _ = pool_clone.update_status(
                     request_key_.clone(),
                     StatusWithContext::new(status, chrono::Utc::now()),
                 );
-            });
 
-            let mut pool_ = self.pool.clone();
-            let done_tx_ = done_tx.clone();
-            let notifier_ = self.notifier.clone();
+                // GPU permit is automatically dropped here, releasing the semaphore
+                drop(gpu_permit);
 
-            tokio::spawn(async move {
-                if let Err(e) = handle.await {
-                    tracing::error!("Actor thread errored while proving {request_key}: {e:?}");
-                    let status = Status::Failed {
-                        error: e.to_string(),
-                    };
-                    let _ = pool_.update_status(request_key.clone(), status.clone().into());
-                }
-
-                let _res = done_tx_.send(request_key.clone()).await;
+                // Notify that request is complete
+                let _ = done_tx_.send(request_key.clone()).await;
                 notifier_.notify_one();
             });
         }

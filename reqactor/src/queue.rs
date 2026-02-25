@@ -34,6 +34,11 @@ impl Queue {
         self.queued_keys.contains(request_key)
     }
 
+    /// Check if the queue is empty (no pending requests)
+    pub fn is_empty(&self) -> bool {
+        self.agg_queue.is_empty() && self.batch_queue.is_empty() && self.preflight_queue.is_empty()
+    }
+
     /// Check if the queue is at capacity
     pub fn is_at_capacity(&self) -> bool {
         self.queued_keys.len() >= self.max_queue_size
