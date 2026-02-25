@@ -527,17 +527,60 @@ impl RequestKey {
         }
     }
 
-    /// Returns the batch_id / proposal_id used for queue priority ordering.
-    /// Lower values are dequeued first within each priority tier.
-    /// Returns `None` for requests that don't carry a batch/proposal concept
-    /// (they go to the preflight queue instead).
-    pub fn batch_sort_key(&self) -> Option<u64> {
+    /// Primary sort key for the priority queue. Lower values are dequeued first.
+    pub fn batch_sort_key(&self) -> u64 {
         match self {
-            RequestKey::Aggregation(key) => key.block_numbers().iter().min().copied(),
-            RequestKey::ShastaAggregation(key) => key.block_numbers().iter().min().copied(),
-            RequestKey::BatchProof(key) => Some(*key.guest_input_key().batch_id()),
-            RequestKey::ShastaProof(key) => Some(*key.guest_input_key().proposal_id()),
-            _ => None,
+            RequestKey::SingleProof(ref key) => key.block_number,
+            &RequestKey::GuestInput(ref key) => key.block_number,
+            RequestKey::Aggregation(key) => key
+                .block_numbers()
+                .iter()
+                .min()
+                .expect("Block numbers should be present")
+                .clone(),
+            RequestKey::ShastaAggregation(key) => key
+                .block_numbers()
+                .iter()
+                .min()
+                .expect("Block numbers should be present")
+                .clone(),
+            RequestKey::BatchProof(key) => *key.guest_input_key().batch_id(),
+            RequestKey::BatchGuestInput(key) => *key.batch_id(),
+            RequestKey::ShastaProof(key) => *key.guest_input_key().proposal_id(),
+            RequestKey::ShastaGuestInput(key) => *key.proposal_id(),
+        }
+    }
+
+    /// Secondary sort key: within the same `batch_sort_key`, guest inputs run
+    /// before proofs, and proofs run before aggregations.
+    pub fn stage(&self) -> RequestStage {
+        match self {
+            RequestKey::GuestInput(_)
+            | RequestKey::BatchGuestInput(_)
+            | RequestKey::ShastaGuestInput(_) => RequestStage::GuestInput,
+            RequestKey::SingleProof(_)
+            | RequestKey::BatchProof(_)
+            | RequestKey::ShastaProof(_) => RequestStage::Proof,
+            RequestKey::Aggregation(_)
+            | RequestKey::ShastaAggregation(_) => RequestStage::Aggregation,
+        }
+    }
+}
+
+/// Processing stage of a request, used for priority ordering within the same batch_id.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum RequestStage {
+    GuestInput = 0,
+    Proof = 1,
+    Aggregation = 2,
+}
+
+impl std::fmt::Display for RequestStage {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::GuestInput => write!(f, "guest_input"),
+            Self::Proof => write!(f, "proof"),
+            Self::Aggregation => write!(f, "aggregation"),
         }
     }
 }
