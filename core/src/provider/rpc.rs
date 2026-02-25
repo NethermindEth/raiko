@@ -352,12 +352,6 @@ impl BlockDataProvider for RpcBlockDataProvider {
         offset: usize,
         num_storage_proofs: usize,
     ) -> RaikoResult<MerkleProof> {
-        assert!(
-            self.block_numbers.contains(&block_number),
-            "Block number {} not found in {:?}",
-            block_number,
-            self.block_numbers
-        );
         self.fetch_storage_proofs_internal(block_number, accounts, offset, num_storage_proofs)
             .await
     }

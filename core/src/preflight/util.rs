@@ -780,7 +780,7 @@ pub struct L1StorageProofCollection {
 /// The requested block number must be within `L1SLOAD_MAX_BLOCK_LOOKBACK` (256) blocks
 /// of the anchor block.
 pub async fn collect_l1_storage_proofs(
-    block: &reth_primitives::Block,
+    block: &alethia_reth_primitives::TaikoBlock,
     l1_provider: &RpcBlockDataProvider,
     anchor_block_id: u64,
 ) -> RaikoResult<L1StorageProofCollection> {
