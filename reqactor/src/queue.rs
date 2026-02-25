@@ -1,14 +1,56 @@
 use raiko_reqpool::{RequestEntity, RequestKey};
-use std::collections::{HashSet, VecDeque};
+use std::cmp::Ordering;
+use std::collections::{BinaryHeap, HashSet, VecDeque};
 
-/// Queue of requests to be processed
+/// Wrapper that gives [`BinaryHeap`] min-heap behaviour keyed on `batch_id`.
+///
+/// Lower `batch_id` is popped first.
+/// Rust's `BinaryHeap` is a *max*-heap, so we invert the comparison.
+#[derive(Debug)]
+struct PriorityItem {
+    /// The batch_id / proposal_id used for ordering (lower = higher priority).
+    sort_key: u64,
+    request_key: RequestKey,
+    request_entity: RequestEntity,
+}
+
+impl PartialEq for PriorityItem {
+    fn eq(&self, other: &Self) -> bool {
+        self.sort_key == other.sort_key
+    }
+}
+impl Eq for PriorityItem {}
+
+impl PartialOrd for PriorityItem {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for PriorityItem {
+    fn cmp(&self, other: &Self) -> Ordering {
+        // Reverse: lower sort_key = "greater" so BinaryHeap pops it first.
+        other.sort_key.cmp(&self.sort_key)
+    }
+}
+
+/// Queue of requests to be processed.
+///
+/// Priority tiers (highest first):
+///   1. **Aggregation** — `Aggregation` and `ShastaAggregation`
+///   2. **Batch / Shasta proof** — `BatchProof` and `ShastaProof`
+///   3. **Preflight** — everything else (guest-input, single-proof, …)
+///
+/// Within tiers 1 and 2 each heap is ordered by ascending
+/// `batch_id` / `proposal_id`, with FIFO tiebreaking, so lower IDs
+/// are proved first.
 #[derive(Debug)]
 pub struct Queue {
-    /// High priority pending for aggregation requests
-    agg_queue: VecDeque<(RequestKey, RequestEntity)>,
-    /// Medium priority pending for batch proof requests
-    batch_queue: VecDeque<(RequestKey, RequestEntity)>,
-    /// Low priority pending for preflight requests
+    /// High priority: aggregation requests (min-heap by batch_id)
+    agg_heap: BinaryHeap<PriorityItem>,
+    /// Medium priority: batch/shasta proof requests (min-heap by batch_id)
+    batch_heap: BinaryHeap<PriorityItem>,
+    /// Low priority: preflight / single-proof requests (FIFO)
     preflight_queue: VecDeque<(RequestKey, RequestEntity)>,
     /// Requests that are currently being worked on
     working_in_progress: HashSet<RequestKey>,
@@ -21,8 +63,8 @@ pub struct Queue {
 impl Queue {
     pub fn new(max_queue_size: usize) -> Self {
         Self {
-            agg_queue: VecDeque::new(),
-            batch_queue: VecDeque::new(),
+            agg_heap: BinaryHeap::new(),
+            batch_heap: BinaryHeap::new(),
             preflight_queue: VecDeque::new(),
             working_in_progress: HashSet::new(),
             queued_keys: HashSet::new(),
@@ -36,7 +78,7 @@ impl Queue {
 
     /// Check if the queue is empty (no pending requests)
     pub fn is_empty(&self) -> bool {
-        self.agg_queue.is_empty() && self.batch_queue.is_empty() && self.preflight_queue.is_empty()
+        self.agg_heap.is_empty() && self.batch_heap.is_empty() && self.preflight_queue.is_empty()
     }
 
     /// Check if the queue is at capacity
@@ -47,6 +89,11 @@ impl Queue {
     /// Get the current queue size (including in-progress requests)
     pub fn size(&self) -> usize {
         self.queued_keys.len()
+    }
+
+    /// Total number of pending items across all three tiers (excludes in-progress).
+    pub fn pending_len(&self) -> usize {
+        self.agg_heap.len() + self.batch_heap.len() + self.preflight_queue.len()
     }
 
     pub fn add_pending(
@@ -60,16 +107,31 @@ impl Queue {
         }
 
         if self.queued_keys.insert(request_key.clone()) {
-            // Check priority and add to appropriate queue using pattern matching
             match &request_key {
-                RequestKey::Aggregation(_) => {
-                    tracing::info!("Adding aggregation request to high priority queue");
-                    self.agg_queue.push_back((request_key, request_entity));
+                // --- Tier 1: Aggregation (min-heap by batch_id / proposal_id) ---
+                RequestKey::Aggregation(_) | RequestKey::ShastaAggregation(_) => {
+                    let sort_key = request_key.batch_sort_key().unwrap_or(u64::MAX);
+                    tracing::info!(sort_key, "Adding aggregation request to high priority heap");
+                    self.agg_heap.push(PriorityItem {
+                        sort_key,
+                        request_key,
+                        request_entity,
+                    });
                 }
-                RequestKey::BatchProof(_) => {
-                    tracing::info!("Adding batch proof request to medium priority queue");
-                    self.batch_queue.push_back((request_key, request_entity));
+                // --- Tier 2: Batch / Shasta proof (min-heap by batch_id / proposal_id) ---
+                RequestKey::BatchProof(_) | RequestKey::ShastaProof(_) => {
+                    let sort_key = request_key.batch_sort_key().unwrap_or(u64::MAX);
+                    tracing::info!(
+                        sort_key,
+                        "Adding batch/shasta proof request to medium priority heap"
+                    );
+                    self.batch_heap.push(PriorityItem {
+                        sort_key,
+                        request_key,
+                        request_entity,
+                    });
                 }
+                // --- Tier 3: Preflight / single-proof / guest-input (FIFO) ---
                 _ => {
                     self.preflight_queue
                         .push_back((request_key, request_entity));
@@ -79,14 +141,28 @@ impl Queue {
         Ok(())
     }
 
-    /// Attempts to move a request from either the high, medium or low priority queue into the in-flight set
-    /// and starts processing it. High priority requests are processed first.
+    /// Attempts to move a request from either the high, medium or low priority queue
+    /// into the in-flight set and starts processing it.
+    ///
+    /// Order: all aggregations (lowest batch_id first) → all batch/shasta proofs
+    /// (lowest batch_id first) → preflight (FIFO).
     pub fn try_next(&mut self) -> Option<(RequestKey, RequestEntity)> {
-        let (request_key, request_entity) = self.agg_queue.pop_front().or_else(|| {
-            self.batch_queue
-                .pop_front()
-                .or_else(|| self.preflight_queue.pop_front())
-        })?;
+        let item = if !self.agg_heap.is_empty() {
+            self.agg_heap.pop()
+        } else if !self.batch_heap.is_empty() {
+            self.batch_heap.pop()
+        } else {
+            return self.preflight_queue.pop_front().map(|(k, e)| {
+                self.working_in_progress.insert(k.clone());
+                (k, e)
+            });
+        };
+
+        let PriorityItem {
+            request_key,
+            request_entity,
+            ..
+        } = item?;
 
         self.working_in_progress.insert(request_key.clone());
         Some((request_key, request_entity))
@@ -105,32 +181,26 @@ mod tests {
     use raiko_core::interfaces::ProverSpecificOpts;
     use raiko_lib::{input::BlobProofType, primitives::B256, proof_type::ProofType, prover::Proof};
     use raiko_reqpool::{
-        AggregationRequestEntity, AggregationRequestKey, SingleProofRequestEntity,
-        SingleProofRequestKey,
+        AggregationRequestEntity, AggregationRequestKey, BatchProofRequestEntity,
+        BatchProofRequestKey, SingleProofRequestEntity, SingleProofRequestKey,
     };
     use std::collections::HashMap;
 
-    /// Helper function to create a test SingleProof request key - low priority
-    fn create_low_priority_request_key(block_number: u64) -> RequestKey {
-        let single_proof_key = SingleProofRequestKey::new(
+    // ── helpers ──────────────────────────────────────────────────────────
+
+    /// SingleProof → preflight tier
+    fn make_single_proof_key(block_number: u64) -> RequestKey {
+        RequestKey::SingleProof(SingleProofRequestKey::new(
             1u64,
             block_number,
             B256::from([1u8; 32]),
             ProofType::Native,
             "test_prover".to_string(),
-        );
-        RequestKey::SingleProof(single_proof_key)
+        ))
     }
 
-    /// Helper function to create a test Aggregation request key - high priority
-    fn create_high_priority_request_key(block_numbers: Vec<u64>) -> RequestKey {
-        let aggregation_key = AggregationRequestKey::new(ProofType::Native, block_numbers);
-        RequestKey::Aggregation(aggregation_key)
-    }
-
-    /// Helper function to create a test SingleProof request entity
-    fn create_single_proof_request_entity(block_number: u64) -> RequestEntity {
-        let single_proof_entity = SingleProofRequestEntity::new(
+    fn make_single_proof_entity(block_number: u64) -> RequestEntity {
+        RequestEntity::SingleProof(SingleProofRequestEntity::new(
             block_number,
             5678u64,
             "ethereum".to_string(),
@@ -140,103 +210,224 @@ mod tests {
             ProofType::Native,
             BlobProofType::ProofOfEquivalence,
             HashMap::new(),
-        );
-        RequestEntity::SingleProof(single_proof_entity)
+        ))
     }
 
-    /// Helper function to create a test Aggregation request entity
-    fn create_aggregation_request_entity(aggregation_ids: Vec<u64>) -> RequestEntity {
-        let aggregation_entity = AggregationRequestEntity::new(
-            aggregation_ids,
+    /// Aggregation → agg tier, sort key = min(block_numbers)
+    fn make_aggregation_key(block_numbers: Vec<u64>) -> RequestKey {
+        RequestKey::Aggregation(AggregationRequestKey::new(ProofType::Native, block_numbers))
+    }
+
+    fn make_aggregation_entity(block_numbers: Vec<u64>) -> RequestEntity {
+        RequestEntity::Aggregation(AggregationRequestEntity::new(
+            block_numbers,
             vec![Proof::default()],
             ProofType::Native,
             ProverSpecificOpts::default(),
-        );
-        RequestEntity::Aggregation(aggregation_entity)
+        ))
     }
 
+    /// ShastaAggregation → agg tier, sort key = min(proposal_ids)
+    fn make_shasta_agg_key(proposal_ids: Vec<u64>) -> RequestKey {
+        RequestKey::ShastaAggregation(AggregationRequestKey::new(ProofType::Native, proposal_ids))
+    }
+
+    fn make_shasta_agg_entity(proposal_ids: Vec<u64>) -> RequestEntity {
+        RequestEntity::ShastaAggregation(AggregationRequestEntity::new(
+            proposal_ids,
+            vec![Proof::default()],
+            ProofType::Native,
+            ProverSpecificOpts::default(),
+        ))
+    }
+
+    /// BatchProof → batch tier, sort key = batch_id
+    fn make_batch_proof_key(batch_id: u64) -> RequestKey {
+        RequestKey::BatchProof(BatchProofRequestKey::new(
+            1u64,
+            batch_id,
+            100u64,
+            ProofType::Native,
+            "prover".to_string(),
+        ))
+    }
+
+    fn make_batch_proof_entity(batch_id: u64) -> RequestEntity {
+        RequestEntity::BatchProof(BatchProofRequestEntity::new(
+            batch_id,
+            100u64,
+            "ethereum".to_string(),
+            "ethereum".to_string(),
+            B256::from([0u8; 32]),
+            Address::ZERO,
+            ProofType::Native,
+            BlobProofType::ProofOfEquivalence,
+            HashMap::new(),
+        ))
+    }
+
+    // ── tests ───────────────────────────────────────────────────────────
+
+    /// Aggregation (high) before preflight (low); within agg tier sorted by
+    /// ascending batch_id (min block_number).
     #[test]
-    fn test_complex_workflow() {
-        let mut queue = Queue::new(10); // Set a max size for testing
+    fn test_tier_priority_and_agg_sorted() {
+        let mut queue = Queue::new(10);
 
-        // Add multiple requests of different priorities
-        let low1 = create_low_priority_request_key(1);
-        let low2 = create_low_priority_request_key(2);
-        let high1 = create_high_priority_request_key(vec![100]);
-        let high2 = create_high_priority_request_key(vec![200]);
+        let low1 = make_single_proof_key(1);
+        let low2 = make_single_proof_key(2);
+        let high1 = make_aggregation_key(vec![100]); // sort key 100
+        let high2 = make_aggregation_key(vec![200]); // sort key 200
 
-        let low1_entity = create_single_proof_request_entity(1);
-        let low2_entity = create_single_proof_request_entity(2);
-        let high1_entity = create_aggregation_request_entity(vec![100]);
-        let high2_entity = create_aggregation_request_entity(vec![200]);
+        // Insert out of order: low, high(200), low, high(100)
+        queue
+            .add_pending(low1.clone(), make_single_proof_entity(1))
+            .unwrap();
+        queue
+            .add_pending(high2.clone(), make_aggregation_entity(vec![200]))
+            .unwrap();
+        queue
+            .add_pending(low2.clone(), make_single_proof_entity(2))
+            .unwrap();
+        queue
+            .add_pending(high1.clone(), make_aggregation_entity(vec![100]))
+            .unwrap();
 
-        queue.add_pending(low1.clone(), low1_entity).unwrap();
-        queue.add_pending(high1.clone(), high1_entity).unwrap();
-        queue.add_pending(low2.clone(), low2_entity).unwrap();
-        queue.add_pending(high2.clone(), high2_entity).unwrap();
-
-        // Verify all requests are in queue
         assert_eq!(queue.queued_keys.len(), 4);
-        assert_eq!(queue.agg_queue.len(), 2);
-        assert_eq!(queue.preflight_queue.len(), 2);
+        assert_eq!(queue.pending_len(), 4);
 
-        // Process in priority order
-        let (key, _) = queue.try_next().unwrap();
-        assert_eq!(key, high1);
+        // Tier 1 first, sorted ascending by batch_id (100 < 200)
+        assert_eq!(queue.try_next().unwrap().0, high1);
+        assert_eq!(queue.try_next().unwrap().0, high2);
+        // Tier 3 (preflight) FIFO
+        assert_eq!(queue.try_next().unwrap().0, low1);
 
-        let (key, _) = queue.try_next().unwrap();
-        assert_eq!(key, high2);
+        // Complete some
+        queue.complete(high1);
+        assert_eq!(queue.working_in_progress.len(), 2);
 
-        let (key, _) = queue.try_next().unwrap();
-        assert_eq!(key, low1);
+        assert_eq!(queue.try_next().unwrap().0, low2);
 
-        // Complete one request
-        queue.complete(high1.clone());
-        assert!(!queue.contains(&high1));
-        assert_eq!(queue.working_in_progress.len(), 2); // high2 and low1 still working
-
-        // Get the last request
-        let (key, _) = queue.try_next().unwrap();
-        assert_eq!(key, low2);
-
-        // Complete remaining requests
         queue.complete(high2);
         queue.complete(low1);
         queue.complete(low2);
 
-        // Queue should be completely empty after all requests are completed
         assert_eq!(queue.queued_keys.len(), 0);
         assert_eq!(queue.working_in_progress.len(), 0);
-        assert_eq!(queue.agg_queue.len(), 0);
-        assert_eq!(queue.preflight_queue.len(), 0);
+        assert!(queue.is_empty());
+    }
+
+    /// Full 3-tier ordering:
+    ///   agg (batch_id 1) → agg (batch_id 2) → batch proof (batch_id 1) →
+    ///   batch proof (batch_id 2) → preflight
+    #[test]
+    fn test_batch_id_ordering_across_tiers() {
+        let mut queue = Queue::new(20);
+
+        let preflight = make_single_proof_key(42);
+        let batch2 = make_batch_proof_key(2);
+        let batch1 = make_batch_proof_key(1);
+        let agg2 = make_aggregation_key(vec![2]);
+        let agg1 = make_aggregation_key(vec![1]);
+
+        // Insert in completely scrambled order
+        queue
+            .add_pending(preflight.clone(), make_single_proof_entity(42))
+            .unwrap();
+        queue
+            .add_pending(batch2.clone(), make_batch_proof_entity(2))
+            .unwrap();
+        queue
+            .add_pending(agg2.clone(), make_aggregation_entity(vec![2]))
+            .unwrap();
+        queue
+            .add_pending(batch1.clone(), make_batch_proof_entity(1))
+            .unwrap();
+        queue
+            .add_pending(agg1.clone(), make_aggregation_entity(vec![1]))
+            .unwrap();
+
+        assert_eq!(queue.pending_len(), 5);
+
+        // Expect: agg1, agg2, batch1, batch2, preflight
+        assert_eq!(queue.try_next().unwrap().0, agg1);
+        assert_eq!(queue.try_next().unwrap().0, agg2);
+        assert_eq!(queue.try_next().unwrap().0, batch1);
+        assert_eq!(queue.try_next().unwrap().0, batch2);
+        assert_eq!(queue.try_next().unwrap().0, preflight);
+        assert!(queue.try_next().is_none());
+    }
+
+    /// ShastaAggregation and ShastaProof (via BatchProof key) are routed to
+    /// the correct tiers instead of falling to preflight.
+    #[test]
+    fn test_shasta_variants_routed_correctly() {
+        let mut queue = Queue::new(20);
+
+        let preflight = make_single_proof_key(1);
+        let shasta_agg = make_shasta_agg_key(vec![10]);
+        let batch_proof = make_batch_proof_key(5);
+
+        queue
+            .add_pending(preflight.clone(), make_single_proof_entity(1))
+            .unwrap();
+        queue
+            .add_pending(batch_proof.clone(), make_batch_proof_entity(5))
+            .unwrap();
+        queue
+            .add_pending(shasta_agg.clone(), make_shasta_agg_entity(vec![10]))
+            .unwrap();
+
+        // ShastaAgg → agg tier (first), BatchProof → batch tier (second), preflight last
+        assert_eq!(queue.try_next().unwrap().0, shasta_agg);
+        assert_eq!(queue.try_next().unwrap().0, batch_proof);
+        assert_eq!(queue.try_next().unwrap().0, preflight);
+    }
+
+    /// Agg and ShastaAgg in the same tier, sorted together by batch_id.
+    #[test]
+    fn test_mixed_agg_and_shasta_agg_sorted() {
+        let mut queue = Queue::new(20);
+
+        let agg5 = make_aggregation_key(vec![5]);
+        let shasta_agg3 = make_shasta_agg_key(vec![3]);
+        let shasta_agg7 = make_shasta_agg_key(vec![7]);
+
+        queue
+            .add_pending(shasta_agg7.clone(), make_shasta_agg_entity(vec![7]))
+            .unwrap();
+        queue
+            .add_pending(agg5.clone(), make_aggregation_entity(vec![5]))
+            .unwrap();
+        queue
+            .add_pending(shasta_agg3.clone(), make_shasta_agg_entity(vec![3]))
+            .unwrap();
+
+        // Sorted ascending: 3, 5, 7
+        assert_eq!(queue.try_next().unwrap().0, shasta_agg3);
+        assert_eq!(queue.try_next().unwrap().0, agg5);
+        assert_eq!(queue.try_next().unwrap().0, shasta_agg7);
     }
 
     #[test]
     fn test_queue_limit() {
-        let mut queue = Queue::new(2); // Small limit for testing
+        let mut queue = Queue::new(2);
 
-        // Add requests until capacity is reached
         for i in 0..2 {
-            let request_key = create_low_priority_request_key(i as u64);
-            let request_entity = create_single_proof_request_entity(i as u64);
-            assert!(queue.add_pending(request_key, request_entity).is_ok());
+            let key = make_single_proof_key(i as u64);
+            let entity = make_single_proof_entity(i as u64);
+            assert!(queue.add_pending(key, entity).is_ok());
         }
 
-        // Verify queue is at capacity
         assert_eq!(queue.size(), 2);
         assert!(queue.is_at_capacity());
 
-        // Try to add one more request - should fail
-        let overflow_request_key = create_low_priority_request_key(3);
-        let overflow_request_entity = create_single_proof_request_entity(3);
-        let result = queue.add_pending(overflow_request_key, overflow_request_entity);
+        let result = queue.add_pending(make_single_proof_key(3), make_single_proof_entity(3));
         assert!(result.is_err());
         assert_eq!(
             result.unwrap_err(),
             "Reached the maximum queue size, please try again later"
         );
-
-        // Verify queue size didn't change
         assert_eq!(queue.size(), 2);
     }
 }

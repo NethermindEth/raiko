@@ -64,9 +64,7 @@ impl Status {
     }
 }
 
-#[derive(
-    PartialEq, Debug, Clone, Deserialize, Serialize, Eq, RedisValue, Getters,
-)]
+#[derive(PartialEq, Debug, Clone, Deserialize, Serialize, Eq, RedisValue, Getters)]
 /// The status of a request with context
 pub struct StatusWithContext {
     /// The status of the request
@@ -526,6 +524,20 @@ impl RequestKey {
             RequestKey::ShastaGuestInput(_) => None, // ShastaGuestInput doesn't have image_id
             RequestKey::ShastaProof(key) => key.image_id.as_ref(),
             RequestKey::ShastaAggregation(key) => key.image_id.as_ref(),
+        }
+    }
+
+    /// Returns the batch_id / proposal_id used for queue priority ordering.
+    /// Lower values are dequeued first within each priority tier.
+    /// Returns `None` for requests that don't carry a batch/proposal concept
+    /// (they go to the preflight queue instead).
+    pub fn batch_sort_key(&self) -> Option<u64> {
+        match self {
+            RequestKey::Aggregation(key) => key.block_numbers().iter().min().copied(),
+            RequestKey::ShastaAggregation(key) => key.block_numbers().iter().min().copied(),
+            RequestKey::BatchProof(key) => Some(*key.guest_input_key().batch_id()),
+            RequestKey::ShastaProof(key) => Some(*key.guest_input_key().proposal_id()),
+            _ => None,
         }
     }
 }
