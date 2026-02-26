@@ -794,7 +794,7 @@ pub async fn collect_l1_storage_proofs(
     ]);
 
     // Method 1: Detect direct calls by scanning transactions
-    info!("Scanning transactions for direct L1SLOAD calls...");
+    info!("[jmadibekov] Scanning transactions for direct L1SLOAD calls...");
     for tx in &block.body.transactions {
         if let Some(to_address) = tx.to() {
             // L1SLOAD input format (84 bytes):
@@ -836,7 +836,7 @@ pub async fn collect_l1_storage_proofs(
         }
     }
 
-    info!("Total L1SLOAD calls detected: {}", detected_calls.len());
+    info!("[jmadibekov] Total L1SLOAD calls detected: {}", detected_calls.len());
 
     if detected_calls.is_empty() {
         return Ok(L1StorageProofCollection {
@@ -903,7 +903,7 @@ pub async fn collect_l1_storage_proofs(
         }
     }
 
-    info!("Collected {} L1 storage proofs", proofs.len());
+    info!("[jmadibekov] Collected {} L1 storage proofs", proofs.len());
 
     // Fetch L1 ancestor headers if any proof requests a non-anchor block
     let min_requested_block = calls_by_block

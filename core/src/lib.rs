@@ -148,7 +148,7 @@ impl Raiko {
             let anchor_state_root = input.taiko.l1_header.state_root;
             let anchor_block_number = input.taiko.l1_header.number;
             info!(
-                "get_output: Verifying and populating L1SLOAD proofs with {} proofs, \
+                "[jmadibekov] get_output: Verifying and populating L1SLOAD proofs with {} proofs, \
                  anchor block={}, {} L1 ancestor headers",
                 input.l1_storage_proofs.len(),
                 anchor_block_number,
@@ -248,7 +248,7 @@ impl Raiko {
             let anchor_state_root = input.taiko.l1_header.state_root;
             let anchor_block_number = input.taiko.l1_header.number;
             info!(
-                "single_output_for_batch: Verifying and populating L1SLOAD proofs with {} proofs, \
+                "[jmadibekov] single_output_for_batch: Verifying and populating L1SLOAD proofs with {} proofs, \
                  anchor block={}, {} L1 ancestor headers",
                 input.l1_storage_proofs.len(),
                 anchor_block_number,

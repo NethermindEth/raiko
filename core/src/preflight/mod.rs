@@ -170,7 +170,7 @@ pub async fn preflight<BDP: BlockDataProvider>(
         populate_l1sload_cache(&l1_storage_proofs, anchor_block_id);
     }
 
-    info!("preflight: L1 data collection done");
+    info!("[jmadibekov] preflight: L1 data collection done");
 
     // Create the guest input
     let input = GuestInput {

@@ -113,7 +113,7 @@ pub fn populate_l1sload_cache(l1_storage_proofs: &[L1StorageProof], anchor_block
 
     // Set anchor block ID for the precompile's range check
     set_anchor_block_id(anchor_block_number);
-    info!("Set anchor block ID for L1SLOAD: {}", anchor_block_number);
+    info!("[jmadibekov] Set anchor block ID for L1SLOAD: {}", anchor_block_number);
 
     for proof in l1_storage_proofs {
         // Use the B256 block_number directly from the proof
