@@ -697,7 +697,7 @@ impl Prover for Sp1Prover {
             .get_or_init(|| vk_hash_hex(BATCH_ELF))
             .await;
         let shasta = SHASTA_AGGREGATION_PROGRAM_HASH
-            .get_or_init(|| vk_hash_hex(SHASTA_AGG_ELF))
+            .get_or_init(|| vk_bytes32(SHASTA_AGG_ELF))
             .await;
         Ok(json!({
             "sp1": {
