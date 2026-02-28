@@ -40,6 +40,17 @@ use reth_primitives::serde_bincode_compat::Block as BincodeCompactBlock;
 /// required values.
 pub type StorageEntry = (MptNode, Vec<U256>);
 
+/// L1 storage proof for L1SLOAD precompile calls
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct L1StorageProof {
+    pub contract_address: Address,
+    pub storage_key: B256,
+    pub block_number: B256,
+    pub value: B256,
+    pub account_proof: Vec<Bytes>,
+    pub storage_proof: Vec<Bytes>,
+}
+
 /// External block input.
 #[serde_as]
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
@@ -63,6 +74,22 @@ pub struct GuestInput {
     pub ancestor_headers: Vec<Header>,
     /// Taiko specific data
     pub taiko: TaikoGuestInput,
+    /// L1 storage proofs for L1SLOAD precompile calls
+    #[serde(default)]
+    pub l1_storage_proofs: Vec<L1StorageProof>,
+    /// L1 ancestor block headers for verifying L1SLOAD at non-anchor blocks.
+    ///
+    /// When L1SLOAD calls request state from an L1 block older than the anchor block,
+    /// we need a chain of L1 headers from the requested block up to the anchor block.
+    /// The prover verifies the parent_hash linkage from the anchor block backwards to
+    /// obtain a trusted state_root for each requested block.
+    ///
+    /// Ordered from oldest (requested block) to newest (anchor block - 1).
+    /// The anchor block header itself is available via `taiko.l1_header`.
+    /// At most 256 headers (matching L1SLOAD_MAX_BLOCK_LOOKBACK).
+    #[serde_as(as = "Vec<BincodeCompactHeader>")]
+    #[serde(default)]
+    pub l1_ancestor_headers: Vec<Header>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
@@ -529,6 +556,8 @@ mod test {
             contracts: vec![],
             ancestor_headers: vec![],
             taiko: TaikoGuestInput::default(),
+            l1_storage_proofs: vec![],
+            l1_ancestor_headers: vec![],
         };
         let input_ser = serde_json::to_string(&input).unwrap();
         let input_de: GuestInput = serde_json::from_str(&input_ser).unwrap();
@@ -546,6 +575,8 @@ mod test {
             contracts: vec![],
             ancestor_headers: vec![],
             taiko: TaikoGuestInput::default(),
+            l1_storage_proofs: vec![],
+            l1_ancestor_headers: vec![],
         };
         let input_ser = serde_json::to_value(&input).unwrap();
         let input_de: GuestInput = serde_json::from_value(input_ser).unwrap();

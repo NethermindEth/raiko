@@ -15,6 +15,7 @@ use raiko_lib::{
         BlobProofType, BlockProposedFork, GuestBatchInput, GuestInput, TaikoGuestInput,
         TaikoProverData,
     },
+    l1_precompiles::{clear_l1sload_cache, populate_l1sload_cache},
     primitives::mpt::proofs_to_tries,
     proof_type::ProofType,
     utils::txs::{generate_transactions, generate_transactions_for_batch_blocks},
@@ -23,12 +24,13 @@ use raiko_lib::{
 use tracing::{debug, info};
 
 use util::{
-    execute_txs, get_batch_blocks_and_parent_data, get_block_and_parent_data,
-    prepare_taiko_chain_batch_input, prepare_taiko_chain_input,
+    collect_l1_storage_proofs, execute_txs, get_batch_blocks_and_parent_data,
+    get_block_and_parent_data, prepare_taiko_chain_batch_input, prepare_taiko_chain_input,
 };
 
 pub use util::{
-    parse_l1_batch_proposal_tx_for_pacaya_fork, parse_l1_batch_proposal_tx_for_shasta_fork,
+    get_anchor_tx_info_by_fork, parse_l1_batch_proposal_tx_for_pacaya_fork,
+    parse_l1_batch_proposal_tx_for_shasta_fork,
 };
 
 #[cfg(feature = "statedb_lru")]
@@ -124,12 +126,52 @@ pub async fn preflight<BDP: BlockDataProvider>(
 
     info!("preflight: parent header done");
 
+    // Clear L1SLOAD cache before collecting L1 storage proofs
+    clear_l1sload_cache();
+
+    // Collect L1 storage proofs with anchor block validation.
+    let (l1_storage_proofs, l1_ancestor_headers, anchor_block_id) = if taiko_chain_spec.is_taiko() {
+        let l1_provider = RpcBlockDataProvider::new(&l1_chain_spec.rpc).await?;
+
+        // Extract anchor info from TaikoGuestInput
+        let anchor_tx = taiko_guest_input
+            .anchor_tx
+            .as_ref()
+            .ok_or_else(|| RaikoError::Preflight("No anchor tx available".to_owned()))?;
+        let fork = taiko_chain_spec.active_fork(block_number, block.timestamp)?;
+        let (anchor_block_id, _anchor_state_root) = get_anchor_tx_info_by_fork(fork, anchor_tx)?;
+
+        let collection = collect_l1_storage_proofs(
+            &block,
+            &l1_provider,
+            anchor_block_id,
+        )
+        .await?;
+
+        (
+            collection.proofs,
+            collection.l1_ancestor_headers,
+            anchor_block_id,
+        )
+    } else {
+        (Vec::new(), Vec::new(), 0u64)
+    };
+
+    // Populate L1SLOAD cache with storage values before EVM execution
+    if !l1_storage_proofs.is_empty() {
+        populate_l1sload_cache(&l1_storage_proofs, anchor_block_id);
+    }
+
+    info!("[jmadibekov] preflight: L1 data collection done");
+
     // Create the guest input
     let input = GuestInput {
         block: block.clone(),
         parent_header,
         chain_spec: taiko_chain_spec.clone(),
         taiko: taiko_guest_input,
+        l1_storage_proofs,
+        l1_ancestor_headers,
         ..Default::default()
     };
 
@@ -346,6 +388,9 @@ pub async fn batch_preflight<BDP: BlockDataProvider>(
         .zip(pool_txs_list.iter().cloned())
         .collect();
 
+    // Create L1 provider once and share across all chunks (PR #14)
+    let shared_l1_provider = RpcBlockDataProvider::new(&l1_chain_spec.rpc).await?;
+
     for task_batch in tasks.chunks(chunk_size) {
         let task_batch_vec = task_batch.to_vec();
         let taiko_guest_batch_input = taiko_guest_batch_input.clone();
@@ -361,8 +406,10 @@ pub async fn batch_preflight<BDP: BlockDataProvider>(
         let mut grandparent_timestamp =
             get_grandparent_timestamp(&provider, first_block_number_in_batch).await?;
 
+        let l1_provider = shared_l1_provider.clone();
         let handle = tokio::spawn(async move {
             let mut chunk_guest_input = Vec::new();
+
             for ((prove_block, parent_block), txs_with_force_inc_flag) in task_batch_vec {
                 let taiko_chain_spec = taiko_chain_spec.clone();
                 let taiko_guest_batch_input = taiko_guest_batch_input.clone();
@@ -398,12 +445,47 @@ pub async fn batch_preflight<BDP: BlockDataProvider>(
                 // Current block's parent becomes next block's grandparent
                 grandparent_timestamp = Some(parent_header.timestamp);
 
+                // Clear L1SLOAD cache before collecting L1 storage proofs
+                clear_l1sload_cache();
+
+                // Collect L1 storage proofs for this specific block's anchor
+                let (l1_storage_proofs, l1_ancestor_headers, anchor_block_id) =
+                    if taiko_chain_spec.is_taiko() {
+                        // Extract anchor info for this specific block
+                        let fork = taiko_chain_spec
+                            .active_fork(prove_block.header.number, prove_block.timestamp)?;
+                        let (anchor_block_id, _anchor_state_root) =
+                            get_anchor_tx_info_by_fork(fork, &anchor_tx)?;
+
+                        let collection = collect_l1_storage_proofs(
+                            &prove_block,
+                            &l1_provider,
+                            anchor_block_id,
+                        )
+                        .await?;
+
+                        (
+                            collection.proofs,
+                            collection.l1_ancestor_headers,
+                            anchor_block_id,
+                        )
+                    } else {
+                        (Vec::new(), Vec::new(), 0u64)
+                    };
+
+                // Populate L1SLOAD cache with storage values before EVM execution
+                if !l1_storage_proofs.is_empty() {
+                    populate_l1sload_cache(&l1_storage_proofs, anchor_block_id);
+                }
+
                 // Create the guest input
                 let input = GuestInput {
                     block: prove_block.clone(),
                     parent_header,
                     chain_spec: taiko_chain_spec.clone(),
                     taiko: taiko_input.clone(),
+                    l1_storage_proofs,
+                    l1_ancestor_headers,
                     ..Default::default()
                 };
 

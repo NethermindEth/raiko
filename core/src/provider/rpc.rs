@@ -36,6 +36,111 @@ impl RpcBlockDataProvider {
         &self.provider
     }
 
+    /// Helper function to fetch storage proofs with batching
+    async fn fetch_storage_proofs_internal(
+        &self,
+        block_number: u64,
+        accounts: HashMap<Address, Vec<U256>>,
+        offset: usize,
+        num_storage_proofs: usize,
+    ) -> RaikoResult<MerkleProof> {
+        let mut storage_proofs: MerkleProof = HashMap::new();
+        let mut idx = offset;
+
+        let mut accounts = accounts.clone();
+
+        let batch_limit = 1000;
+        while !accounts.is_empty() {
+            if cfg!(debug_assertions) {
+                raiko_lib::inplace_print(&format!(
+                    "fetching storage proof {idx}/{num_storage_proofs}..."
+                ));
+            } else {
+                trace!("Fetching storage proof {idx}/{num_storage_proofs}...");
+            }
+
+            // Create a batch for all storage proofs
+            let mut batch = self.client.new_batch();
+
+            // Collect all requests
+            let mut requests = Vec::new();
+
+            let mut batch_size = 0;
+            while !accounts.is_empty() && batch_size < batch_limit {
+                let mut address_to_remove = None;
+
+                if let Some((address, keys)) = accounts.iter_mut().next() {
+                    // Calculate how many keys we can still process
+                    let num_keys_to_process = if batch_size + keys.len() < batch_limit {
+                        keys.len()
+                    } else {
+                        batch_limit - batch_size
+                    };
+
+                    // If we can process all keys, remove the address from the map after the loop
+                    if num_keys_to_process == keys.len() {
+                        address_to_remove = Some(*address);
+                    }
+
+                    // Extract the keys to process
+                    let keys_to_process = keys
+                        .drain(0..num_keys_to_process)
+                        .map(StorageKey::from)
+                        .collect::<Vec<_>>();
+
+                    // Add the request
+                    requests.push(Box::pin(
+                        batch
+                            .add_call::<_, EIP1186AccountProofResponse>(
+                                "eth_getProof",
+                                &(
+                                    *address,
+                                    keys_to_process.clone(),
+                                    BlockId::from(block_number),
+                                ),
+                            )
+                            .map_err(|_| {
+                                RaikoError::RPC(
+                                    "Failed adding eth_getProof call to batch".to_owned(),
+                                )
+                            })?,
+                    ));
+
+                    // Keep track of how many keys were processed
+                    // Add an additional 1 for the account proof itself
+                    batch_size += 1 + keys_to_process.len();
+                }
+
+                // Remove the address if all keys were processed for this account
+                if let Some(address) = address_to_remove {
+                    accounts.remove(&address);
+                }
+            }
+
+            // Send the batch
+            batch
+                .send()
+                .await
+                .map_err(|e| RaikoError::RPC(format!("Error sending batch request {e}")))?;
+
+            // Collect the data from the batch
+            for request in requests {
+                let mut proof = request
+                    .await
+                    .map_err(|e| RaikoError::RPC(format!("Error collecting request data: {e}")))?;
+                idx += proof.storage_proof.len();
+                if let Some(map_proof) = storage_proofs.get_mut(&proof.address) {
+                    map_proof.storage_proof.append(&mut proof.storage_proof);
+                } else {
+                    storage_proofs.insert(proof.address, proof);
+                }
+            }
+        }
+        clear_line();
+
+        Ok(storage_proofs)
+    }
+
     async fn construct_and_send_batch(
         &self,
         blocks_to_fetch: &[(u64, bool)],
@@ -247,101 +352,17 @@ impl BlockDataProvider for RpcBlockDataProvider {
         offset: usize,
         num_storage_proofs: usize,
     ) -> RaikoResult<MerkleProof> {
-        let mut storage_proofs: MerkleProof = HashMap::new();
-        let mut idx = offset;
+        self.fetch_storage_proofs_internal(block_number, accounts, offset, num_storage_proofs)
+            .await
+    }
 
-        let mut accounts = accounts.clone();
-
-        let batch_limit = 1000;
-        while !accounts.is_empty() {
-            if cfg!(debug_assertions) {
-                raiko_lib::inplace_print(&format!(
-                    "fetching storage proof {idx}/{num_storage_proofs}..."
-                ));
-            } else {
-                trace!("Fetching storage proof {idx}/{num_storage_proofs}...");
-            }
-
-            // Create a batch for all storage proofs
-            let mut batch = self.client.new_batch();
-
-            // Collect all requests
-            let mut requests = Vec::new();
-
-            let mut batch_size = 0;
-            while !accounts.is_empty() && batch_size < batch_limit {
-                let mut address_to_remove = None;
-
-                if let Some((address, keys)) = accounts.iter_mut().next() {
-                    // Calculate how many keys we can still process
-                    let num_keys_to_process = if batch_size + keys.len() < batch_limit {
-                        keys.len()
-                    } else {
-                        batch_limit - batch_size
-                    };
-
-                    // If we can process all keys, remove the address from the map after the loop
-                    if num_keys_to_process == keys.len() {
-                        address_to_remove = Some(*address);
-                    }
-
-                    // Extract the keys to process
-                    let keys_to_process = keys
-                        .drain(0..num_keys_to_process)
-                        .map(StorageKey::from)
-                        .collect::<Vec<_>>();
-
-                    // Add the request
-                    requests.push(Box::pin(
-                        batch
-                            .add_call::<_, EIP1186AccountProofResponse>(
-                                "eth_getProof",
-                                &(
-                                    *address,
-                                    keys_to_process.clone(),
-                                    BlockId::from(block_number),
-                                ),
-                            )
-                            .map_err(|_| {
-                                RaikoError::RPC(
-                                    "Failed adding eth_getProof call to batch".to_owned(),
-                                )
-                            })?,
-                    ));
-
-                    // Keep track of how many keys were processed
-                    // Add an additional 1 for the account proof itself
-                    batch_size += 1 + keys_to_process.len();
-                }
-
-                // Remove the address if all keys were processed for this account
-                if let Some(address) = address_to_remove {
-                    accounts.remove(&address);
-                }
-            }
-
-            // Send the batch
-            batch
-                .send()
-                .await
-                .map_err(|e| RaikoError::RPC(format!("Error sending batch request {e}")))?;
-
-            // Collect the data from the batch
-            for request in requests {
-                let mut proof = request
-                    .await
-                    .map_err(|e| RaikoError::RPC(format!("Error collecting request data: {e}")))?;
-                idx += proof.storage_proof.len();
-                if let Some(map_proof) = storage_proofs.get_mut(&proof.address) {
-                    map_proof.storage_proof.append(&mut proof.storage_proof);
-                } else {
-                    storage_proofs.insert(proof.address, proof);
-                }
-            }
-        }
-        clear_line();
-
-        Ok(storage_proofs)
+    async fn get_l1_storage_proofs(
+        &self,
+        l1_block_number: u64,
+        storage_requests: HashMap<Address, Vec<U256>>,
+    ) -> RaikoResult<MerkleProof> {
+        self.fetch_storage_proofs_internal(l1_block_number, storage_requests, 0, 0)
+            .await
     }
 }
 

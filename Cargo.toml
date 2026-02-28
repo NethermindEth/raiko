@@ -71,13 +71,13 @@ reth-revm = { git = "https://github.com/paradigmxyz/reth.git", tag = "v1.11.0", 
 reth-provider = { git = "https://github.com/paradigmxyz/reth.git", tag = "v1.11.0", default-features = false }
 reth-storage-api = { git = "https://github.com/paradigmxyz/reth.git", tag = "v1.11.0", default-features = false }
 
-alethia-reth-block = { git = "https://github.com/NethermindEth/alethia-reth.git", branch = "main", default-features = false }
-alethia-reth-chainspec = { git = "https://github.com/NethermindEth/alethia-reth.git", branch = "main", default-features = false }
-alethia-reth-consensus = { git = "https://github.com/NethermindEth/alethia-reth.git", branch = "main", default-features = false }
-alethia-reth-evm = { git = "https://github.com/NethermindEth/alethia-reth.git", branch = "main", default-features = false, features = [
+alethia-reth-block = { git = "https://github.com/NethermindEth/alethia-reth.git", branch = "feat/l1sload-precompile-nmc", default-features = false }
+alethia-reth-chainspec = { git = "https://github.com/NethermindEth/alethia-reth.git", branch = "feat/l1sload-precompile-nmc", default-features = false }
+alethia-reth-consensus = { git = "https://github.com/NethermindEth/alethia-reth.git", branch = "feat/l1sload-precompile-nmc", default-features = false }
+alethia-reth-evm = { git = "https://github.com/NethermindEth/alethia-reth.git", branch = "feat/l1sload-precompile-nmc", default-features = false, features = [
     "serde",
 ] }
-alethia-reth-primitives = { git = "https://github.com/NethermindEth/alethia-reth.git", branch = "main", default-features = false, features = [
+alethia-reth-primitives = { git = "https://github.com/NethermindEth/alethia-reth.git", branch = "feat/l1sload-precompile-nmc", default-features = false, features = [
     "serde-bincode-compat",
 ] }
 
@@ -142,6 +142,7 @@ alloy-transport-http = { version = "1.0.18", default-features = false, features 
 ] }
 alloy-signer = { version = "1.0.18", default-features = false }
 alloy-signer-local = { version = "1.0.18", default-features = false }
+alloy-trie = { version = "0.9.1", default-features = false }
 
 # ethers (TODO: remove)
 ethers-contract = { git = "https://github.com/smtmfft/ethers-rs", branch = "ethers-core-2.0.10" }

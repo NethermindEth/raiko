@@ -11,6 +11,7 @@ use crate::{
     consts::MAX_BLOCK_HASH_AGE,
     guest_mem_forget,
     input::{GuestBatchInput, GuestInput},
+    l1_precompiles::populate_l1sload_cache,
     mem_db::{AccountState, DbAccount, MemDb},
     CycleTracker,
 };
@@ -254,6 +255,11 @@ pub fn calculate_block_header(input: &GuestInput) -> Header {
     let db = create_mem_db(&mut input.clone()).unwrap();
     cycle_tracker.end();
 
+    if !input.l1_storage_proofs.is_empty() {
+        let anchor_block_number = input.taiko.l1_header.number;
+        populate_l1sload_cache(&input.l1_storage_proofs, anchor_block_number);
+    }
+
     let mut builder = RethBlockBuilder::new(input, db);
     let pool_tx = generate_transactions(
         &input.chain_spec,
@@ -279,6 +285,11 @@ pub fn calculate_batch_blocks_final_header(input: &GuestBatchInput) -> Vec<Taiko
     let pool_txs_list = generate_transactions_for_batch_blocks(&input);
     let mut final_blocks = Vec::new();
     for (i, pool_txs) in pool_txs_list.iter().enumerate() {
+        if !input.inputs[i].l1_storage_proofs.is_empty() {
+            let anchor_block_number = input.inputs[i].taiko.l1_header.number;
+            populate_l1sload_cache(&input.inputs[i].l1_storage_proofs, anchor_block_number);
+        }
+
         let mut builder = RethBlockBuilder::new(
             &input.inputs[i],
             create_mem_db(&mut input.inputs[i].clone()).unwrap(),
