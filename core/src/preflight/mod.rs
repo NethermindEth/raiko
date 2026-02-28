@@ -170,6 +170,7 @@ pub async fn preflight<BDP: BlockDataProvider>(
         parent_header,
         chain_spec: taiko_chain_spec.clone(),
         taiko: taiko_guest_input,
+        l1_storage_proofs,
         l1_ancestor_headers,
         ..Default::default()
     };
@@ -387,6 +388,9 @@ pub async fn batch_preflight<BDP: BlockDataProvider>(
         .zip(pool_txs_list.iter().cloned())
         .collect();
 
+    // Create L1 provider once and share across all chunks (PR #14)
+    let shared_l1_provider = RpcBlockDataProvider::new(&l1_chain_spec.rpc).await?;
+
     for task_batch in tasks.chunks(chunk_size) {
         let task_batch_vec = task_batch.to_vec();
         let taiko_guest_batch_input = taiko_guest_batch_input.clone();
@@ -402,10 +406,9 @@ pub async fn batch_preflight<BDP: BlockDataProvider>(
         let mut grandparent_timestamp =
             get_grandparent_timestamp(&provider, first_block_number_in_batch).await?;
 
-        let l1_chain_spec = l1_chain_spec.clone();
+        let l1_provider = shared_l1_provider.clone();
         let handle = tokio::spawn(async move {
             let mut chunk_guest_input = Vec::new();
-            let l1_provider = RpcBlockDataProvider::new(&l1_chain_spec.rpc).await?;
 
             for ((prove_block, parent_block), txs_with_force_inc_flag) in task_batch_vec {
                 let taiko_chain_spec = taiko_chain_spec.clone();

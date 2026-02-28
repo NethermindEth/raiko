@@ -863,42 +863,58 @@ pub async fn collect_l1_storage_proofs(
         calls_by_block.keys().collect::<Vec<_>>()
     );
 
-    // Collect storage proofs for each block number
+    // Collect storage proofs for each block number, batching keys per address (PR #10).
+    // This reduces RPC calls from one-per-key to one-per-block-number.
     for (block_number_u64, calls) in &calls_by_block {
-        for (contract_address, storage_key, block_number_b256) in calls {
+        // Group storage keys by contract address for batched RPC calls
+        let mut keys_by_address: HashMap<Address, Vec<(B256, U256)>> = HashMap::new();
+        for (contract_address, storage_key, _block_number_b256) in calls {
             let storage_key_u256 = U256::from_be_bytes((*storage_key).into());
-            let proof_response = l1_provider
-                .get_l1_storage_proofs(
-                    *block_number_u64,
-                    HashMap::from([(*contract_address, vec![storage_key_u256])]),
-                )
-                .await?;
+            keys_by_address
+                .entry(*contract_address)
+                .or_default()
+                .push((*storage_key, storage_key_u256));
+        }
 
-            // Find the proof for this specific contract
-            if let Some(proof) = proof_response.get(contract_address) {
-                // Ensure we have storage proof array
-                if proof.storage_proof.is_empty() {
-                    return Err(RaikoError::Preflight(format!(
-                        "No storage proof returned for L1SLOAD: contract={:?}, key={:?}, block={}",
-                        contract_address, storage_key, block_number_u64
-                    )));
-                }
+        // Build the batched request: address → vec of U256 keys
+        let batch_request: HashMap<Address, Vec<U256>> = keys_by_address
+            .iter()
+            .map(|(addr, keys)| (*addr, keys.iter().map(|(_, u256)| *u256).collect()))
+            .collect();
 
-                // Note: account_proof and storage_proof[0].proof can be empty for non-existent
-                // accounts/storage. This is valid and proves non-existence (returns zero).
-                // The MPT proof verification will handle these cases.
-                proofs.push(L1StorageProof {
-                    contract_address: *contract_address,
-                    storage_key: *storage_key,
-                    block_number: *block_number_b256,
-                    value: B256::from(proof.storage_proof[0].value),
-                    account_proof: proof.account_proof.iter().map(|p| p.clone()).collect(),
-                    storage_proof: proof.storage_proof[0]
-                        .proof
+        let proof_response = l1_provider
+            .get_l1_storage_proofs(*block_number_u64, batch_request)
+            .await?;
+
+        // Extract individual proofs from the batched response
+        for (contract_address, keys) in &keys_by_address {
+            if let Some(account_proof_response) = proof_response.get(contract_address) {
+                for (i, (storage_key_b256, _storage_key_u256)) in keys.iter().enumerate() {
+                    if i >= account_proof_response.storage_proof.len() {
+                        return Err(RaikoError::Preflight(format!(
+                            "Missing storage proof for L1SLOAD: contract={:?}, key={:?}, block={}",
+                            contract_address, storage_key_b256, block_number_u64
+                        )));
+                    }
+
+                    // Find the B256 block number for this call
+                    let block_number_b256 = calls
                         .iter()
-                        .map(|p| p.clone())
-                        .collect(),
-                });
+                        .find(|(addr, key, _)| addr == contract_address && key == storage_key_b256)
+                        .map(|(_, _, bn)| *bn)
+                        .unwrap();
+
+                    proofs.push(L1StorageProof {
+                        contract_address: *contract_address,
+                        storage_key: *storage_key_b256,
+                        block_number: block_number_b256,
+                        value: B256::from(account_proof_response.storage_proof[i].value),
+                        account_proof: account_proof_response.account_proof.clone(),
+                        storage_proof: account_proof_response.storage_proof[i]
+                            .proof
+                            .clone(),
+                    });
+                }
             }
         }
     }

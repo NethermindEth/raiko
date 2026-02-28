@@ -8,7 +8,9 @@ use raiko_lib::{
     builder::{create_mem_db, RethBlockBuilder},
     consts::ChainSpec,
     input::{GuestBatchInput, GuestBatchOutput, GuestInput, GuestOutput, TaikoProverData},
-    l1_precompiles::{clear_l1sload_cache, verify_and_populate_l1sload_proofs},
+    l1_precompiles::{
+        acquire_l1sload_lock, clear_l1sload_cache, verify_and_populate_l1sload_proofs,
+    },
     protocol_instance::ProtocolInstance,
     prover::{IdStore, IdWrite, Proof, ProofKey},
     utils::txs::{generate_transactions, generate_transactions_for_batch_blocks},
@@ -141,11 +143,11 @@ impl Raiko {
             &input.taiko.anchor_tx,
         );
 
-        // If there are L1SLOAD proofs, clear the L1SLOAD cache before executing
-        // the transactions and verify them against the anchor state root.
-        // L1 ancestor headers are used to walk back from the anchor block and derive
-        // trusted state roots for blocks older than the anchor.
-        if !input.l1_storage_proofs.is_empty() {
+        // Acquire L1SLOAD execution lock if proofs exist. This serializes concurrent
+        // block executions that use L1SLOAD to prevent global cache races.
+        // The lock must be held through clear → populate → execute.
+        let _l1sload_guard = if !input.l1_storage_proofs.is_empty() {
+            let guard = acquire_l1sload_lock();
             clear_l1sload_cache();
             // Extract actual anchor block info from the anchor tx (not l1_header).
             // In Shasta mode, l1_header is set to l1_inclusion_block - 1 which differs
@@ -154,14 +156,20 @@ impl Raiko {
                 .taiko
                 .anchor_tx
                 .as_ref()
-                .expect("No anchor tx for L1SLOAD verification");
+                .ok_or_else(|| RaikoError::Guest(
+                    raiko_lib::prover::ProverError::GuestError("No anchor tx for L1SLOAD verification".to_string()),
+                ))?;
             let fork = input
                 .chain_spec
                 .active_fork(input.block.header.number, input.block.timestamp)
-                .expect("Failed to determine active fork");
+                .map_err(|e| RaikoError::Guest(
+                    raiko_lib::prover::ProverError::GuestError(format!("Failed to determine active fork: {}", e)),
+                ))?;
             let (anchor_block_number, anchor_state_root) =
                 get_anchor_tx_info_by_fork(fork, anchor_tx)
-                    .expect("Failed to decode anchor tx info");
+                    .map_err(|e| RaikoError::Guest(
+                        raiko_lib::prover::ProverError::GuestError(format!("Failed to decode anchor tx info: {}", e)),
+                    ))?;
             info!(
                 "get_output: Verifying and populating L1SLOAD proofs with {} proofs, \
                  anchor block={}, anchor state root={:?}, {} L1 ancestor headers",
@@ -176,8 +184,13 @@ impl Raiko {
                 anchor_block_number,
                 &input.l1_ancestor_headers,
             )
-            .expect("Failed to verify and populate L1SLOAD proofs");
-        }
+            .map_err(|e| RaikoError::Guest(
+                raiko_lib::prover::ProverError::GuestError(format!("Failed to verify and populate L1SLOAD proofs: {}", e)),
+            ))?;
+            Some(guard)
+        } else {
+            None
+        };
 
         builder
             .execute_transactions(pool_tx, false)
@@ -256,10 +269,10 @@ impl Raiko {
         let db = create_mem_db(&mut input.clone()).unwrap();
         let mut builder = RethBlockBuilder::new(input, db);
 
-        // If there are L1SLOAD proofs, populate the L1SLOAD cache before executing
-        // the transactions and verify them against the anchor state root.
-        // L1 ancestor headers enable verification of L1SLOAD at non-anchor blocks.
-        if !input.l1_storage_proofs.is_empty() {
+        // Acquire L1SLOAD execution lock if proofs exist. This serializes concurrent
+        // block executions that use L1SLOAD to prevent global cache races.
+        let _l1sload_guard = if !input.l1_storage_proofs.is_empty() {
+            let guard = acquire_l1sload_lock();
             clear_l1sload_cache();
             // Extract actual anchor block info from the anchor tx (not l1_header).
             // In Shasta mode, l1_header is set to l1_inclusion_block - 1 which differs
@@ -268,14 +281,20 @@ impl Raiko {
                 .taiko
                 .anchor_tx
                 .as_ref()
-                .expect("No anchor tx for L1SLOAD verification in batch");
+                .ok_or_else(|| RaikoError::Guest(
+                    raiko_lib::prover::ProverError::GuestError("No anchor tx for L1SLOAD verification in batch".to_string()),
+                ))?;
             let fork = input
                 .chain_spec
                 .active_fork(input.block.header.number, input.block.timestamp)
-                .expect("Failed to determine active fork for batch block");
+                .map_err(|e| RaikoError::Guest(
+                    raiko_lib::prover::ProverError::GuestError(format!("Failed to determine active fork for batch: {}", e)),
+                ))?;
             let (anchor_block_number, anchor_state_root) =
                 get_anchor_tx_info_by_fork(fork, anchor_tx)
-                    .expect("Failed to decode anchor tx info for batch block");
+                    .map_err(|e| RaikoError::Guest(
+                        raiko_lib::prover::ProverError::GuestError(format!("Failed to decode anchor tx info for batch: {}", e)),
+                    ))?;
             info!(
                 "execute_transaction_batch: Verifying and populating L1SLOAD proofs with {} proofs, \
                  anchor block={}, anchor state root={:?}, {} L1 ancestor headers",
@@ -290,8 +309,13 @@ impl Raiko {
                 anchor_block_number,
                 &input.l1_ancestor_headers,
             )
-            .expect("Failed to verify and populate L1SLOAD proofs for batch block");
-        }
+            .map_err(|e| RaikoError::Guest(
+                raiko_lib::prover::ProverError::GuestError(format!("Failed to verify L1SLOAD proofs for batch: {}", e)),
+            ))?;
+            Some(guard)
+        } else {
+            None
+        };
 
         let mut pool_txs = vec![input.taiko.anchor_tx.clone().unwrap()];
         pool_txs.extend_from_slice(&origin_pool_txs.as_slice());

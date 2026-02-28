@@ -7,10 +7,25 @@ use alloy_trie::{proof::verify_proof, Nibbles};
 use anyhow::{bail, Context, Result};
 use reth_primitives::Header;
 use std::collections::HashMap;
+use std::sync::{LazyLock, Mutex, MutexGuard};
 use tracing::info;
 
 use crate::input::L1StorageProof;
 use crate::primitives::keccak::keccak;
+
+/// Execution lock to serialize L1SLOAD cache operations across concurrent proving tasks.
+/// The L1SLOAD precompile uses global state (L1_STORAGE_CACHE, CURRENT_ANCHOR_BLOCK_ID)
+/// which is not safe for concurrent block execution. This lock must be held during the
+/// entire clear → populate → EVM execute cycle.
+static L1SLOAD_EXECUTION_LOCK: LazyLock<Mutex<()>> = LazyLock::new(|| Mutex::new(()));
+
+/// Acquire the L1SLOAD execution lock. Returns a MutexGuard that must be held
+/// during the entire populate → EVM execute cycle to prevent concurrent cache races.
+pub fn acquire_l1sload_lock() -> MutexGuard<'static, ()> {
+    L1SLOAD_EXECUTION_LOCK
+        .lock()
+        .expect("L1SLOAD execution lock poisoned")
+}
 
 /// Verify and populate L1SLOAD cache with storage values before EVM execution.
 ///
@@ -232,6 +247,22 @@ fn build_verified_state_root_map(
                 anchor_block_number
             );
         }
+
+        // Verify the newest ancestor immediately precedes the anchor block (PR #4).
+        // This ensures the ancestor chain is contiguous up to the anchor.
+        // NOTE: We cannot verify hash(header[anchor-1]) == anchor_block.parent_hash
+        // because we only have the anchor's state_root (from the anchor tx), not its
+        // full header. This is an acceptable trust assumption since the ancestor headers
+        // come from the same L1 RPC that provided the anchor state root.
+        if newest_num != anchor_block_number - 1 {
+            bail!(
+                "Newest L1 ancestor header (block {}) does not immediately precede \
+                 anchor block {}. Expected block {}.",
+                newest_num,
+                anchor_block_number,
+                anchor_block_number - 1
+            );
+        }
     }
 
     // Handle single-header case (windows(2) produces nothing for single element)
@@ -310,11 +341,11 @@ fn verify_l1_proof(proof: &L1StorageProof, state_root: B256) -> Result<()> {
     Ok(())
 }
 
-/// Get value and verify proof
+/// Get value and verify proof.
+/// Single-pass: extracts the leaf value first, then verifies once (PR #5 optimization).
 fn get_and_verify_value(key_hash: B256, root: B256, proof: &[Bytes]) -> Result<Vec<u8>> {
     // Handle empty proof array (proves non-existence at the root level)
     if proof.is_empty() {
-        // For non-existent keys, verify against the root
         let nibbles = Nibbles::unpack(&key_hash);
         let proof_refs: Vec<&Bytes> = Vec::new();
         verify_proof(root, nibbles, None, proof_refs)?;
@@ -324,24 +355,27 @@ fn get_and_verify_value(key_hash: B256, root: B256, proof: &[Bytes]) -> Result<V
     let nibbles = Nibbles::unpack(&key_hash);
     let proof_refs: Vec<&Bytes> = proof.iter().collect();
 
-    // Try with None first (empty/non-existent)
-    if verify_proof(root, nibbles.clone(), None, proof_refs.clone()).is_ok() {
-        return Ok(Vec::new());
+    // Try to extract a leaf value from the proof. If the proof terminates at a
+    // leaf node, we verify existence. If extraction fails (branch/extension node
+    // termination), we verify non-existence.
+    match get_leaf_value(proof) {
+        Ok(value) if !value.is_empty() => {
+            // Leaf with value — verify existence proof (single pass)
+            verify_proof(root, nibbles, Some(value.clone()), proof_refs)?;
+            Ok(value)
+        }
+        _ => {
+            // No value extractable (non-existent key) — verify non-existence
+            verify_proof(root, nibbles, None, proof_refs)?;
+            Ok(Vec::new())
+        }
     }
-
-    // Extract and verify actual value
-    let value = get_leaf_value(proof)?;
-    let value_option = if value.is_empty() {
-        None
-    } else {
-        Some(value.clone())
-    };
-    verify_proof(root, nibbles, value_option, proof_refs)?;
-
-    Ok(value)
 }
 
-/// Extract value from leaf node
+/// Extract value from leaf node.
+/// Distinguishes leaf from extension nodes via the HP (hex prefix) flag (PR #6).
+/// - HP flag 0x0/0x1 = extension node (path + next-node-hash)
+/// - HP flag 0x2/0x3 = leaf node (path + value)
 fn get_leaf_value(proof: &[Bytes]) -> Result<Vec<u8>> {
     let last_node = proof.last().ok_or_else(|| anyhow::anyhow!("Empty proof"))?;
     let mut data = last_node.as_ref();
@@ -361,9 +395,26 @@ fn get_leaf_value(proof: &[Bytes]) -> Result<Vec<u8>> {
         );
     }
 
-    // For a 2-element list [path, value], we need to skip the path and decode the value
+    // For a 2-element list [path, value], we need to decode the path first
     let path_header = RlpHeader::decode(&mut data)
         .with_context(|| format!("Failed to decode path header: 0x{}", hex::encode(last_node)))?;
+
+    // Check the HP (hex prefix) to distinguish leaf from extension nodes.
+    // The first nibble of the compact-encoded path encodes the node type:
+    //   0x0 or 0x1 → extension node
+    //   0x2 or 0x3 → leaf node
+    let path_bytes = &data[..path_header.payload_length];
+    if !path_bytes.is_empty() {
+        let hp_flag = path_bytes[0] >> 4;
+        if hp_flag < 2 {
+            bail!(
+                "Last proof node is an extension node (HP flag=0x{:x}), not a leaf. \
+                 This indicates the key does not exist at this path.",
+                hp_flag
+            );
+        }
+    }
+
     data.advance(path_header.payload_length);
 
     // Decode the value element header to get its payload
@@ -375,7 +426,7 @@ fn get_leaf_value(proof: &[Bytes]) -> Result<Vec<u8>> {
     let value = data[..value_header.payload_length].to_vec();
 
     info!(
-        "Extracted leaf value: {} bytes (RLP-encoded) from 2-element node",
+        "[jmadibekov] Extracted leaf value: {} bytes (RLP-encoded) from leaf node",
         value.len()
     );
     Ok(value)

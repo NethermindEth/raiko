@@ -1,7 +1,8 @@
 mod l1sload;
 
 pub use l1sload::{
-    clear_l1sload_cache, populate_l1sload_cache, verify_and_populate_l1sload_proofs,
+    acquire_l1sload_lock, clear_l1sload_cache, populate_l1sload_cache,
+    verify_and_populate_l1sload_proofs,
 };
 
 /// Re-export the max lookback constant for use in preflight and detection
