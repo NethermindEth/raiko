@@ -21,7 +21,9 @@ use crate::{
     interfaces::{
         run_shasta_proposal_prover, ProofRequest, RaikoError, RaikoResult, ShastaProposalCheckpoint,
     },
-    preflight::{batch_preflight, preflight, BatchPreflightData, PreflightData},
+    preflight::{
+        batch_preflight, get_anchor_tx_info_by_fork, preflight, BatchPreflightData, PreflightData,
+    },
     provider::BlockDataProvider,
 };
 
@@ -145,13 +147,27 @@ impl Raiko {
         // trusted state roots for blocks older than the anchor.
         if !input.l1_storage_proofs.is_empty() {
             clear_l1sload_cache();
-            let anchor_state_root = input.taiko.l1_header.state_root;
-            let anchor_block_number = input.taiko.l1_header.number;
+            // Extract actual anchor block info from the anchor tx (not l1_header).
+            // In Shasta mode, l1_header is set to l1_inclusion_block - 1 which differs
+            // from the anchor block referenced by the anchor transaction.
+            let anchor_tx = input
+                .taiko
+                .anchor_tx
+                .as_ref()
+                .expect("No anchor tx for L1SLOAD verification");
+            let fork = input
+                .chain_spec
+                .active_fork(input.block.header.number, input.block.timestamp)
+                .expect("Failed to determine active fork");
+            let (anchor_block_number, anchor_state_root) =
+                get_anchor_tx_info_by_fork(fork, anchor_tx)
+                    .expect("Failed to decode anchor tx info");
             info!(
-                "[jmadibekov] get_output: Verifying and populating L1SLOAD proofs with {} proofs, \
-                 anchor block={}, {} L1 ancestor headers",
+                "get_output: Verifying and populating L1SLOAD proofs with {} proofs, \
+                 anchor block={}, anchor state root={:?}, {} L1 ancestor headers",
                 input.l1_storage_proofs.len(),
                 anchor_block_number,
+                anchor_state_root,
                 input.l1_ancestor_headers.len()
             );
             verify_and_populate_l1sload_proofs(
@@ -245,13 +261,27 @@ impl Raiko {
         // L1 ancestor headers enable verification of L1SLOAD at non-anchor blocks.
         if !input.l1_storage_proofs.is_empty() {
             clear_l1sload_cache();
-            let anchor_state_root = input.taiko.l1_header.state_root;
-            let anchor_block_number = input.taiko.l1_header.number;
+            // Extract actual anchor block info from the anchor tx (not l1_header).
+            // In Shasta mode, l1_header is set to l1_inclusion_block - 1 which differs
+            // from the anchor block referenced by the anchor transaction.
+            let anchor_tx = input
+                .taiko
+                .anchor_tx
+                .as_ref()
+                .expect("No anchor tx for L1SLOAD verification in batch");
+            let fork = input
+                .chain_spec
+                .active_fork(input.block.header.number, input.block.timestamp)
+                .expect("Failed to determine active fork for batch block");
+            let (anchor_block_number, anchor_state_root) =
+                get_anchor_tx_info_by_fork(fork, anchor_tx)
+                    .expect("Failed to decode anchor tx info for batch block");
             info!(
-                "[jmadibekov] single_output_for_batch: Verifying and populating L1SLOAD proofs with {} proofs, \
-                 anchor block={}, {} L1 ancestor headers",
+                "execute_transaction_batch: Verifying and populating L1SLOAD proofs with {} proofs, \
+                 anchor block={}, anchor state root={:?}, {} L1 ancestor headers",
                 input.l1_storage_proofs.len(),
                 anchor_block_number,
+                anchor_state_root,
                 input.l1_ancestor_headers.len()
             );
             verify_and_populate_l1sload_proofs(

@@ -24,13 +24,13 @@ use raiko_lib::{
 use tracing::{debug, info};
 
 use util::{
-    collect_l1_storage_proofs, execute_txs, get_anchor_tx_info_by_fork,
-    get_batch_blocks_and_parent_data, get_block_and_parent_data, prepare_taiko_chain_batch_input,
-    prepare_taiko_chain_input,
+    collect_l1_storage_proofs, execute_txs, get_batch_blocks_and_parent_data,
+    get_block_and_parent_data, prepare_taiko_chain_batch_input, prepare_taiko_chain_input,
 };
 
 pub use util::{
-    parse_l1_batch_proposal_tx_for_pacaya_fork, parse_l1_batch_proposal_tx_for_shasta_fork,
+    get_anchor_tx_info_by_fork, parse_l1_batch_proposal_tx_for_pacaya_fork,
+    parse_l1_batch_proposal_tx_for_shasta_fork,
 };
 
 #[cfg(feature = "statedb_lru")]
@@ -139,15 +139,7 @@ pub async fn preflight<BDP: BlockDataProvider>(
             .as_ref()
             .ok_or_else(|| RaikoError::Preflight("No anchor tx available".to_owned()))?;
         let fork = taiko_chain_spec.active_fork(block_number, block.timestamp)?;
-        let (anchor_block_id, anchor_state_root) = get_anchor_tx_info_by_fork(fork, anchor_tx)?;
-
-        // Validate anchor state root matches TaikoGuestInput.l1_header.state_root
-        if anchor_state_root != taiko_guest_input.l1_header.state_root {
-            return Err(RaikoError::Preflight(format!(
-                "Anchor state root mismatch: expected {:?}, got {:?}",
-                anchor_state_root, taiko_guest_input.l1_header.state_root
-            )));
-        }
+        let (anchor_block_id, _anchor_state_root) = get_anchor_tx_info_by_fork(fork, anchor_tx)?;
 
         let collection = collect_l1_storage_proofs(
             &block,
@@ -459,18 +451,8 @@ pub async fn batch_preflight<BDP: BlockDataProvider>(
                         // Extract anchor info for this specific block
                         let fork = taiko_chain_spec
                             .active_fork(prove_block.header.number, prove_block.timestamp)?;
-                        let (anchor_block_id, anchor_state_root) =
+                        let (anchor_block_id, _anchor_state_root) =
                             get_anchor_tx_info_by_fork(fork, &anchor_tx)?;
-
-                        // Validate anchor state root matches this block's L1 header
-                        if anchor_state_root != taiko_input.l1_header.state_root {
-                            return Err(RaikoError::Preflight(format!(
-                                "Anchor state root mismatch for block {}: expected {:?}, got {:?}",
-                                prove_block.header.number,
-                                anchor_state_root,
-                                taiko_input.l1_header.state_root
-                            )));
-                        }
 
                         let collection = collect_l1_storage_proofs(
                             &prove_block,
