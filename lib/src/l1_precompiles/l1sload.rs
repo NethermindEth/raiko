@@ -372,10 +372,14 @@ fn get_and_verify_value(key_hash: B256, root: B256, proof: &[Bytes]) -> Result<V
     }
 }
 
-/// Extract value from leaf node.
-/// Distinguishes leaf from extension nodes via the HP (hex prefix) flag (PR #6).
-/// - HP flag 0x0/0x1 = extension node (path + next-node-hash)
-/// - HP flag 0x2/0x3 = leaf node (path + value)
+/// Extract value from leaf node in an MPT proof.
+///
+/// Distinguishes node types by RLP structure (matching alloy-trie's TrieNode::decode):
+/// 1. Element count: 17 elements = branch node, 2 elements = leaf/extension
+/// 2. HP (hex prefix) flag: 0x0/0x1 = extension, 0x2/0x3 = leaf
+///
+/// Returns Ok(value) only for leaf nodes. Returns Err for branch/extension nodes,
+/// which signals non-existence to the caller.
 fn get_leaf_value(proof: &[Bytes]) -> Result<Vec<u8>> {
     let last_node = proof.last().ok_or_else(|| anyhow::anyhow!("Empty proof"))?;
     let mut data = last_node.as_ref();
@@ -395,7 +399,33 @@ fn get_leaf_value(proof: &[Bytes]) -> Result<Vec<u8>> {
         );
     }
 
-    // For a 2-element list [path, value], we need to decode the path first
+    // Count elements to distinguish node types:
+    // - 17 elements = branch node (non-existence proof terminates here)
+    // - 2 elements = leaf or extension node
+    // This matches alloy-trie's TrieNode::decode logic (nodes/mod.rs).
+    let mut count_data = &data[..list_header.payload_length];
+    let mut element_count = 0u32;
+    while !count_data.is_empty() {
+        let header = RlpHeader::decode(&mut count_data).with_context(|| {
+            format!(
+                "Failed to decode element {} in proof node: 0x{}",
+                element_count,
+                hex::encode(last_node)
+            )
+        })?;
+        count_data.advance(header.payload_length);
+        element_count += 1;
+    }
+
+    if element_count != 2 {
+        bail!(
+            "Last proof node has {} elements (expected 2 for leaf/extension). \
+             This is a branch node, meaning the key does not exist at this path.",
+            element_count
+        );
+    }
+
+    // 2-element node: decode [path, value]
     let path_header = RlpHeader::decode(&mut data)
         .with_context(|| format!("Failed to decode path header: 0x{}", hex::encode(last_node)))?;
 
