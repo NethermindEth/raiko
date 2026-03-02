@@ -63,6 +63,8 @@ pub enum RecursionMode {
     /// The proof mode for a PlonK proof.
     #[default]
     Plonk,
+    /// The proof mode for a Groth16 proof.
+    Groth16,
 }
 
 impl From<RecursionMode> for SP1ProofMode {
@@ -71,6 +73,7 @@ impl From<RecursionMode> for SP1ProofMode {
             RecursionMode::Core => SP1ProofMode::Core,
             RecursionMode::Compressed => SP1ProofMode::Compressed,
             RecursionMode::Plonk => SP1ProofMode::Plonk,
+            RecursionMode::Groth16 => SP1ProofMode::Groth16,
         }
     }
 }
@@ -207,9 +210,10 @@ impl Prover for Sp1Prover {
     ) -> ProverResult<Proof> {
         let mut param = Sp1Param::deserialize(config.get("sp1").unwrap()).unwrap();
 
-        // TODO: remove param.recursion, hardcode to Plonk
-        param.recursion = RecursionMode::Plonk;
+        // TODO: remove param.recursion, hardcode to Groth16
+        param.recursion = RecursionMode::Groth16;
 
+        let prove_mode: SP1ProofMode = param.recursion.clone().into();
         let mode = param.prover.clone().unwrap_or_else(get_env_mock);
         let block_inputs: Vec<B256> = input
             .proofs
@@ -266,7 +270,7 @@ impl Prover for Sp1Prover {
                     input.proofs.len(),
                     vk.bytes32()
                 );
-                let result = prove_local(&client, &pk, stdin, SP1ProofMode::Plonk).await?;
+                let result = prove_local(&client, &pk, stdin, prove_mode).await?;
                 (result, vk)
             }
             ProverMode::Local => {
@@ -282,13 +286,12 @@ impl Prover for Sp1Prover {
                     input.proofs.len(),
                     vk.bytes32()
                 );
-                let result = prove_local(&client, &pk, stdin, SP1ProofMode::Plonk).await?;
+                let result = prove_local(&client, &pk, stdin, prove_mode).await?;
                 (result, vk)
             }
             #[cfg(feature = "network")]
             ProverMode::Network => {
-                let (result, vk) =
-                    prove_network(stdin, AGGREGATION_ELF, SP1ProofMode::Plonk).await?;
+                let (result, vk) = prove_network(stdin, AGGREGATION_ELF, prove_mode).await?;
                 info!(
                     "sp1 aggregate: {:?} based {:?} blocks with vk {:?}",
                     hex::encode_prefixed(stark_vk.hash_bytes()),
@@ -365,11 +368,7 @@ impl Prover for Sp1Prover {
             .unwrap();
         info!("GPU Number: {}", gpu_number);
 
-        let prove_mode: SP1ProofMode = match param.recursion {
-            RecursionMode::Core => SP1ProofMode::Core,
-            RecursionMode::Compressed => SP1ProofMode::Compressed,
-            RecursionMode::Plonk => SP1ProofMode::Plonk,
-        };
+        let prove_mode: SP1ProofMode = param.recursion.clone().into();
 
         // Each prover type is a different concrete type, so we must handle them separately.
         let (prove_result, vk) = match mode {
@@ -549,8 +548,9 @@ impl Prover for Sp1Prover {
         _store: Option<&mut dyn IdWrite>,
     ) -> ProverResult<Proof> {
         let mut param = Sp1Param::deserialize(config.get("sp1").unwrap()).unwrap();
-        param.recursion = RecursionMode::Plonk;
+        param.recursion = RecursionMode::Groth16;
 
+        let prove_mode: SP1ProofMode = param.recursion.clone().into();
         let mode = param.prover.clone().unwrap_or_else(get_env_mock);
         let first_proof = input.proofs.first().ok_or_else(|| {
             ProverError::GuestError("empty shasta aggregation request".to_string())
@@ -617,7 +617,7 @@ impl Prover for Sp1Prover {
                     input.proofs.len(),
                     vk.bytes32()
                 );
-                let result = prove_local(&client, &pk, stdin, SP1ProofMode::Plonk).await?;
+                let result = prove_local(&client, &pk, stdin, prove_mode).await?;
                 (result, vk)
             }
             ProverMode::Local => {
@@ -632,13 +632,12 @@ impl Prover for Sp1Prover {
                     input.proofs.len(),
                     vk.bytes32()
                 );
-                let result = prove_local(&client, &pk, stdin, SP1ProofMode::Plonk).await?;
+                let result = prove_local(&client, &pk, stdin, prove_mode).await?;
                 (result, vk)
             }
             #[cfg(feature = "network")]
             ProverMode::Network => {
-                let (result, vk) =
-                    prove_network(stdin, SHASTA_AGG_ELF, SP1ProofMode::Plonk).await?;
+                let (result, vk) = prove_network(stdin, SHASTA_AGG_ELF, prove_mode).await?;
                 info!(
                     "Sp1 Shasta aggregation: {} proofs with vk {:?}",
                     input.proofs.len(),
