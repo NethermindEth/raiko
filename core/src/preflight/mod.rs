@@ -161,10 +161,9 @@ pub async fn preflight<BDP: BlockDataProvider>(
         (Vec::new(), Vec::new(), 0u64)
     };
 
-    // Populate L1SLOAD cache with storage values before EVM execution
-    if !l1_storage_proofs.is_empty() {
-        populate_l1sload_cache(&l1_storage_proofs, anchor_block_id);
-    }
+    // Always set L1SLOAD anchor context before EVM execution.
+    // For indirect-only blocks, proofs may be empty at this stage.
+    populate_l1sload_cache(&l1_storage_proofs, anchor_block_id);
 
     info!("Preflight: L1 storage proof collection complete");
 
@@ -531,10 +530,9 @@ pub async fn batch_preflight<BDP: BlockDataProvider>(
                         (Vec::new(), Vec::new(), 0u64)
                     };
 
-                // Populate L1SLOAD cache with storage values before EVM execution
-                if !l1_storage_proofs.is_empty() {
-                    populate_l1sload_cache(&l1_storage_proofs, anchor_block_id);
-                }
+                // Always set L1SLOAD anchor context before EVM execution.
+                // For indirect-only blocks, proofs may be empty at this stage.
+                populate_l1sload_cache(&l1_storage_proofs, anchor_block_id);
 
                 // Create the guest input (mutable: indirect L1SLOAD proofs may be added)
                 let mut input = GuestInput {

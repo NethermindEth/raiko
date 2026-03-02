@@ -122,13 +122,15 @@ pub fn verify_and_populate_l1sload_proofs(
 ///
 /// Must be called before any EVM execution to ensure L1SLOAD precompile has access to L1 data.
 pub fn populate_l1sload_cache(l1_storage_proofs: &[L1StorageProof], anchor_block_number: u64) {
-    if l1_storage_proofs.is_empty() {
-        return;
-    }
-
-    // Set anchor block ID for the precompile's range check
+    // Always set anchor block ID so indirect L1SLOAD calls can pass range checks
+    // even when there are no direct pre-fetched proofs.
     set_anchor_block_id(anchor_block_number);
     debug!("L1SLOAD anchor block ID set: {}", anchor_block_number);
+
+    if l1_storage_proofs.is_empty() {
+        debug!("No direct L1SLOAD proofs; anchor context set for indirect calls");
+        return;
+    }
 
     for proof in l1_storage_proofs {
         // Use the B256 block_number directly from the proof
