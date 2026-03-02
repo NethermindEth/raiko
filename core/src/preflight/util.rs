@@ -8,7 +8,7 @@ use anyhow::{anyhow, bail, ensure, Result};
 use kzg::kzg_types::ZFr;
 use kzg_traits::{eip_4844::blob_to_kzg_commitment_rust, Fr, G1};
 use raiko_lib::{
-    anchor::{decode_anchor, decode_anchor_ontake, decode_anchor_pacaya, decode_anchor_shasta},
+    anchor::{decode_anchor, decode_anchor_ontake},
     builder::{OptimisticDatabase, RethBlockBuilder},
     clear_line,
     consts::{ChainSpec, TaikoSpecId},
@@ -237,27 +237,8 @@ pub fn get_anchor_tx_info_by_fork(
     fork: TaikoSpecId,
     anchor_tx: &TaikoTxEnvelope,
 ) -> RaikoResult<(u64, B256)> {
-    match fork {
-        TaikoSpecId::SHASTA => {
-            let anchor_call = decode_anchor_shasta(anchor_tx.input())?;
-            Ok((
-                anchor_call._checkpoint.blockNumber.to(),
-                anchor_call._checkpoint.stateRoot,
-            ))
-        }
-        TaikoSpecId::PACAYA => {
-            let anchor_call = decode_anchor_pacaya(anchor_tx.input())?;
-            Ok((anchor_call._anchorBlockId, anchor_call._anchorStateRoot))
-        }
-        TaikoSpecId::ONTAKE => {
-            let anchor_call = decode_anchor_ontake(anchor_tx.input())?;
-            Ok((anchor_call._anchorBlockId, anchor_call._anchorStateRoot))
-        }
-        _ => {
-            let anchor_call = decode_anchor(anchor_tx.input())?;
-            Ok((anchor_call.l1BlockId, anchor_call.l1StateRoot))
-        }
-    }
+    raiko_lib::anchor::get_anchor_tx_info_by_fork(fork, anchor_tx)
+        .map_err(|e| RaikoError::Preflight(e.to_string()))
 }
 
 /// a problem here is that we need to know the fork of the batch proposal tx
@@ -794,7 +775,7 @@ pub async fn collect_l1_storage_proofs(
     ]);
 
     // Method 1: Detect direct calls by scanning transactions
-    info!("[jmadibekov] Scanning transactions for direct L1SLOAD calls...");
+    debug!("Scanning transactions for L1SLOAD calls");
     for tx in &block.body.transactions {
         if let Some(to_address) = tx.to() {
             // L1SLOAD input format (84 bytes):
@@ -836,7 +817,7 @@ pub async fn collect_l1_storage_proofs(
         }
     }
 
-    info!("[jmadibekov] Total L1SLOAD calls detected: {}", detected_calls.len());
+    info!("L1SLOAD calls detected: {}", detected_calls.len());
 
     if detected_calls.is_empty() {
         return Ok(L1StorageProofCollection {
@@ -888,38 +869,41 @@ pub async fn collect_l1_storage_proofs(
 
         // Extract individual proofs from the batched response
         for (contract_address, keys) in &keys_by_address {
-            if let Some(account_proof_response) = proof_response.get(contract_address) {
-                for (i, (storage_key_b256, _storage_key_u256)) in keys.iter().enumerate() {
-                    if i >= account_proof_response.storage_proof.len() {
-                        return Err(RaikoError::Preflight(format!(
-                            "Missing storage proof for L1SLOAD: contract={:?}, key={:?}, block={}",
-                            contract_address, storage_key_b256, block_number_u64
-                        )));
-                    }
+            let account_proof_response = proof_response.get(contract_address)
+                .ok_or_else(|| RaikoError::Preflight(format!(
+                    "Missing account proof for L1SLOAD: contract={:?}, block={}",
+                    contract_address, block_number_u64
+                )))?;
 
-                    // Find the B256 block number for this call
-                    let block_number_b256 = calls
-                        .iter()
-                        .find(|(addr, key, _)| addr == contract_address && key == storage_key_b256)
-                        .map(|(_, _, bn)| *bn)
-                        .unwrap();
+            for (storage_key_b256, _storage_key_u256) in keys {
+                // Match storage proof by key instead of relying on index ordering
+                let storage_proof = account_proof_response.storage_proof.iter()
+                    .find(|p| p.key.as_b256() == *storage_key_b256)
+                    .ok_or_else(|| RaikoError::Preflight(format!(
+                        "Missing storage proof for L1SLOAD: contract={:?}, key={:?}, block={}",
+                        contract_address, storage_key_b256, block_number_u64
+                    )))?;
 
-                    proofs.push(L1StorageProof {
-                        contract_address: *contract_address,
-                        storage_key: *storage_key_b256,
-                        block_number: block_number_b256,
-                        value: B256::from(account_proof_response.storage_proof[i].value),
-                        account_proof: account_proof_response.account_proof.clone(),
-                        storage_proof: account_proof_response.storage_proof[i]
-                            .proof
-                            .clone(),
-                    });
-                }
+                // Find the B256 block number for this call
+                let block_number_b256 = calls
+                    .iter()
+                    .find(|(addr, key, _)| addr == contract_address && key == storage_key_b256)
+                    .map(|(_, _, bn)| *bn)
+                    .unwrap();
+
+                proofs.push(L1StorageProof {
+                    contract_address: *contract_address,
+                    storage_key: *storage_key_b256,
+                    block_number: block_number_b256,
+                    value: B256::from(storage_proof.value),
+                    account_proof: account_proof_response.account_proof.clone(),
+                    storage_proof: storage_proof.proof.clone(),
+                });
             }
         }
     }
 
-    info!("[jmadibekov] Collected {} L1 storage proofs", proofs.len());
+    info!("Collected {} L1 storage proofs", proofs.len());
 
     // Fetch L1 ancestor headers if any proof requests a non-anchor block
     let min_requested_block = calls_by_block
@@ -942,6 +926,114 @@ pub async fn collect_l1_storage_proofs(
         "Collected {} L1 ancestor headers for header chain verification",
         l1_ancestor_headers.len()
     );
+
+    Ok(L1StorageProofCollection {
+        proofs,
+        l1_ancestor_headers,
+    })
+}
+
+/// Fetch L1 Merkle proofs for calls discovered during EVM execution (indirect L1SLOAD calls).
+///
+/// These are calls that went through the live L1 RPC fallback because they weren't
+/// pre-fetched by transaction scanning (e.g., contract → 0x10001 internal calls).
+/// The ZK prover needs Merkle proofs for these calls, so we fetch them after execution.
+pub async fn fetch_l1_proofs_for_rpc_served_calls(
+    l1_provider: &RpcBlockDataProvider,
+    calls: &std::collections::HashSet<(Address, B256, B256)>,
+    anchor_block_id: u64,
+) -> RaikoResult<L1StorageProofCollection> {
+    let mut proofs = Vec::new();
+
+    // Group calls by block number, then by address (same batching as collect_l1_storage_proofs)
+    let mut calls_by_block: HashMap<u64, Vec<(Address, B256, B256)>> = HashMap::new();
+    for (contract_address, storage_key, block_number_b256) in calls {
+        let block_number_u256 = U256::from_be_bytes(block_number_b256.0);
+        let block_number_u64: u64 = block_number_u256.try_into().map_err(|_| {
+            RaikoError::Preflight(format!(
+                "L1SLOAD block number exceeds u64: {:?}",
+                block_number_b256
+            ))
+        })?;
+        calls_by_block
+            .entry(block_number_u64)
+            .or_default()
+            .push((*contract_address, *storage_key, *block_number_b256));
+    }
+
+    for (block_number_u64, block_calls) in &calls_by_block {
+        let mut keys_by_address: HashMap<Address, Vec<(B256, U256)>> = HashMap::new();
+        for (contract_address, storage_key, _) in block_calls {
+            let storage_key_u256 = U256::from_be_bytes((*storage_key).into());
+            keys_by_address
+                .entry(*contract_address)
+                .or_default()
+                .push((*storage_key, storage_key_u256));
+        }
+
+        let batch_request: HashMap<Address, Vec<U256>> = keys_by_address
+            .iter()
+            .map(|(addr, keys)| (*addr, keys.iter().map(|(_, u256)| *u256).collect()))
+            .collect();
+
+        let proof_response = l1_provider
+            .get_l1_storage_proofs(*block_number_u64, batch_request)
+            .await?;
+
+        for (contract_address, keys) in &keys_by_address {
+            let account_proof_response = proof_response.get(contract_address).ok_or_else(|| {
+                RaikoError::Preflight(format!(
+                    "Missing account proof for indirect L1SLOAD: contract={:?}, block={}",
+                    contract_address, block_number_u64
+                ))
+            })?;
+
+            for (storage_key_b256, _storage_key_u256) in keys {
+                let storage_proof = account_proof_response
+                    .storage_proof
+                    .iter()
+                    .find(|p| p.key.as_b256() == *storage_key_b256)
+                    .ok_or_else(|| {
+                        RaikoError::Preflight(format!(
+                            "Missing storage proof for indirect L1SLOAD: contract={:?}, key={:?}, block={}",
+                            contract_address, storage_key_b256, block_number_u64
+                        ))
+                    })?;
+
+                let block_number_b256 = block_calls
+                    .iter()
+                    .find(|(addr, key, _)| addr == contract_address && key == storage_key_b256)
+                    .map(|(_, _, bn)| *bn)
+                    .unwrap();
+
+                proofs.push(L1StorageProof {
+                    contract_address: *contract_address,
+                    storage_key: *storage_key_b256,
+                    block_number: block_number_b256,
+                    value: B256::from(storage_proof.value),
+                    account_proof: account_proof_response.account_proof.clone(),
+                    storage_proof: storage_proof.proof.clone(),
+                });
+            }
+        }
+    }
+
+    // Fetch ancestor headers if indirect calls target blocks older than anchor
+    let min_requested_block = calls_by_block
+        .keys()
+        .copied()
+        .min()
+        .unwrap_or(anchor_block_id);
+    let l1_ancestor_headers = if min_requested_block < anchor_block_id {
+        info!(
+            "Fetching L1 ancestor headers for indirect calls: blocks {} to {}",
+            min_requested_block,
+            anchor_block_id - 1
+        );
+        fetch_l1_ancestor_headers(l1_provider, min_requested_block, anchor_block_id).await?
+    } else {
+        Vec::new()
+    };
 
     Ok(L1StorageProofCollection {
         proofs,

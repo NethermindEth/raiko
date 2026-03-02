@@ -8,7 +8,7 @@ use anyhow::{bail, Context, Result};
 use reth_primitives::Header;
 use std::collections::HashMap;
 use std::sync::{LazyLock, Mutex, MutexGuard};
-use tracing::info;
+use tracing::{debug, info, trace};
 
 use crate::input::L1StorageProof;
 use crate::primitives::keccak::keccak;
@@ -68,7 +68,7 @@ pub fn verify_and_populate_l1sload_proofs(
     );
 
     for (i, proof) in l1_storage_proofs.iter().enumerate() {
-        let requested_block = block_number_from_b256(&proof.block_number);
+        let requested_block = block_number_from_b256(&proof.block_number)?;
 
         // Look up the verified state root for this block number
         let state_root = state_root_map.get(&requested_block).ok_or_else(|| {
@@ -128,7 +128,7 @@ pub fn populate_l1sload_cache(l1_storage_proofs: &[L1StorageProof], anchor_block
 
     // Set anchor block ID for the precompile's range check
     set_anchor_block_id(anchor_block_number);
-    info!("[jmadibekov] Set anchor block ID for L1SLOAD: {}", anchor_block_number);
+    debug!("L1SLOAD anchor block ID set: {}", anchor_block_number);
 
     for proof in l1_storage_proofs {
         // Use the B256 block_number directly from the proof
@@ -276,9 +276,10 @@ fn build_verified_state_root_map(
 }
 
 /// Convert a B256 block number to u64
-fn block_number_from_b256(block_number: &B256) -> u64 {
+fn block_number_from_b256(block_number: &B256) -> Result<u64> {
     let u256 = U256::from_be_bytes(block_number.0);
-    u256.try_into().unwrap_or(u64::MAX)
+    u256.try_into()
+        .map_err(|_| anyhow::anyhow!("L1SLOAD block number exceeds u64: {:?}", block_number))
 }
 
 /// Verify L1 storage and account proof against a given state root using MPT proof verification.
@@ -455,8 +456,8 @@ fn get_leaf_value(proof: &[Bytes]) -> Result<Vec<u8>> {
     // the value field is the PAYLOAD only (not including the RLP header).
     let value = data[..value_header.payload_length].to_vec();
 
-    info!(
-        "[jmadibekov] Extracted leaf value: {} bytes (RLP-encoded) from leaf node",
+    trace!(
+        "Extracted leaf value: {} bytes (RLP-encoded) from leaf node",
         value.len()
     );
     Ok(value)

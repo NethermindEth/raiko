@@ -7,3 +7,8 @@ pub use l1sload::{
 
 /// Re-export the max lookback constant for use in preflight and detection
 pub use alethia_reth_evm::precompiles::l1sload::L1SLOAD_MAX_BLOCK_LOOKBACK;
+
+/// Re-export L1 RPC fallback functions for indirect L1SLOAD support
+pub use alethia_reth_evm::precompiles::l1sload::{
+    clear_l1_rpc_fetcher, set_l1_rpc_fetcher, take_l1_rpc_served_calls,
+};

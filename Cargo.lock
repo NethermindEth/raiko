@@ -120,7 +120,7 @@ dependencies = [
 [[package]]
 name = "alethia-reth-block"
 version = "0.6.0"
-source = "git+https://github.com/NethermindEth/alethia-reth.git?branch=feat%2Fl1sload-precompile-nmc#136e51a0e79dd9b8cb0de83d365ade09c1b7c8d2"
+source = "git+https://github.com/NethermindEth/alethia-reth.git?rev=11f6a922c30dd796a609c1c1c9e09abe5d680129#11f6a922c30dd796a609c1c1c9e09abe5d680129"
 dependencies = [
  "alethia-reth-chainspec",
  "alethia-reth-consensus",
@@ -152,7 +152,7 @@ dependencies = [
 [[package]]
 name = "alethia-reth-chainspec"
 version = "0.6.0"
-source = "git+https://github.com/NethermindEth/alethia-reth.git?branch=feat%2Fl1sload-precompile-nmc#136e51a0e79dd9b8cb0de83d365ade09c1b7c8d2"
+source = "git+https://github.com/NethermindEth/alethia-reth.git?rev=11f6a922c30dd796a609c1c1c9e09abe5d680129#11f6a922c30dd796a609c1c1c9e09abe5d680129"
 dependencies = [
  "alloy-chains",
  "alloy-consensus",
@@ -175,7 +175,7 @@ dependencies = [
 [[package]]
 name = "alethia-reth-consensus"
 version = "0.6.0"
-source = "git+https://github.com/NethermindEth/alethia-reth.git?branch=feat%2Fl1sload-precompile-nmc#136e51a0e79dd9b8cb0de83d365ade09c1b7c8d2"
+source = "git+https://github.com/NethermindEth/alethia-reth.git?rev=11f6a922c30dd796a609c1c1c9e09abe5d680129#11f6a922c30dd796a609c1c1c9e09abe5d680129"
 dependencies = [
  "alethia-reth-chainspec",
  "alethia-reth-evm",
@@ -208,7 +208,7 @@ dependencies = [
 [[package]]
 name = "alethia-reth-evm"
 version = "0.6.0"
-source = "git+https://github.com/NethermindEth/alethia-reth.git?branch=feat%2Fl1sload-precompile-nmc#136e51a0e79dd9b8cb0de83d365ade09c1b7c8d2"
+source = "git+https://github.com/NethermindEth/alethia-reth.git?rev=11f6a922c30dd796a609c1c1c9e09abe5d680129#11f6a922c30dd796a609c1c1c9e09abe5d680129"
 dependencies = [
  "alloy-evm",
  "alloy-primitives",
@@ -224,7 +224,7 @@ dependencies = [
 [[package]]
 name = "alethia-reth-primitives"
 version = "0.6.0"
-source = "git+https://github.com/NethermindEth/alethia-reth.git?branch=feat%2Fl1sload-precompile-nmc#136e51a0e79dd9b8cb0de83d365ade09c1b7c8d2"
+source = "git+https://github.com/NethermindEth/alethia-reth.git?rev=11f6a922c30dd796a609c1c1c9e09abe5d680129#11f6a922c30dd796a609c1c1c9e09abe5d680129"
 dependencies = [
  "alethia-reth-chainspec",
  "alethia-reth-consensus",
