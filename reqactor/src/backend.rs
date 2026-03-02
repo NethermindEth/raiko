@@ -129,7 +129,7 @@ impl Backend {
             let done_tx_ = done_tx.clone();
             let notifier_ = self.notifier.clone();
 
-            tokio::spawn(async move {
+            let handle = tokio::spawn(async move {
                 let result = match request_entity {
                     RequestEntity::SingleProof(entity) => {
                         do_prove_single(
@@ -232,8 +232,36 @@ impl Backend {
                 // GPU permit is automatically dropped here, releasing the semaphore
                 drop(gpu_permit);
 
-                // Notify that request is complete
-                let _ = done_tx_.send(request_key.clone()).await;
+                request_key
+            });
+
+            // Spawn a watcher task that handles both success and panic
+            let done_tx_ = done_tx.clone();
+            let notifier_ = self.notifier.clone();
+            let request_key_for_panic = request_key.clone();
+            let mut pool_for_panic = self.pool.clone();
+            tokio::spawn(async move {
+                match handle.await {
+                    Ok(completed_key) => {
+                        let _ = done_tx_.send(completed_key).await;
+                    }
+                    Err(join_err) => {
+                        // Task panicked — mark as failed and release the queue slot
+                        tracing::error!(
+                            "Proving task panicked for {request_key_for_panic}: {join_err}"
+                        );
+                        let _ = pool_for_panic.update_status(
+                            request_key_for_panic.clone(),
+                            StatusWithContext::new(
+                                Status::Failed {
+                                    error: format!("proving task panicked: {join_err}"),
+                                },
+                                chrono::Utc::now(),
+                            ),
+                        );
+                        let _ = done_tx_.send(request_key_for_panic).await;
+                    }
+                }
                 notifier_.notify_one();
             });
         }
