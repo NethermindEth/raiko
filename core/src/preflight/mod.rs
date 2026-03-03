@@ -165,7 +165,7 @@ pub async fn preflight<BDP: BlockDataProvider>(
     };
 
     info!("[jmadibekov] Preflight: L1 storage proof collection complete (proofs={}, ancestors={}, successors={})",
-        input.l1_storage_proofs.len(), input.l1_ancestor_headers.len(), input.l1_successor_headers.len());
+        l1_storage_proofs.len(), l1_ancestor_headers.len(), l1_successor_headers.len());
 
     // Create the guest input (mutable: indirect L1SLOAD proofs may be added after execution)
     let mut input = GuestInput {
