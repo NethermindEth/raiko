@@ -10,5 +10,5 @@ pub use alethia_reth_evm::precompiles::l1sload::L1SLOAD_MAX_BLOCK_LOOKBACK;
 
 /// Re-export L1 RPC fallback functions for indirect L1SLOAD support
 pub use alethia_reth_evm::precompiles::l1sload::{
-    clear_l1_rpc_fetcher, set_l1_rpc_fetcher, take_l1_rpc_served_calls,
+    clear_l1_rpc_fetcher, clear_l1_rpc_served_calls, set_l1_rpc_fetcher, take_l1_rpc_served_calls,
 };

@@ -740,10 +740,13 @@ pub async fn filter_tx_blob_beacon_with_proof(
 pub struct L1StorageProofCollection {
     /// Storage proofs for each detected L1SLOAD call (one per unique (address, key, block_number))
     pub proofs: Vec<L1StorageProof>,
-    /// L1 ancestor headers needed to verify proofs at non-anchor blocks.
+    /// L1 ancestor headers needed to verify proofs for blocks older than anchor.
     /// Ordered from oldest (lowest block number) to newest (anchor_block - 1).
     /// Empty if all proofs are for the anchor block itself.
     pub l1_ancestor_headers: Vec<reth_primitives::Header>,
+    /// L1 successor headers needed to verify proofs for blocks newer than anchor.
+    /// Ordered from oldest to newest and starts with the anchor header when non-empty.
+    pub l1_successor_headers: Vec<reth_primitives::Header>,
 }
 
 /// Collect L1 storage proofs by detecting all L1SLOAD calls (direct and indirect).
@@ -758,12 +761,14 @@ pub struct L1StorageProofCollection {
 /// for blocks between the oldest requested block and the anchor block, enabling
 /// the prover to verify parent_hash linkage and derive trusted state roots.
 ///
-/// The requested block number must be within `L1SLOAD_MAX_BLOCK_LOOKBACK` (256) blocks
-/// of the anchor block.
+/// The requested block number must satisfy the same bidirectional range as the runtime precompile:
+/// - `requested <= l1_origin_block_id`
+/// - `requested < anchor => anchor - requested <= L1SLOAD_MAX_BLOCK_LOOKBACK`
 pub async fn collect_l1_storage_proofs(
     block: &alethia_reth_primitives::TaikoBlock,
     l1_provider: &RpcBlockDataProvider,
     anchor_block_id: u64,
+    l1_origin_block_id: u64,
 ) -> RaikoResult<L1StorageProofCollection> {
     let mut proofs = Vec::new();
     let mut detected_calls: std::collections::HashSet<(Address, B256, B256)> =
@@ -795,14 +800,15 @@ pub async fn collect_l1_storage_proofs(
                 })?;
 
                 // Validate block number is within allowed range
-                if block_number_u64 > anchor_block_id {
+                if block_number_u64 > l1_origin_block_id {
                     return Err(RaikoError::Preflight(format!(
-                        "L1SLOAD requested block {} is after anchor block {}",
-                        block_number_u64, anchor_block_id
+                        "L1SLOAD requested block {} is after l1origin block {}",
+                        block_number_u64, l1_origin_block_id
                     )));
                 }
-                if anchor_block_id - block_number_u64
-                    > raiko_lib::l1_precompiles::L1SLOAD_MAX_BLOCK_LOOKBACK
+                if block_number_u64 < anchor_block_id
+                    && anchor_block_id - block_number_u64
+                        > raiko_lib::l1_precompiles::L1SLOAD_MAX_BLOCK_LOOKBACK
                 {
                     return Err(RaikoError::Preflight(format!(
                         "L1SLOAD requested block {} is too old: anchor={}, max lookback={}",
@@ -823,6 +829,7 @@ pub async fn collect_l1_storage_proofs(
         return Ok(L1StorageProofCollection {
             proofs: Vec::new(),
             l1_ancestor_headers: Vec::new(),
+            l1_successor_headers: Vec::new(),
         });
     }
 
@@ -830,7 +837,12 @@ pub async fn collect_l1_storage_proofs(
     let mut calls_by_block: HashMap<u64, Vec<(Address, B256, B256)>> = HashMap::new();
     for (contract_address, storage_key, block_number) in &detected_calls {
         let block_number_u256 = U256::from_be_bytes(block_number.0);
-        let block_number_u64: u64 = block_number_u256.try_into().unwrap_or(u64::MAX);
+        let block_number_u64: u64 = block_number_u256.try_into().map_err(|_| {
+            RaikoError::Preflight(format!(
+                "L1SLOAD block number exceeds u64: {:?}",
+                block_number
+            ))
+        })?;
         calls_by_block.entry(block_number_u64).or_default().push((
             *contract_address,
             *storage_key,
@@ -869,27 +881,37 @@ pub async fn collect_l1_storage_proofs(
 
         // Extract individual proofs from the batched response
         for (contract_address, keys) in &keys_by_address {
-            let account_proof_response = proof_response.get(contract_address)
-                .ok_or_else(|| RaikoError::Preflight(format!(
+            let account_proof_response = proof_response.get(contract_address).ok_or_else(|| {
+                RaikoError::Preflight(format!(
                     "Missing account proof for L1SLOAD: contract={:?}, block={}",
                     contract_address, block_number_u64
-                )))?;
+                ))
+            })?;
 
             for (storage_key_b256, _storage_key_u256) in keys {
                 // Match storage proof by key instead of relying on index ordering
-                let storage_proof = account_proof_response.storage_proof.iter()
+                let storage_proof = account_proof_response
+                    .storage_proof
+                    .iter()
                     .find(|p| p.key.as_b256() == *storage_key_b256)
-                    .ok_or_else(|| RaikoError::Preflight(format!(
-                        "Missing storage proof for L1SLOAD: contract={:?}, key={:?}, block={}",
-                        contract_address, storage_key_b256, block_number_u64
-                    )))?;
+                    .ok_or_else(|| {
+                        RaikoError::Preflight(format!(
+                            "Missing storage proof for L1SLOAD: contract={:?}, key={:?}, block={}",
+                            contract_address, storage_key_b256, block_number_u64
+                        ))
+                    })?;
 
                 // Find the B256 block number for this call
                 let block_number_b256 = calls
                     .iter()
                     .find(|(addr, key, _)| addr == contract_address && key == storage_key_b256)
                     .map(|(_, _, bn)| *bn)
-                    .unwrap();
+                    .ok_or_else(|| {
+                        RaikoError::Preflight(format!(
+                            "Internal L1SLOAD call mapping error: missing call tuple for contract={:?}, key={:?}, block={}",
+                            contract_address, storage_key_b256, block_number_u64
+                        ))
+                    })?;
 
                 proofs.push(L1StorageProof {
                     contract_address: *contract_address,
@@ -905,11 +927,16 @@ pub async fn collect_l1_storage_proofs(
 
     info!("Collected {} L1 storage proofs", proofs.len());
 
-    // Fetch L1 ancestor headers if any proof requests a non-anchor block
+    // Fetch L1 predecessor/successor headers for proof verification.
     let min_requested_block = calls_by_block
         .keys()
         .copied()
         .min()
+        .unwrap_or(anchor_block_id);
+    let max_requested_block = calls_by_block
+        .keys()
+        .copied()
+        .max()
         .unwrap_or(anchor_block_id);
     let l1_ancestor_headers = if min_requested_block < anchor_block_id {
         info!(
@@ -921,15 +948,26 @@ pub async fn collect_l1_storage_proofs(
     } else {
         Vec::new()
     };
+    let l1_successor_headers = if max_requested_block > anchor_block_id {
+        info!(
+            "Fetching L1 successor headers from block {} to {}",
+            anchor_block_id, max_requested_block
+        );
+        fetch_l1_successor_headers(l1_provider, anchor_block_id, max_requested_block).await?
+    } else {
+        Vec::new()
+    };
 
     info!(
-        "Collected {} L1 ancestor headers for header chain verification",
-        l1_ancestor_headers.len()
+        "Collected header chains for L1SLOAD verification: {} predecessor headers, {} successor headers",
+        l1_ancestor_headers.len(),
+        l1_successor_headers.len()
     );
 
     Ok(L1StorageProofCollection {
         proofs,
         l1_ancestor_headers,
+        l1_successor_headers,
     })
 }
 
@@ -942,6 +980,7 @@ pub async fn fetch_l1_proofs_for_rpc_served_calls(
     l1_provider: &RpcBlockDataProvider,
     calls: &std::collections::HashSet<(Address, B256, B256)>,
     anchor_block_id: u64,
+    l1_origin_block_id: u64,
 ) -> RaikoResult<L1StorageProofCollection> {
     let mut proofs = Vec::new();
 
@@ -955,10 +994,28 @@ pub async fn fetch_l1_proofs_for_rpc_served_calls(
                 block_number_b256
             ))
         })?;
-        calls_by_block
-            .entry(block_number_u64)
-            .or_default()
-            .push((*contract_address, *storage_key, *block_number_b256));
+        if block_number_u64 > l1_origin_block_id {
+            return Err(RaikoError::Preflight(format!(
+                "Indirect L1SLOAD requested block {} is after l1origin block {}",
+                block_number_u64, l1_origin_block_id
+            )));
+        }
+        if block_number_u64 < anchor_block_id
+            && anchor_block_id - block_number_u64
+                > raiko_lib::l1_precompiles::L1SLOAD_MAX_BLOCK_LOOKBACK
+        {
+            return Err(RaikoError::Preflight(format!(
+                "Indirect L1SLOAD requested block {} is too old: anchor={}, max lookback={}",
+                block_number_u64,
+                anchor_block_id,
+                raiko_lib::l1_precompiles::L1SLOAD_MAX_BLOCK_LOOKBACK
+            )));
+        }
+        calls_by_block.entry(block_number_u64).or_default().push((
+            *contract_address,
+            *storage_key,
+            *block_number_b256,
+        ));
     }
 
     for (block_number_u64, block_calls) in &calls_by_block {
@@ -1004,7 +1061,12 @@ pub async fn fetch_l1_proofs_for_rpc_served_calls(
                     .iter()
                     .find(|(addr, key, _)| addr == contract_address && key == storage_key_b256)
                     .map(|(_, _, bn)| *bn)
-                    .unwrap();
+                    .ok_or_else(|| {
+                        RaikoError::Preflight(format!(
+                            "Internal indirect L1SLOAD mapping error: missing call tuple for contract={:?}, key={:?}, block={}",
+                            contract_address, storage_key_b256, block_number_u64
+                        ))
+                    })?;
 
                 proofs.push(L1StorageProof {
                     contract_address: *contract_address,
@@ -1018,11 +1080,16 @@ pub async fn fetch_l1_proofs_for_rpc_served_calls(
         }
     }
 
-    // Fetch ancestor headers if indirect calls target blocks older than anchor
+    // Fetch predecessor/successor headers for indirect calls.
     let min_requested_block = calls_by_block
         .keys()
         .copied()
         .min()
+        .unwrap_or(anchor_block_id);
+    let max_requested_block = calls_by_block
+        .keys()
+        .copied()
+        .max()
         .unwrap_or(anchor_block_id);
     let l1_ancestor_headers = if min_requested_block < anchor_block_id {
         info!(
@@ -1034,10 +1101,20 @@ pub async fn fetch_l1_proofs_for_rpc_served_calls(
     } else {
         Vec::new()
     };
+    let l1_successor_headers = if max_requested_block > anchor_block_id {
+        info!(
+            "Fetching L1 successor headers for indirect calls: blocks {} to {}",
+            anchor_block_id, max_requested_block
+        );
+        fetch_l1_successor_headers(l1_provider, anchor_block_id, max_requested_block).await?
+    } else {
+        Vec::new()
+    };
 
     Ok(L1StorageProofCollection {
         proofs,
         l1_ancestor_headers,
+        l1_successor_headers,
     })
 }
 
@@ -1083,6 +1160,48 @@ async fn fetch_l1_ancestor_headers(
 
     info!(
         "Fetched {} L1 ancestor headers (blocks {} to {})",
+        headers.len(),
+        headers.first().map(|h| h.number).unwrap_or(0),
+        headers.last().map(|h| h.number).unwrap_or(0)
+    );
+
+    Ok(headers)
+}
+
+/// Fetch L1 headers from `anchor_block` (inclusive) to `to_block` (inclusive).
+///
+/// The returned chain starts at the anchor header so the prover can:
+/// 1. verify anchor header's state root equals trusted anchor_state_root
+/// 2. verify forward parent_hash linkage up to the requested block
+///
+/// Returns headers ordered from oldest to newest.
+async fn fetch_l1_successor_headers(
+    l1_provider: &RpcBlockDataProvider,
+    anchor_block: u64,
+    to_block: u64,
+) -> RaikoResult<Vec<reth_primitives::Header>> {
+    if to_block <= anchor_block {
+        return Ok(Vec::new());
+    }
+
+    let num_headers = (to_block - anchor_block + 1) as usize;
+    info!(
+        "Fetching {} L1 headers from block {} to {} (successor chain)",
+        num_headers, anchor_block, to_block
+    );
+
+    let blocks_to_fetch: Vec<(u64, bool)> = (anchor_block..=to_block).map(|n| (n, false)).collect();
+    let blocks = l1_provider.get_blocks(&blocks_to_fetch).await?;
+
+    let mut headers: Vec<reth_primitives::Header> = blocks
+        .into_iter()
+        .map(|block| block.header.inner.clone())
+        .collect();
+
+    headers.sort_by_key(|h| h.number);
+
+    info!(
+        "Fetched {} L1 successor headers (blocks {} to {})",
         headers.len(),
         headers.first().map(|h| h.number).unwrap_or(0),
         headers.last().map(|h| h.number).unwrap_or(0)

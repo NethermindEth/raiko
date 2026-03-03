@@ -90,6 +90,17 @@ pub struct GuestInput {
     #[serde_as(as = "Vec<BincodeCompactHeader>")]
     #[serde(default)]
     pub l1_ancestor_headers: Vec<Header>,
+    /// L1 successor block headers for verifying L1SLOAD at blocks newer than anchor.
+    ///
+    /// When L1SLOAD calls request state from an L1 block after the anchor block,
+    /// we need a forward chain starting at the anchor header up to the newest requested block.
+    /// The prover verifies parent_hash linkage forward from the trusted anchor and
+    /// obtains trusted state roots for those newer blocks.
+    ///
+    /// Ordered from oldest to newest and starts with the anchor header when non-empty.
+    #[serde_as(as = "Vec<BincodeCompactHeader>")]
+    #[serde(default)]
+    pub l1_successor_headers: Vec<Header>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
@@ -548,7 +559,7 @@ mod test {
     #[test]
     fn test_guest_input_se_de() {
         let input = GuestInput {
-            block: Block::default(),
+            block: TaikoBlock::default(),
             chain_spec: ChainSpec::default(),
             parent_header: Header::default(),
             parent_state_trie: MptNode::default(),
@@ -558,6 +569,7 @@ mod test {
             taiko: TaikoGuestInput::default(),
             l1_storage_proofs: vec![],
             l1_ancestor_headers: vec![],
+            l1_successor_headers: vec![],
         };
         let input_ser = serde_json::to_string(&input).unwrap();
         let input_de: GuestInput = serde_json::from_str(&input_ser).unwrap();
@@ -567,7 +579,7 @@ mod test {
     #[test]
     fn test_guest_input_value_sede() {
         let input = GuestInput {
-            block: Block::default(),
+            block: TaikoBlock::default(),
             chain_spec: ChainSpec::default(),
             parent_header: Header::default(),
             parent_state_trie: MptNode::default(),
@@ -577,6 +589,7 @@ mod test {
             taiko: TaikoGuestInput::default(),
             l1_storage_proofs: vec![],
             l1_ancestor_headers: vec![],
+            l1_successor_headers: vec![],
         };
         let input_ser = serde_json::to_value(&input).unwrap();
         let input_de: GuestInput = serde_json::from_value(input_ser).unwrap();

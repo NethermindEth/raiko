@@ -71,13 +71,13 @@ reth-revm = { git = "https://github.com/paradigmxyz/reth.git", tag = "v1.11.0", 
 reth-provider = { git = "https://github.com/paradigmxyz/reth.git", tag = "v1.11.0", default-features = false }
 reth-storage-api = { git = "https://github.com/paradigmxyz/reth.git", tag = "v1.11.0", default-features = false }
 
-alethia-reth-block = { git = "https://github.com/NethermindEth/alethia-reth.git", rev = "11f6a922c30dd796a609c1c1c9e09abe5d680129", default-features = false }
-alethia-reth-chainspec = { git = "https://github.com/NethermindEth/alethia-reth.git", rev = "11f6a922c30dd796a609c1c1c9e09abe5d680129", default-features = false }
-alethia-reth-consensus = { git = "https://github.com/NethermindEth/alethia-reth.git", rev = "11f6a922c30dd796a609c1c1c9e09abe5d680129", default-features = false }
-alethia-reth-evm = { git = "https://github.com/NethermindEth/alethia-reth.git", rev = "11f6a922c30dd796a609c1c1c9e09abe5d680129", default-features = false, features = [
+alethia-reth-block = { git = "https://github.com/NethermindEth/alethia-reth.git", rev = "fefbcc7a33d1888483e38ed88d1d428ad5f1aa33", default-features = false }
+alethia-reth-chainspec = { git = "https://github.com/NethermindEth/alethia-reth.git", rev = "fefbcc7a33d1888483e38ed88d1d428ad5f1aa33", default-features = false }
+alethia-reth-consensus = { git = "https://github.com/NethermindEth/alethia-reth.git", rev = "fefbcc7a33d1888483e38ed88d1d428ad5f1aa33", default-features = false }
+alethia-reth-evm = { git = "https://github.com/NethermindEth/alethia-reth.git", rev = "fefbcc7a33d1888483e38ed88d1d428ad5f1aa33", default-features = false, features = [
     "serde",
 ] }
-alethia-reth-primitives = { git = "https://github.com/NethermindEth/alethia-reth.git", rev = "11f6a922c30dd796a609c1c1c9e09abe5d680129", default-features = false, features = [
+alethia-reth-primitives = { git = "https://github.com/NethermindEth/alethia-reth.git", rev = "fefbcc7a33d1888483e38ed88d1d428ad5f1aa33", default-features = false, features = [
     "serde-bincode-compat",
 ] }
 

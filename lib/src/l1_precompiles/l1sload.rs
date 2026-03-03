@@ -1,5 +1,6 @@
 use alethia_reth_evm::precompiles::l1sload::{
-    clear_l1_storage, set_anchor_block_id, set_l1_storage_value, L1SLOAD_MAX_BLOCK_LOOKBACK,
+    clear_l1_storage, set_anchor_block_id, set_l1_origin_block_id, set_l1_storage_value,
+    L1SLOAD_MAX_BLOCK_LOOKBACK,
 };
 use alloy_primitives::{Bytes, B256, U256};
 use alloy_rlp::{Buf, Decodable, Header as RlpHeader};
@@ -31,7 +32,7 @@ pub fn acquire_l1sload_lock() -> MutexGuard<'static, ()> {
 ///
 /// This function:
 /// 1. Builds a verified map of `block_number → state_root` by walking back from the anchor block
-///    through the L1 ancestor headers, verifying parent_hash linkage at each step.
+///    through predecessor and successor header chains, verifying parent_hash linkage at each step.
 /// 2. For each L1StorageProof, verifies the MPT proof against the state root of the
 ///    requested block number.
 /// 3. Populates the L1SLOAD precompile cache with verified (address, key, block_number) → value.
@@ -40,31 +41,40 @@ pub fn acquire_l1sload_lock() -> MutexGuard<'static, ()> {
 /// * `l1_storage_proofs` - Storage proofs to verify and populate
 /// * `anchor_state_root` - State root of the anchor block (trusted via anchor tx)
 /// * `anchor_block_number` - Block number of the anchor block
+/// * `l1_origin_block_number` - L1 origin block number (upper bound for forward L1SLOAD reads)
 /// * `l1_ancestor_headers` - Chain of L1 headers from oldest requested block to anchor block - 1.
-///   The anchor block's state root is provided separately. These headers form a verifiable chain
-///   via parent_hash linkage.
+/// * `l1_successor_headers` - Chain of L1 headers from anchor block to newest requested forward block.
 pub fn verify_and_populate_l1sload_proofs(
     l1_storage_proofs: &[L1StorageProof],
     anchor_state_root: B256,
     anchor_block_number: u64,
+    l1_origin_block_number: u64,
     l1_ancestor_headers: &[Header],
+    l1_successor_headers: &[Header],
 ) -> Result<()> {
     if l1_storage_proofs.is_empty() {
         return Ok(());
     }
 
-    // Set anchor block ID for the precompile's range check
+    // Set block context for the precompile's range checks.
     set_anchor_block_id(anchor_block_number);
+    set_l1_origin_block_id(l1_origin_block_number);
 
-    // Build verified block_number → state_root map by walking back from the anchor block.
-    let state_root_map =
-        build_verified_state_root_map(anchor_state_root, anchor_block_number, l1_ancestor_headers)?;
+    // Build verified block_number → state_root map by walking from anchor in both directions.
+    let state_root_map = build_verified_state_root_map(
+        anchor_state_root,
+        anchor_block_number,
+        l1_ancestor_headers,
+        l1_successor_headers,
+    )?;
 
     info!(
-        "Built verified state root map with {} entries (anchor block {} + {} ancestor headers)",
+        "Built verified state root map with {} entries (anchor={}, l1origin={}, predecessor_headers={}, successor_headers={})",
         state_root_map.len(),
         anchor_block_number,
-        l1_ancestor_headers.len()
+        l1_origin_block_number,
+        l1_ancestor_headers.len(),
+        l1_successor_headers.len()
     );
 
     for (i, proof) in l1_storage_proofs.iter().enumerate() {
@@ -121,11 +131,19 @@ pub fn verify_and_populate_l1sload_proofs(
 /// Verification happens later in the proving phase via `verify_and_populate_l1sload_proofs`.
 ///
 /// Must be called before any EVM execution to ensure L1SLOAD precompile has access to L1 data.
-pub fn populate_l1sload_cache(l1_storage_proofs: &[L1StorageProof], anchor_block_number: u64) {
-    // Always set anchor block ID so indirect L1SLOAD calls can pass range checks
+pub fn populate_l1sload_cache(
+    l1_storage_proofs: &[L1StorageProof],
+    anchor_block_number: u64,
+    l1_origin_block_number: u64,
+) {
+    // Always set anchor/l1origin block IDs so indirect L1SLOAD calls can pass range checks
     // even when there are no direct pre-fetched proofs.
     set_anchor_block_id(anchor_block_number);
-    debug!("L1SLOAD anchor block ID set: {}", anchor_block_number);
+    set_l1_origin_block_id(l1_origin_block_number);
+    debug!(
+        "L1SLOAD context set: anchor={}, l1origin={}",
+        anchor_block_number, l1_origin_block_number
+    );
 
     if l1_storage_proofs.is_empty() {
         debug!("No direct L1SLOAD proofs; anchor context set for indirect calls");
@@ -148,130 +166,164 @@ pub fn populate_l1sload_cache(l1_storage_proofs: &[L1StorageProof], anchor_block
     }
 }
 
-/// Clear L1SLOAD cache and anchor block ID context
+/// Clear L1SLOAD cache and block-range context
 #[inline(always)]
 pub fn clear_l1sload_cache() {
     clear_l1_storage();
 }
 
-/// Build a verified map of `block_number → state_root` by walking back from the anchor block.
+/// Build a verified map of `block_number → state_root` by walking from the anchor block.
 ///
 /// The anchor block's state root is trusted (verified via the anchor transaction).
-/// For each L1 ancestor header, we verify:
+/// For predecessor headers (< anchor), we verify:
 /// 1. The header's hash matches the `parent_hash` of the next (more recent) block
 /// 2. The header's block number is sequential
 ///
-/// This gives us a chain of trust from the anchor block back to the oldest requested block.
+/// For successor headers (> anchor), we verify:
+/// 1. The chain starts with the anchor header and its state root matches trusted anchor state root
+/// 2. Each newer header references the previous header via `parent_hash`
+/// 3. Block numbers are sequential
 fn build_verified_state_root_map(
     anchor_state_root: B256,
     anchor_block_number: u64,
     l1_ancestor_headers: &[Header],
+    l1_successor_headers: &[Header],
 ) -> Result<HashMap<u64, B256>> {
     let mut state_root_map = HashMap::new();
 
     // The anchor block's state root is trusted
     state_root_map.insert(anchor_block_number, anchor_state_root);
 
-    if l1_ancestor_headers.is_empty() {
-        return Ok(state_root_map);
-    }
-
-    // Validate lookback limit
-    let oldest_header = l1_ancestor_headers.first().unwrap();
-    if anchor_block_number.saturating_sub(oldest_header.number) > L1SLOAD_MAX_BLOCK_LOOKBACK {
-        bail!(
-            "L1 ancestor headers span too many blocks: anchor={}, oldest={}, max={}",
-            anchor_block_number,
-            oldest_header.number,
-            L1SLOAD_MAX_BLOCK_LOOKBACK
-        );
-    }
-
-    // The l1_ancestor_headers are ordered from oldest to newest (up to anchor - 1).
-    // We walk from the anchor block backwards, verifying parent_hash linkage.
-    //
-    // Build a lookup: block_number → header for the ancestor headers
-    let mut header_by_number: HashMap<u64, &Header> = HashMap::new();
-    for header in l1_ancestor_headers {
-        header_by_number.insert(header.number, header);
-    }
-
-    // Walk backward from anchor block - 1
-    // Sort headers by block number in descending order for verification
-    let mut sorted_numbers: Vec<u64> = header_by_number.keys().copied().collect();
-    sorted_numbers.sort_unstable_by(|a, b| b.cmp(a)); // descending
-
-    // Verify chain integrity: walk from newest ancestor header down to oldest
-    // Each header[N]'s parent_hash must equal hash(header[N-1])
-    for window in sorted_numbers.windows(2) {
-        let newer_num = window[0];
-        let older_num = window[1];
-
-        let newer_header = header_by_number[&newer_num];
-        let older_header = header_by_number[&older_num];
-
-        // Verify block numbers are sequential
-        if newer_num != older_num + 1 {
+    if !l1_ancestor_headers.is_empty() {
+        // Validate lookback limit
+        let oldest_header = l1_ancestor_headers.first().unwrap();
+        if anchor_block_number.saturating_sub(oldest_header.number) > L1SLOAD_MAX_BLOCK_LOOKBACK {
             bail!(
-                "Non-sequential L1 ancestor headers: block {} followed by block {} (expected {})",
-                older_num,
-                newer_num,
-                older_num + 1
-            );
-        }
-
-        // Verify parent_hash linkage
-        let older_hash = older_header.hash_slow();
-        if newer_header.parent_hash != older_hash {
-            bail!(
-                "L1 ancestor header chain broken: block {} parent_hash={:?} \
-                 does not match hash of block {}={:?}",
-                newer_num,
-                newer_header.parent_hash,
-                older_num,
-                older_hash
-            );
-        }
-
-        // Add this header's state root to the map
-        state_root_map.insert(older_num, older_header.state_root);
-    }
-
-    // Also add the newest ancestor header's state root
-    if let Some(&newest_num) = sorted_numbers.first() {
-        let newest_header = header_by_number[&newest_num];
-        state_root_map.insert(newest_num, newest_header.state_root);
-
-        if newest_num >= anchor_block_number {
-            bail!(
-                "L1 ancestor header block number {} >= anchor block number {}",
-                newest_num,
-                anchor_block_number
-            );
-        }
-
-        // Verify the newest ancestor immediately precedes the anchor block (PR #4).
-        // This ensures the ancestor chain is contiguous up to the anchor.
-        // NOTE: We cannot verify hash(header[anchor-1]) == anchor_block.parent_hash
-        // because we only have the anchor's state_root (from the anchor tx), not its
-        // full header. This is an acceptable trust assumption since the ancestor headers
-        // come from the same L1 RPC that provided the anchor state root.
-        if newest_num != anchor_block_number - 1 {
-            bail!(
-                "Newest L1 ancestor header (block {}) does not immediately precede \
-                 anchor block {}. Expected block {}.",
-                newest_num,
+                "L1 ancestor headers span too many blocks: anchor={}, oldest={}, max={}",
                 anchor_block_number,
-                anchor_block_number - 1
+                oldest_header.number,
+                L1SLOAD_MAX_BLOCK_LOOKBACK
             );
+        }
+
+        // The l1_ancestor_headers are ordered from oldest to newest (up to anchor - 1).
+        // We walk from the anchor block backwards, verifying parent_hash linkage.
+        let mut header_by_number: HashMap<u64, &Header> = HashMap::new();
+        for header in l1_ancestor_headers {
+            header_by_number.insert(header.number, header);
+        }
+
+        let mut sorted_numbers: Vec<u64> = header_by_number.keys().copied().collect();
+        sorted_numbers.sort_unstable_by(|a, b| b.cmp(a)); // descending
+
+        for window in sorted_numbers.windows(2) {
+            let newer_num = window[0];
+            let older_num = window[1];
+            let newer_header = header_by_number[&newer_num];
+            let older_header = header_by_number[&older_num];
+
+            if newer_num != older_num + 1 {
+                bail!(
+                    "Non-sequential L1 ancestor headers: block {} followed by block {} (expected {})",
+                    older_num,
+                    newer_num,
+                    older_num + 1
+                );
+            }
+
+            let older_hash = older_header.hash_slow();
+            if newer_header.parent_hash != older_hash {
+                bail!(
+                    "L1 ancestor header chain broken: block {} parent_hash={:?} \
+                     does not match hash of block {}={:?}",
+                    newer_num,
+                    newer_header.parent_hash,
+                    older_num,
+                    older_hash
+                );
+            }
+
+            state_root_map.insert(older_num, older_header.state_root);
+        }
+
+        if let Some(&newest_num) = sorted_numbers.first() {
+            let newest_header = header_by_number[&newest_num];
+            state_root_map.insert(newest_num, newest_header.state_root);
+
+            if newest_num >= anchor_block_number {
+                bail!(
+                    "L1 ancestor header block number {} >= anchor block number {}",
+                    newest_num,
+                    anchor_block_number
+                );
+            }
+            if newest_num != anchor_block_number - 1 {
+                bail!(
+                    "Newest L1 ancestor header (block {}) does not immediately precede \
+                     anchor block {}. Expected block {}.",
+                    newest_num,
+                    anchor_block_number,
+                    anchor_block_number - 1
+                );
+            }
+        }
+
+        if sorted_numbers.len() == 1 {
+            let num = sorted_numbers[0];
+            let header = header_by_number[&num];
+            state_root_map.insert(num, header.state_root);
         }
     }
 
-    // Handle single-header case (windows(2) produces nothing for single element)
-    if sorted_numbers.len() == 1 {
-        let num = sorted_numbers[0];
-        let header = header_by_number[&num];
-        state_root_map.insert(num, header.state_root);
+    if !l1_successor_headers.is_empty() {
+        let mut sorted_successors = l1_successor_headers.to_vec();
+        sorted_successors.sort_by_key(|h| h.number);
+
+        let first = sorted_successors.first().unwrap();
+        if first.number != anchor_block_number {
+            bail!(
+                "L1 successor chain must start at anchor block {} but starts at {}",
+                anchor_block_number,
+                first.number
+            );
+        }
+        if first.state_root != anchor_state_root {
+            bail!(
+                "Anchor header state_root mismatch in successor chain: expected {:?}, got {:?}",
+                anchor_state_root,
+                first.state_root
+            );
+        }
+
+        for window in sorted_successors.windows(2) {
+            let older = &window[0];
+            let newer = &window[1];
+
+            if newer.number != older.number + 1 {
+                bail!(
+                    "Non-sequential L1 successor headers: block {} followed by block {} (expected {})",
+                    older.number,
+                    newer.number,
+                    older.number + 1
+                );
+            }
+
+            let older_hash = older.hash_slow();
+            if newer.parent_hash != older_hash {
+                bail!(
+                    "L1 successor header chain broken: block {} parent_hash={:?} \
+                     does not match hash of block {}={:?}",
+                    newer.number,
+                    newer.parent_hash,
+                    older.number,
+                    older_hash
+                );
+            }
+        }
+
+        for header in sorted_successors.into_iter().skip(1) {
+            state_root_map.insert(header.number, header.state_root);
+        }
     }
 
     Ok(state_root_map)

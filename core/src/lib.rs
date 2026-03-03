@@ -41,27 +41,20 @@ pub type MerkleProof = HashMap<Address, EIP1186AccountProofResponse>;
 /// Prepare L1SLOAD state for block execution: clear cache, and if the block has
 /// L1 storage proofs, acquire the execution lock and verify/populate them.
 ///
-/// Returns `Some(guard)` if the lock was acquired (caller must hold it until
-/// execution completes), or `None` if no L1SLOAD proofs exist.
-fn prepare_l1sload_for_execution(
-    input: &GuestInput,
-) -> RaikoResult<Option<MutexGuard<'static, ()>>> {
+/// Returns the execution guard that must be held until block execution completes.
+fn prepare_l1sload_for_execution(input: &GuestInput) -> RaikoResult<MutexGuard<'static, ()>> {
+    let guard = acquire_l1sload_lock();
+    // Always clear under lock so stale global L1SLOAD state cannot leak into this execution.
     clear_l1sload_cache();
 
     if input.l1_storage_proofs.is_empty() {
-        return Ok(None);
+        return Ok(guard);
     }
-
-    let guard = acquire_l1sload_lock();
-    let anchor_tx = input
-        .taiko
-        .anchor_tx
-        .as_ref()
-        .ok_or_else(|| {
-            RaikoError::Guest(raiko_lib::prover::ProverError::GuestError(
-                "No anchor tx for L1SLOAD verification".to_string(),
-            ))
-        })?;
+    let anchor_tx = input.taiko.anchor_tx.as_ref().ok_or_else(|| {
+        RaikoError::Guest(raiko_lib::prover::ProverError::GuestError(
+            "No anchor tx for L1SLOAD verification".to_string(),
+        ))
+    })?;
     let fork = input
         .chain_spec
         .active_fork(input.block.header.number, input.block.timestamp)
@@ -70,25 +63,30 @@ fn prepare_l1sload_for_execution(
                 "Failed to determine active fork: {e}"
             )))
         })?;
-    let (anchor_block_number, anchor_state_root) =
-        get_anchor_tx_info_by_fork(fork, anchor_tx).map_err(|e| {
+    let (anchor_block_number, anchor_state_root) = get_anchor_tx_info_by_fork(fork, anchor_tx)
+        .map_err(|e| {
             RaikoError::Guest(raiko_lib::prover::ProverError::GuestError(format!(
                 "Failed to decode anchor tx info: {e}"
             )))
         })?;
+    let l1_origin_block_number = input.taiko.l1_header.number;
     info!(
         "Verifying and populating L1SLOAD proofs: {} proofs, \
-         anchor block={}, anchor state root={:?}, {} L1 ancestor headers",
+         anchor block={}, l1origin block={}, anchor state root={:?}, predecessor headers={}, successor headers={}",
         input.l1_storage_proofs.len(),
         anchor_block_number,
+        l1_origin_block_number,
         anchor_state_root,
-        input.l1_ancestor_headers.len()
+        input.l1_ancestor_headers.len(),
+        input.l1_successor_headers.len()
     );
     verify_and_populate_l1sload_proofs(
         &input.l1_storage_proofs,
         anchor_state_root,
         anchor_block_number,
+        l1_origin_block_number,
         &input.l1_ancestor_headers,
+        &input.l1_successor_headers,
     )
     .map_err(|e| {
         RaikoError::Guest(raiko_lib::prover::ProverError::GuestError(format!(
@@ -96,7 +94,7 @@ fn prepare_l1sload_for_execution(
         )))
     })?;
 
-    Ok(Some(guard))
+    Ok(guard)
 }
 
 pub struct Raiko {
