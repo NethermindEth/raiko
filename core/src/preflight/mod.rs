@@ -164,7 +164,8 @@ pub async fn preflight<BDP: BlockDataProvider>(
         (Vec::new(), Vec::new(), Vec::new(), 0u64, 0u64)
     };
 
-    info!("Preflight: L1 storage proof collection complete");
+    info!("[jmadibekov] Preflight: L1 storage proof collection complete (proofs={}, ancestors={}, successors={})",
+        input.l1_storage_proofs.len(), input.l1_ancestor_headers.len(), input.l1_successor_headers.len());
 
     // Create the guest input (mutable: indirect L1SLOAD proofs may be added after execution)
     let mut input = GuestInput {
@@ -259,9 +260,12 @@ pub async fn preflight<BDP: BlockDataProvider>(
     // Collect indirect L1SLOAD calls discovered during execution.
     if input.chain_spec.is_taiko() && !rpc_served_calls.is_empty() {
         info!(
-            "Detected {} indirect L1SLOAD calls via live L1 RPC fallback",
+            "[jmadibekov] Detected {} indirect L1SLOAD calls via live L1 RPC fallback",
             rpc_served_calls.len()
         );
+        for (addr, key, block) in &rpc_served_calls {
+            info!("[jmadibekov]   indirect call: contract={:?}, key={:?}, block={:?}", addr, key, block);
+        }
         let l1_provider = RpcBlockDataProvider::new(&l1_chain_spec.rpc).await?;
         let additional = fetch_l1_proofs_for_rpc_served_calls(
             &l1_provider,
@@ -650,9 +654,12 @@ pub async fn batch_preflight<BDP: BlockDataProvider>(
                 // Collect indirect L1SLOAD calls discovered during execution.
                 if taiko_chain_spec.is_taiko() && !rpc_served_calls.is_empty() {
                     info!(
-                        "Batch: detected {} indirect L1SLOAD calls via live L1 RPC",
+                        "[jmadibekov] Batch: detected {} indirect L1SLOAD calls via live L1 RPC",
                         rpc_served_calls.len()
                     );
+                    for (addr, key, block) in &rpc_served_calls {
+                        info!("[jmadibekov]   batch indirect call: contract={:?}, key={:?}, block={:?}", addr, key, block);
+                    }
                     let additional = fetch_l1_proofs_for_rpc_served_calls(
                         &l1_provider,
                         &rpc_served_calls,

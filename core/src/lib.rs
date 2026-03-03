@@ -43,11 +43,14 @@ pub type MerkleProof = HashMap<Address, EIP1186AccountProofResponse>;
 ///
 /// Returns the execution guard that must be held until block execution completes.
 fn prepare_l1sload_for_execution(input: &GuestInput) -> RaikoResult<MutexGuard<'static, ()>> {
+    info!("[jmadibekov] prepare_l1sload_for_execution: acquiring lock, proofs={}", input.l1_storage_proofs.len());
     let guard = acquire_l1sload_lock();
     // Always clear under lock so stale global L1SLOAD state cannot leak into this execution.
     clear_l1sload_cache();
+    info!("[jmadibekov] prepare_l1sload_for_execution: cache cleared");
 
     if input.l1_storage_proofs.is_empty() {
+        info!("[jmadibekov] prepare_l1sload_for_execution: no proofs, skipping verification");
         return Ok(guard);
     }
     let anchor_tx = input.taiko.anchor_tx.as_ref().ok_or_else(|| {

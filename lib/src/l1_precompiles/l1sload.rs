@@ -53,8 +53,14 @@ pub fn verify_and_populate_l1sload_proofs(
     l1_successor_headers: &[Header],
 ) -> Result<()> {
     if l1_storage_proofs.is_empty() {
+        info!("[jmadibekov] verify_and_populate_l1sload_proofs: no proofs to verify, skipping");
         return Ok(());
     }
+
+    info!(
+        "[jmadibekov] verify_and_populate_l1sload_proofs: starting with {} proofs, anchor={}, l1origin={}",
+        l1_storage_proofs.len(), anchor_block_number, l1_origin_block_number
+    );
 
     // Set block context for the precompile's range checks.
     set_anchor_block_id(anchor_block_number);
@@ -80,6 +86,11 @@ pub fn verify_and_populate_l1sload_proofs(
     for (i, proof) in l1_storage_proofs.iter().enumerate() {
         let requested_block = block_number_from_b256(&proof.block_number)?;
 
+        info!(
+            "[jmadibekov] verify proof #{}: contract={:?}, key={:?}, block={}, claimed_value={:?}",
+            i, proof.contract_address, proof.storage_key, requested_block, proof.value
+        );
+
         // Look up the verified state root for this block number
         let state_root = state_root_map.get(&requested_block).ok_or_else(|| {
             anyhow::anyhow!(
@@ -89,6 +100,11 @@ pub fn verify_and_populate_l1sload_proofs(
                 state_root_map.keys().collect::<Vec<_>>()
             )
         })?;
+
+        info!(
+            "[jmadibekov] verify proof #{}: using state_root={:?} for block {}",
+            i, state_root, requested_block
+        );
 
         // Verify L1 storage proof against this block's state root
         if let Err(e) = verify_l1_proof(proof, *state_root) {
@@ -113,13 +129,13 @@ pub fn verify_and_populate_l1sload_proofs(
         );
 
         info!(
-            "Verified and populated L1SLOAD proof for contract={:?}, key={:?}, block={}, value={:?}",
-            proof.contract_address, proof.storage_key, requested_block, proof.value
+            "[jmadibekov] verify proof #{}: VERIFIED + CACHED — contract={:?}, key={:?}, block={}, value={:?}",
+            i, proof.contract_address, proof.storage_key, requested_block, proof.value
         );
     }
 
     info!(
-        "Successfully verified and populated {} L1SLOAD storage proofs",
+        "[jmadibekov] Successfully verified and populated {} L1SLOAD storage proofs",
         l1_storage_proofs.len()
     );
     Ok(())
@@ -140,17 +156,17 @@ pub fn populate_l1sload_cache(
     // even when there are no direct pre-fetched proofs.
     set_anchor_block_id(anchor_block_number);
     set_l1_origin_block_id(l1_origin_block_number);
-    debug!(
-        "L1SLOAD context set: anchor={}, l1origin={}",
-        anchor_block_number, l1_origin_block_number
+    info!(
+        "[jmadibekov] populate_l1sload_cache: context set — anchor={}, l1origin={}, proofs={}",
+        anchor_block_number, l1_origin_block_number, l1_storage_proofs.len()
     );
 
     if l1_storage_proofs.is_empty() {
-        debug!("No direct L1SLOAD proofs; anchor context set for indirect calls");
+        info!("[jmadibekov] populate_l1sload_cache: no proofs to populate (indirect calls only)");
         return;
     }
 
-    for proof in l1_storage_proofs {
+    for (i, proof) in l1_storage_proofs.iter().enumerate() {
         // Use the B256 block_number directly from the proof
         set_l1_storage_value(
             proof.contract_address,
@@ -160,8 +176,8 @@ pub fn populate_l1sload_cache(
         );
 
         info!(
-            "Populated L1SLOAD: contract={:?}, key={:?}, block={:?}, value={:?}",
-            proof.contract_address, proof.storage_key, proof.block_number, proof.value
+            "[jmadibekov] populate_l1sload_cache: cached proof #{} — contract={:?}, key={:?}, block={:?}, value={:?}",
+            i, proof.contract_address, proof.storage_key, proof.block_number, proof.value
         );
     }
 }
@@ -190,6 +206,11 @@ fn build_verified_state_root_map(
     l1_successor_headers: &[Header],
 ) -> Result<HashMap<u64, B256>> {
     let mut state_root_map = HashMap::new();
+
+    info!(
+        "[jmadibekov] build_verified_state_root_map: anchor={}, anchor_state_root={:?}, ancestors={}, successors={}",
+        anchor_block_number, anchor_state_root, l1_ancestor_headers.len(), l1_successor_headers.len()
+    );
 
     // The anchor block's state root is trusted
     state_root_map.insert(anchor_block_number, anchor_state_root);
@@ -339,6 +360,11 @@ fn block_number_from_b256(block_number: &B256) -> Result<u64> {
 /// Verify L1 storage and account proof against a given state root using MPT proof verification.
 /// For non-existent accounts/storage should return zero, given that the provided proofs are empty.
 fn verify_l1_proof(proof: &L1StorageProof, state_root: B256) -> Result<()> {
+    info!(
+        "[jmadibekov] verify_l1_proof: contract={:?}, key={:?}, state_root={:?}, account_proof_nodes={}, storage_proof_nodes={}",
+        proof.contract_address, proof.storage_key, state_root, proof.account_proof.len(), proof.storage_proof.len()
+    );
+
     // Get and verify account data
     let account_key = B256::from(keccak(proof.contract_address.as_slice()));
     let account_rlp = get_and_verify_value(account_key, state_root, &proof.account_proof)?;
@@ -390,8 +416,8 @@ fn verify_l1_proof(proof: &L1StorageProof, state_root: B256) -> Result<()> {
     }
 
     info!(
-        "L1 storage proof verified for contract {:?}, value={:?}",
-        proof.contract_address, proof.value
+        "[jmadibekov] verify_l1_proof: MPT VERIFIED — contract={:?}, key={:?}, value={:?}",
+        proof.contract_address, proof.storage_key, proof.value
     );
     Ok(())
 }

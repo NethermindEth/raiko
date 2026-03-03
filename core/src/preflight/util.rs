@@ -780,7 +780,7 @@ pub async fn collect_l1_storage_proofs(
     ]);
 
     // Method 1: Detect direct calls by scanning transactions
-    debug!("Scanning transactions for L1SLOAD calls");
+    info!("[jmadibekov] collect_l1_storage_proofs: scanning {} transactions for L1SLOAD calls (anchor={}, l1origin={})", block.body.transactions.len(), anchor_block_id, l1_origin_block_id);
     for tx in &block.body.transactions {
         if let Some(to_address) = tx.to() {
             // L1SLOAD input format (84 bytes):
@@ -823,7 +823,10 @@ pub async fn collect_l1_storage_proofs(
         }
     }
 
-    info!("L1SLOAD calls detected: {}", detected_calls.len());
+    info!("[jmadibekov] L1SLOAD direct calls detected: {}", detected_calls.len());
+    for (addr, key, block) in &detected_calls {
+        info!("[jmadibekov]   — contract={:?}, key={:?}, block={:?}", addr, key, block);
+    }
 
     if detected_calls.is_empty() {
         return Ok(L1StorageProofCollection {
@@ -925,7 +928,10 @@ pub async fn collect_l1_storage_proofs(
         }
     }
 
-    info!("Collected {} L1 storage proofs", proofs.len());
+    info!("[jmadibekov] Collected {} L1 storage proofs", proofs.len());
+    for (i, p) in proofs.iter().enumerate() {
+        info!("[jmadibekov]   proof #{}: contract={:?}, key={:?}, block={:?}, value={:?}", i, p.contract_address, p.storage_key, p.block_number, p.value);
+    }
 
     // Fetch L1 predecessor/successor headers for proof verification.
     let min_requested_block = calls_by_block
