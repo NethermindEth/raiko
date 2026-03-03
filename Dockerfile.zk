@@ -1,8 +1,9 @@
-FROM rust:1.88.0 AS base-builder
+# ── Stage 1: Install Rust + risc0/sp1 toolchains (no CUDA needed) ────
+FROM ubuntu:24.04 AS toolchain-installer
 
 ENV DEBIAN_FRONTEND=noninteractive
-ARG BUILD_FLAGS=""
 
+# Install system dependencies + Rust
 RUN apt-get update && \
     apt-get install -y \
     build-essential \
@@ -10,32 +11,130 @@ RUN apt-get update && \
     protobuf-compiler \
     jq \
     clang \
-    sudo && \
+    sudo \
+    curl \
+    git \
+    pkg-config \
+    libssl-dev && \
     apt-get clean && \
     rm -rf /var/lib/apt/lists/*
 
+# Install Rust
+ENV RUSTUP_HOME=/usr/local/rustup \
+    CARGO_HOME=/usr/local/cargo \
+    PATH=/usr/local/cargo/bin:$PATH
+RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+
 WORKDIR /opt/raiko
-# build related files
 COPY makefile makefile
 COPY script script
-RUN ls -al > /tmp/file_list.txt
-RUN cat /tmp/file_list.txt
+
+RUN mkdir -p ~/.cargo/bin
+
+# Limit parallelism to avoid OOM 
+# ARG CARGO_BUILD_JOBS=2
+# ENV CARGO_BUILD_JOBS=${CARGO_BUILD_JOBS}
+# ENV NUM_JOBS=${CARGO_BUILD_JOBS}
 
 ENV TARGET=risc0
-RUN mkdir -p ~/.cargo/bin
-RUN echo "Building for risc0"
-RUN make install
-RUN echo "Building for sp1"
-ENV TARGET=sp1
+RUN echo "Installing risc0 toolchain"
 RUN make install
 
-FROM base-builder AS builder
+ENV TARGET=sp1
+RUN echo "Installing sp1 toolchain"
+RUN make install
+
+# ── Stage 2: Guest ELF build (cached separately) ────────────────────
+FROM toolchain-installer AS guest-builder
+
+WORKDIR /opt/raiko
+
+# Copy only what make guest needs (builders depend on pipeline + harness, so include them)
+COPY Cargo.lock Cargo.lock
+COPY Cargo.toml Cargo.toml
+COPY rust-toolchain rust-toolchain
+COPY lib lib
+COPY provers provers
+COPY pipeline pipeline
+COPY harness harness
+COPY makefile makefile
+COPY script script
+
+# Copy config files that raiko-lib's include_str! references at compile time
+COPY host/config/chain_spec_list_default.json host/config/chain_spec_list_default.json
+
+# Stub out workspace members that guests don't need, so cargo resolves the workspace
+RUN mkdir -p host/src && echo "fn main() {}" > host/src/main.rs && touch host/src/lib.rs \
+    && printf '[package]\nname = "raiko-host"\nversion = "0.1.0"\nedition = "2021"\n' > host/Cargo.toml \
+    && mkdir -p core/src && touch core/src/lib.rs \
+    && printf '[package]\nname = "raiko-core"\nversion = "0.1.0"\nedition = "2021"\n' > core/Cargo.toml \
+    && mkdir -p taskdb/src && touch taskdb/src/lib.rs \
+    && printf '[package]\nname = "raiko-taskdb"\nversion = "0.1.0"\nedition = "2021"\n' > taskdb/Cargo.toml \
+    && mkdir -p reqpool/src && touch reqpool/src/lib.rs \
+    && printf '[package]\nname = "raiko-reqpool"\nversion = "0.1.0"\nedition = "2021"\n' > reqpool/Cargo.toml \
+    && mkdir -p reqactor/src && touch reqactor/src/lib.rs \
+    && printf '[package]\nname = "raiko-reqactor"\nversion = "0.1.0"\nedition = "2021"\n' > reqactor/Cargo.toml \
+    && mkdir -p ballot/src && touch ballot/src/lib.rs \
+    && printf '[package]\nname = "raiko-ballot"\nversion = "0.1.0"\nedition = "2021"\n' > ballot/Cargo.toml \
+    && mkdir -p redis-derive/src && touch redis-derive/src/lib.rs \
+    && printf '[package]\nname = "raiko-redis-derive"\nversion = "0.1.0"\nedition = "2021"\n' > redis-derive/Cargo.toml
+
+RUN mkdir -p ~/.cargo/bin
+
+ENV TARGET=risc0
+RUN echo "Building risc0 guest ELFs"
+RUN make guest
+# Verify risc0 guest ELFs were produced 
+RUN ls provers/risc0/guest/target/riscv32im-risc0-zkvm-elf/release/*.bin
+
+ENV TARGET=sp1
+RUN echo "Building sp1 guest ELFs"
+RUN make guest
+# Verify sp1 guest ELFs were produced
+RUN ls provers/sp1/guest/elf/*.elf
+
+# ── Stage 3: Host build with CUDA (depends on all source code) ──────
+FROM nvidia/cuda:12.4.0-devel-ubuntu22.04 AS builder
 
 ENV DEBIAN_FRONTEND=noninteractive
 ARG BUILD_FLAGS=""
 
+# Install system dependencies (needed for cargo build)
+RUN apt-get update && \
+    apt-get install -y \
+    build-essential \
+    cracklib-runtime \
+    protobuf-compiler \
+    jq \
+    clang \
+    sudo \
+    curl \
+    git \
+    pkg-config \
+    libssl-dev && \
+    apt-get clean && \
+    rm -rf /var/lib/apt/lists/*
+
+# Wrap nvcc so -arch=native (which fails without a GPU) is replaced with an
+# explicit target.  sm_80 = Ampere (A100/A10) and the PTX it emits can be
+# JIT-compiled at runtime for newer architectures.
+ARG CUDA_ARCH=sm_80
+RUN mv /usr/local/cuda/bin/nvcc /usr/local/cuda/bin/nvcc.real && \
+    printf '#!/bin/bash\nexec /usr/local/cuda/bin/nvcc.real "${@/-arch=native/-arch=%s}"\n' "$CUDA_ARCH" \
+    > /usr/local/cuda/bin/nvcc && \
+    chmod +x /usr/local/cuda/bin/nvcc
+
+# Copy Rust + toolchains from toolchain-installer (avoids re-downloading)
+COPY --from=toolchain-installer /usr/local/rustup /usr/local/rustup
+COPY --from=toolchain-installer /usr/local/cargo /usr/local/cargo
+COPY --from=toolchain-installer /root/.risc0 /root/.risc0
+COPY --from=toolchain-installer /root/.sp1 /root/.sp1
+ENV RUSTUP_HOME=/usr/local/rustup \
+    CARGO_HOME=/usr/local/cargo \
+    PATH=/usr/local/cargo/bin:$PATH
+
 WORKDIR /opt/raiko
-# build related files
+# Copy the full workspace
 COPY Cargo.lock Cargo.lock
 COPY Cargo.toml Cargo.toml
 COPY lib lib
@@ -53,23 +152,19 @@ COPY reqpool reqpool
 COPY reqactor reqactor
 COPY ballot ballot
 COPY redis-derive redis-derive
-RUN ls -al > /tmp/file_list.txt
-RUN cat /tmp/file_list.txt
 
-ENV TARGET=risc0
+# Bring in cached guest ELFs from guest-builder
+COPY --from=guest-builder /opt/raiko/provers/sp1/guest/elf /opt/raiko/provers/sp1/guest/elf
+COPY --from=guest-builder /opt/raiko/provers/risc0/guest /opt/raiko/provers/risc0/guest
+
 RUN mkdir -p ~/.cargo/bin
-RUN echo "Building for risc0"
-RUN make guest
-RUN echo "Building for sp1"
-ENV TARGET=sp1
-RUN make guest
 # Limit parallelism to avoid OOM during heavy ZK crate compilation (sp1-sdk + risc0 circuits)
-ARG CARGO_BUILD_JOBS=2
-ENV CARGO_BUILD_JOBS=${CARGO_BUILD_JOBS}
-ENV NUM_JOBS=${CARGO_BUILD_JOBS}
-RUN cargo build --release ${BUILD_FLAGS} --features "sp1,risc0,cuda" --features "docker_build"
+# ARG CARGO_BUILD_JOBS=2
+# ENV CARGO_BUILD_JOBS=${CARGO_BUILD_JOBS}
+# ENV NUM_JOBS=${CARGO_BUILD_JOBS}
+RUN cargo build --release ${BUILD_FLAGS} --features "sp1,risc0,cuda"
 
-FROM ubuntu:22.04 AS raiko-zk
+FROM nvidia/cuda:12.4.0-runtime-ubuntu22.04 AS raiko-zk
 RUN mkdir -p \
     ./bin \
     /etc/raiko \
