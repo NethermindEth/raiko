@@ -63,7 +63,11 @@ RUN make guest
 RUN echo "Building for sp1"
 ENV TARGET=sp1
 RUN make guest
-RUN cargo build --release ${BUILD_FLAGS} --features "sp1,risc0" --features "docker_build"
+# Limit parallelism to avoid OOM during heavy ZK crate compilation (sp1-sdk + risc0 circuits)
+ARG CARGO_BUILD_JOBS=2
+ENV CARGO_BUILD_JOBS=${CARGO_BUILD_JOBS}
+ENV NUM_JOBS=${CARGO_BUILD_JOBS}
+RUN cargo build --release ${BUILD_FLAGS} --features "sp1,risc0,cuda" --features "docker_build"
 
 FROM ubuntu:22.04 AS raiko-zk
 RUN mkdir -p \
