@@ -1,4 +1,4 @@
-use core::{fmt::Debug, str::FromStr};
+use core::str::FromStr;
 use std::collections::HashMap;
 
 use alethia_reth_consensus::transaction::TaikoTxEnvelope;
@@ -15,6 +15,7 @@ use pacaya::{BatchInfo, BatchProposed};
 use reth_primitives::Header;
 use serde::{Deserialize, Serialize};
 use serde_with::serde_as;
+use realtime::RealTimeEventData;
 use shasta::ShastaEventData;
 use tracing::error;
 
@@ -177,6 +178,7 @@ pub enum BlockProposedFork {
     Ontake(BlockProposedV2),
     Pacaya(BatchProposed),
     Shasta(ShastaEventData),
+    RealTime(RealTimeEventData),
 }
 
 impl BlockProposedFork {
@@ -186,6 +188,11 @@ impl BlockProposedFork {
             BlockProposedFork::Ontake(block) => block.meta.blobUsed,
             BlockProposedFork::Pacaya(batch) => batch.info.blobHashes.len() > 0,
             BlockProposedFork::Shasta(event_data) => event_data
+                .proposal
+                .sources
+                .iter()
+                .all(|source| source.blobSlice.blobHashes.len() > 0),
+            BlockProposedFork::RealTime(event_data) => event_data
                 .proposal
                 .sources
                 .iter()
@@ -204,6 +211,9 @@ impl BlockProposedFork {
             BlockProposedFork::Shasta(_event_data) => {
                 unimplemented!("can not get block number from shasta proposal")
             }
+            BlockProposedFork::RealTime(_) => {
+                unimplemented!("can not get block number from realtime proposal")
+            }
             _ => 0,
         }
     }
@@ -211,6 +221,8 @@ impl BlockProposedFork {
     pub fn proposal_timestamp(&self) -> u64 {
         match self {
             BlockProposedFork::Shasta(event_data) => event_data.proposal.timestamp.to(),
+            // RealTime proposals have no on-chain timestamp (proof is pre-proposal)
+            BlockProposedFork::RealTime(_) => 0,
             _ => unimplemented!("can not get proposal timestamp from non-shasta proposal"),
         }
     }
@@ -219,6 +231,10 @@ impl BlockProposedFork {
         match self {
             BlockProposedFork::Shasta(event_data) => {
                 event_data.proposal.originBlockNumber.to::<u64>() + 1
+            }
+            // RealTime uses maxAnchorBlockNumber instead of originBlockNumber
+            BlockProposedFork::RealTime(event_data) => {
+                event_data.proposal.maxAnchorBlockNumber.to::<u64>()
             }
             _ => unimplemented!("can not get proposal block number from non-shasta proposal"),
         }
@@ -247,6 +263,13 @@ impl BlockProposedFork {
                 min_gas_excess: 0,
                 max_gas_issuance_per_block: 0,
             },
+            BlockProposedFork::RealTime(event_data) => ProtocolBaseFeeConfig {
+                adjustment_quotient: 0,
+                sharing_pctg: event_data.proposal.basefeeSharingPctg,
+                gas_issuance_per_second: 0,
+                min_gas_excess: 0,
+                max_gas_issuance_per_block: 0,
+            },
             _ => ProtocolBaseFeeConfig::default(),
         }
     }
@@ -263,6 +286,10 @@ impl BlockProposedFork {
             )),
             BlockProposedFork::Shasta(_) => {
                 error!("blob_tx_slice_param not supported for shasta proposal");
+                None
+            }
+            BlockProposedFork::RealTime(_) => {
+                error!("blob_tx_slice_param not supported for realtime proposal");
                 None
             }
             _ => None,
@@ -282,6 +309,7 @@ impl BlockProposedFork {
         match self {
             BlockProposedFork::Pacaya(batch) => Some(&batch.info),
             BlockProposedFork::Shasta(_) => unimplemented!("Shasta batch_info implementation"),
+            BlockProposedFork::RealTime(_) => None,
             _ => None,
         }
     }
@@ -298,6 +326,8 @@ impl BlockProposedFork {
     pub fn proposer(&self) -> Address {
         match self {
             BlockProposedFork::Shasta(event_data) => event_data.proposal.proposer,
+            // RealTime proposals have no on-chain proposer field
+            BlockProposedFork::RealTime(_) => Address::ZERO,
             _ => unimplemented!("proposer is not supported for non-shasta fork"),
         }
     }
@@ -305,6 +335,8 @@ impl BlockProposedFork {
     pub fn fork_spec(&self) -> TaikoSpecId {
         match self {
             BlockProposedFork::Shasta(_) => TaikoSpecId::SHASTA,
+            // TODO: use TaikoSpecId::REALTIME once alethia-reth-evm adds the variant
+            BlockProposedFork::RealTime(_) => TaikoSpecId::SHASTA,
             BlockProposedFork::Pacaya(_) => TaikoSpecId::PACAYA,
             BlockProposedFork::Ontake(_) => TaikoSpecId::ONTAKE,
             _ => unimplemented!("unsupported fork spec"),
@@ -312,16 +344,19 @@ impl BlockProposedFork {
     }
 
     pub fn is_shasta(&self) -> bool {
-        match self {
-            BlockProposedFork::Shasta(_) => true,
-            _ => false,
-        }
+        matches!(self, BlockProposedFork::Shasta(_))
+    }
+
+    pub fn is_realtime(&self) -> bool {
+        matches!(self, BlockProposedFork::RealTime(_))
     }
 
     pub fn proposal_id(&self) -> u64 {
         match self {
             BlockProposedFork::Shasta(event_data) => event_data.proposal.id.to(),
             BlockProposedFork::Pacaya(batch) => batch.meta.batchId,
+            // RealTime proposals have no on-chain ID (proof is pre-proposal)
+            BlockProposedFork::RealTime(_) => 0,
             _ => 0,
         }
     }
@@ -329,6 +364,12 @@ impl BlockProposedFork {
     pub fn proposal_hash(&self) -> B256 {
         match self {
             BlockProposedFork::Shasta(event_data) => hash_proposal(&event_data.proposal),
+            BlockProposedFork::RealTime(event_data) => {
+                crate::primitives::keccak::keccak(
+                    alloy_sol_types::SolValue::abi_encode(&event_data.proposal),
+                )
+                .into()
+            }
             _ => B256::ZERO,
         }
     }
@@ -336,6 +377,9 @@ impl BlockProposedFork {
     pub fn parent_proposal_hash(&self) -> B256 {
         match self {
             BlockProposedFork::Shasta(event_data) => event_data.proposal.parentProposalHash,
+            BlockProposedFork::RealTime(event_data) => {
+                event_data.proposal.parentProposalHash
+            }
             _ => B256::ZERO,
         }
     }
@@ -343,6 +387,12 @@ impl BlockProposedFork {
     pub fn all_source_blob_hashes(&self) -> Vec<Vec<B256>> {
         match self {
             BlockProposedFork::Shasta(event_data) => event_data
+                .proposal
+                .sources
+                .iter()
+                .map(|s| s.blobSlice.blobHashes.clone())
+                .collect(),
+            BlockProposedFork::RealTime(event_data) => event_data
                 .proposal
                 .sources
                 .iter()
@@ -370,16 +420,31 @@ impl BlockProposedFork {
         const SHASTA_BLOB_DATA_PREFIX_SIZE: usize = 64;
         use crate::utils::blobs::BLOB_DATA_CAPACITY as BLOB_BYTES;
 
-        let BlockProposedFork::Shasta(event_data) = self else {
-            return None;
+        // RealTime reuses the same DerivationSource / blob layout as Shasta.
+        // Extract (offset, has_blobs) since the sol! types are distinct.
+        let (blob_offset, has_blobs) = match self {
+            BlockProposedFork::Shasta(event_data) => {
+                let source = event_data.proposal.sources.get(source_idx)?;
+                (
+                    source.blobSlice.offset.to::<usize>(),
+                    !source.blobSlice.blobHashes.is_empty(),
+                )
+            }
+            BlockProposedFork::RealTime(event_data) => {
+                let source = event_data.proposal.sources.get(source_idx)?;
+                (
+                    source.blobSlice.offset.to::<usize>(),
+                    !source.blobSlice.blobHashes.is_empty(),
+                )
+            }
+            _ => return None,
         };
 
-        let source = event_data.proposal.sources.get(source_idx)?;
-        if source.blobSlice.blobHashes.is_empty() {
+        if !has_blobs {
             return None;
         }
 
-        let offset = source.blobSlice.offset.to::<usize>();
+        let offset = blob_offset;
         if offset > BLOB_BYTES.saturating_sub(SHASTA_BLOB_DATA_PREFIX_SIZE) {
             return None;
         }
@@ -508,6 +573,7 @@ pub fn get_input_path(dir: &Path, block_number: u64, network: &str) -> PathBuf {
 mod hekla;
 pub mod ontake;
 pub mod pacaya;
+pub mod realtime;
 pub mod shasta;
 
 pub use hekla::*;

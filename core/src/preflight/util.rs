@@ -17,10 +17,12 @@ use raiko_lib::{
         ontake::{BlockProposedV2, CalldataTxList},
         pacaya::BatchProposed,
         proposeBlockCall,
+        realtime::RealTimeEventData,
         shasta::{Proposed as ShastaProposed, ShastaEventData},
         BlobProofType, BlockProposed, BlockProposedFork, InputDataSource, TaikoGuestBatchInput,
         TaikoGuestInput, TaikoProverData,
     },
+    libhash::hash_signal_slots,
     primitives::eip4844::{self, commitment_to_version_hash, KZG_SETTINGS},
     utils::shasta_rules::ANCHOR_MAX_OFFSET,
 };
@@ -576,6 +578,110 @@ async fn prepare_taiko_chain_batch_input_shasta(
     .await
 }
 
+/// Prepare the input for a RealTime fork proposal.
+///
+/// Unlike Shasta, there is no on-chain `Proposed` event to fetch. The proposal is assembled
+/// locally from caller-supplied data. The function:
+/// 1. Reads the L1 header at `maxAnchorBlockNumber` to obtain `maxAnchorBlockHash`
+/// 2. Computes `signalSlotsHash` from the raw signal slots
+/// 3. Reads L1 ancestor headers for anchor linkage verification
+/// 4. Fetches blob data for each `DerivationSource` in the proposal
+/// 5. Returns a complete `TaikoGuestBatchInput` with `BlockProposedFork::RealTime`
+async fn prepare_taiko_chain_batch_input_realtime(
+    l1_chain_spec: &ChainSpec,
+    taiko_chain_spec: &ChainSpec,
+    prover_data: TaikoProverData,
+    blob_proof_type: &BlobProofType,
+    batch_anchor_tx_info: Vec<(u64, B256)>,
+    mut realtime_event_data: RealTimeEventData,
+    grandparent_header: Option<reth_primitives::Header>,
+) -> RaikoResult<TaikoGuestBatchInput> {
+    let max_anchor_block_number: u64 = realtime_event_data.proposal.maxAnchorBlockNumber.to();
+    let provider_l1 = RpcBlockDataProvider::new(&l1_chain_spec.rpc).await?;
+
+    // 1. Read L1 header at maxAnchorBlockNumber (the header's hash is maxAnchorBlockHash)
+    let l1_blocks = provider_l1
+        .get_blocks(&[(max_anchor_block_number, false)])
+        .await?;
+    let l1_header = l1_blocks
+        .first()
+        .ok_or_else(|| {
+            RaikoError::Preflight(format!(
+                "No L1 block at maxAnchorBlockNumber {max_anchor_block_number}"
+            ))
+        })?
+        .header
+        .clone();
+
+    // Fill in maxAnchorBlockHash from the fetched L1 header
+    realtime_event_data.proposal.maxAnchorBlockHash = l1_header.hash;
+
+    // 2. Compute signalSlotsHash
+    realtime_event_data.proposal.signalSlotsHash =
+        hash_signal_slots(&realtime_event_data.signal_slots);
+
+    // 3. Read L1 ancestor headers for anchor linkage
+    let l1_ancestor_headers = get_max_anchor_headers(
+        &provider_l1,
+        batch_anchor_tx_info,
+        max_anchor_block_number,
+    )
+    .await?;
+
+    // 4. Build data sources from DerivationSource[] (same pattern as Shasta, no forced inclusions)
+    let mut data_sources = Vec::new();
+    for derivation_source in realtime_event_data.proposal.sources.clone() {
+        let blob_hashes = derivation_source.blobSlice.blobHashes;
+        // RealTime: use source's blob timestamp (forced inclusions removed)
+        let l1_blob_timestamp: u64 = derivation_source.blobSlice.timestamp.to();
+
+        let (tx_data_from_calldata, blob_tx_buffers_with_proofs) = if blob_hashes.is_empty() {
+            unimplemented!("calldata txlist is not supported in realtime");
+        } else {
+            let blob_tx_buffers = get_batch_tx_data_with_proofs(
+                blob_hashes,
+                l1_blob_timestamp,
+                l1_chain_spec,
+                blob_proof_type,
+            )
+            .await?;
+            (Vec::new(), blob_tx_buffers)
+        };
+        data_sources.push(InputDataSource {
+            tx_data_from_calldata,
+            tx_data_from_blob: blob_tx_buffers_with_proofs
+                .iter()
+                .map(|(blob_tx_data, _, _)| blob_tx_data.clone())
+                .collect(),
+            blob_commitments: blob_tx_buffers_with_proofs
+                .iter()
+                .map(|(_, commit, _)| commit.clone())
+                .collect(),
+            blob_proofs: blob_tx_buffers_with_proofs
+                .iter()
+                .map(|(_, _, proof)| proof.clone())
+                .collect(),
+            blob_proof_type: blob_proof_type.clone(),
+            is_forced_inclusion: false, // RealTime: forced inclusions removed
+        });
+    }
+
+    // 5. Return TaikoGuestBatchInput
+    Ok(TaikoGuestBatchInput {
+        batch_id: 0, // RealTime has no on-chain proposal ID
+        batch_proposed: BlockProposedFork::RealTime(realtime_event_data),
+        l1_header: l1_header.try_into().unwrap(),
+        l1_ancestor_headers: l1_ancestor_headers
+            .iter()
+            .map(|header| header.clone().try_into().unwrap())
+            .collect(),
+        chain_spec: taiko_chain_spec.clone(),
+        prover_data,
+        l2_grandparent_header: grandparent_header,
+        data_sources,
+    })
+}
+
 /// Prepare the input for a Taiko chain
 pub async fn prepare_taiko_chain_batch_input(
     l1_chain_spec: &ChainSpec,
@@ -665,6 +771,31 @@ pub async fn prepare_taiko_chain_batch_input(
                 blob_proof_type,
                 batch_anchor_tx_info,
                 shasta_event_data,
+                grandparent_header,
+            )
+            .await
+        }
+        // RealTime: uses same TaikoSpecId as Shasta until REALTIME variant exists in alethia-reth-evm.
+        // Cached event data MUST be provided (no on-chain Proposed event to fetch).
+        (_, BlockProposedFork::RealTime(realtime_event_data)) => {
+            assert!(
+                batch_anchor_tx_info
+                    .windows(2)
+                    .all(|w| if w[0].0 == w[1].0 {
+                        w[0].1 == w[1].1
+                    } else {
+                        // if anchor changes, block hash is not zero
+                        w[0].0 < w[1].0 && w[0].1 != B256::ZERO && w[1].1 != B256::ZERO
+                    }),
+                "batch anchor tx info mismatch, {batch_anchor_tx_info:?}"
+            );
+            prepare_taiko_chain_batch_input_realtime(
+                l1_chain_spec,
+                taiko_chain_spec,
+                prover_data,
+                blob_proof_type,
+                batch_anchor_tx_info,
+                realtime_event_data,
                 grandparent_header,
             )
             .await

@@ -114,9 +114,13 @@ pub fn generate_transactions_for_batch_blocks(
     match batch_proposal {
         BlockProposedFork::Pacaya(_) => generate_transactions_for_pacaya_blocks(guest_batch_input),
         BlockProposedFork::Shasta(_) => generate_transactions_for_shasta_blocks(guest_batch_input),
+        // RealTime reuses the same transaction generation as Shasta
+        BlockProposedFork::RealTime(_) => {
+            generate_transactions_for_shasta_blocks(guest_batch_input)
+        }
         _ => {
             unreachable!(
-                "only pacaya and shasta batch supported, but got {:?}",
+                "only pacaya, shasta, and realtime batch supported, but got {:?}",
                 batch_proposal
             );
         }
