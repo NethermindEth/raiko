@@ -59,7 +59,7 @@ pub fn verify_and_populate_l1sload_proofs(
         l1_successor_headers,
     )?;
 
-    info!(
+    debug!(
         "Built verified state root map with {} entries (anchor={}, l1origin={}, predecessor_headers={}, successor_headers={})",
         state_root_map.len(),
         anchor_block_number,
@@ -101,7 +101,7 @@ pub fn verify_and_populate_l1sload_proofs(
         );
     }
 
-    info!(
+    debug!(
         "Verified and populated {} L1SLOAD storage proofs",
         l1_storage_proofs.len()
     );
@@ -226,12 +226,6 @@ fn build_verified_state_root_map(
                 );
             }
         }
-
-        if sorted_numbers.len() == 1 {
-            let num = sorted_numbers[0];
-            let header = header_by_number[&num];
-            state_root_map.insert(num, header.state_root);
-        }
     }
 
     if !l1_successor_headers.is_empty() {
@@ -353,16 +347,14 @@ fn verify_l1_proof(proof: &L1StorageProof, state_root: B256) -> Result<()> {
 /// Get value and verify proof.
 /// Single-pass: extracts the leaf value first, then verifies once (PR #5 optimization).
 fn get_and_verify_value(key_hash: B256, root: B256, proof: &[Bytes]) -> Result<Vec<u8>> {
+    let nibbles = Nibbles::unpack(&key_hash);
+    let proof_refs: Vec<&Bytes> = proof.iter().collect();
+
     // Handle empty proof array (proves non-existence at the root level)
     if proof.is_empty() {
-        let nibbles = Nibbles::unpack(&key_hash);
-        let proof_refs: Vec<&Bytes> = Vec::new();
         verify_proof(root, nibbles, None, proof_refs)?;
         return Ok(Vec::new());
     }
-
-    let nibbles = Nibbles::unpack(&key_hash);
-    let proof_refs: Vec<&Bytes> = proof.iter().collect();
 
     // Try to extract a leaf value from the proof. If the proof terminates at a
     // leaf node, we verify existence. If extraction fails (branch/extension node
