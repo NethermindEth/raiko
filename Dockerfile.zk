@@ -36,13 +36,11 @@ RUN mkdir -p ~/.cargo/bin
 # ENV CARGO_BUILD_JOBS=${CARGO_BUILD_JOBS}
 # ENV NUM_JOBS=${CARGO_BUILD_JOBS}
 
-ENV TARGET=risc0
 RUN echo "Installing risc0 toolchain"
-RUN make install
+RUN TARGET=risc0 make install
 
-ENV TARGET=sp1
 RUN echo "Installing sp1 toolchain"
-RUN make install
+RUN TARGET=sp1 make install
 
 # ── Stage 2: Guest ELF build (cached separately) ────────────────────
 FROM toolchain-installer AS guest-builder
@@ -54,7 +52,11 @@ COPY Cargo.lock Cargo.lock
 COPY Cargo.toml Cargo.toml
 COPY rust-toolchain rust-toolchain
 COPY lib lib
-COPY provers provers
+# Only copy guest/builder subdirs — driver/ changes must not bust the guest cache
+COPY provers/risc0/guest provers/risc0/guest
+COPY provers/risc0/builder provers/risc0/builder
+COPY provers/sp1/guest provers/sp1/guest
+COPY provers/sp1/builder provers/sp1/builder
 COPY pipeline pipeline
 COPY harness harness
 COPY makefile makefile
@@ -77,19 +79,31 @@ RUN mkdir -p host/src && echo "fn main() {}" > host/src/main.rs && touch host/sr
     && mkdir -p ballot/src && touch ballot/src/lib.rs \
     && printf '[package]\nname = "raiko-ballot"\nversion = "0.1.0"\nedition = "2021"\n' > ballot/Cargo.toml \
     && mkdir -p redis-derive/src && touch redis-derive/src/lib.rs \
-    && printf '[package]\nname = "raiko-redis-derive"\nversion = "0.1.0"\nedition = "2021"\n' > redis-derive/Cargo.toml
+    && printf '[package]\nname = "raiko-redis-derive"\nversion = "0.1.0"\nedition = "2021"\n' > redis-derive/Cargo.toml \
+    && mkdir -p provers/risc0/driver/src && touch provers/risc0/driver/src/lib.rs \
+    && printf '[package]\nname = "risc0-driver"\nversion = "0.1.0"\nedition = "2021"\n' > provers/risc0/driver/Cargo.toml \
+    && mkdir -p provers/sp1/driver/src && touch provers/sp1/driver/src/lib.rs \
+    && printf '[package]\nname = "sp1-driver"\nversion = "0.1.0"\nedition = "2021"\n' > provers/sp1/driver/Cargo.toml \
+    && mkdir -p provers/sgx/prover/src && touch provers/sgx/prover/src/lib.rs \
+    && printf '[package]\nname = "sgx-prover"\nversion = "0.1.0"\nedition = "2021"\n' > provers/sgx/prover/Cargo.toml \
+    && mkdir -p provers/sgx/guest/src && touch provers/sgx/guest/src/lib.rs \
+    && printf '[package]\nname = "sgx-guest"\nversion = "0.1.0"\nedition = "2021"\n' > provers/sgx/guest/Cargo.toml \
+    && mkdir -p provers/sgx/setup/src && touch provers/sgx/setup/src/lib.rs \
+    && printf '[package]\nname = "raiko-setup"\nversion = "0.1.0"\nedition = "2021"\n' > provers/sgx/setup/Cargo.toml \
+    && mkdir -p provers/tdx/src && touch provers/tdx/src/lib.rs \
+    && printf '[package]\nname = "raiko-tdx"\nversion = "0.1.0"\nedition = "2021"\n' > provers/tdx/Cargo.toml \
+    && mkdir -p provers/tdx/prover/src && touch provers/tdx/prover/src/lib.rs \
+    && printf '[package]\nname = "tdx-prover"\nversion = "0.1.0"\nedition = "2021"\n' > provers/tdx/prover/Cargo.toml
 
 RUN mkdir -p ~/.cargo/bin
 
-ENV TARGET=risc0
 RUN echo "Building risc0 guest ELFs"
-RUN make guest
+RUN TARGET=risc0 make guest
 # Verify risc0 guest ELFs were produced 
 RUN ls provers/risc0/guest/target/riscv32im-risc0-zkvm-elf/release/*.bin
 
-ENV TARGET=sp1
 RUN echo "Building sp1 guest ELFs"
-RUN make guest
+RUN TARGET=sp1 make guest
 # Verify sp1 guest ELFs were produced
 RUN ls provers/sp1/guest/elf/*
 
@@ -164,7 +178,14 @@ RUN mkdir -p ~/.cargo/bin
 # ENV NUM_JOBS=${CARGO_BUILD_JOBS}
 RUN cargo build --release ${BUILD_FLAGS} --features "sp1,risc0,cuda"
 
-FROM nvidia/cuda:12.4.0-runtime-ubuntu22.04 AS raiko-zk
+FROM ubuntu:22.04 AS raiko-zk
+
+COPY --from=builder /usr/local/cuda/lib64/libcudart* /usr/local/cuda/lib64/
+
+ENV NVIDIA_VISIBLE_DEVICES=all \
+    NVIDIA_DRIVER_CAPABILITIES=compute,utility \
+    LD_LIBRARY_PATH=/usr/local/cuda/lib64
+
 RUN mkdir -p \
     ./bin \
     /etc/raiko \
@@ -176,10 +197,8 @@ RUN apt-get update && apt-get install -y \
     openssl \
     curl \
     jq \
-    docker.io \ 
     && rm -rf /var/lib/apt/lists/*
 
-# copy to /etc/raiko, but if self register mode, the mounted one will overwrite it.
 COPY --from=builder /opt/raiko/host/config/config.sgx.json /etc/raiko/
 COPY --from=builder /opt/raiko/host/config/chain_spec_list_default.json /etc/raiko/chain_spec_list_default.json
 COPY --from=builder /opt/raiko/target/release/raiko-host /opt/raiko/bin/

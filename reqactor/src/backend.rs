@@ -133,6 +133,11 @@ impl Backend {
             let notifier_ = self.notifier.clone();
             let mut pool_for_panic = self.pool.clone();
 
+            let _ = pool_.update_status(
+                request_key_for_watcher.clone(),
+                StatusWithContext::new(Status::WorkInProgress, chrono::Utc::now()),
+            );
+
             let handle = tokio::spawn(async move {
                 let result = match request_entity {
                     RequestEntity::SingleProof(entity) => {

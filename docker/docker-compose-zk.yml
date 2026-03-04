@@ -17,13 +17,15 @@ services:
       RAIKO_CONF_DIR: "/raiko/config/devnet"
       BASE_CONFIG_FILE: "config.json"
       BASE_CHAINSPEC_FILE: "chain_spec_list.json"
+      HOME: "${HOME}"
+    restart: unless-stopped
     runtime: nvidia
     privileged: true
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - ../host/config:/raiko/config
       - /tmp:/tmp
-      - ${HOME}/.sp1/circuits/groth16:${HOME}/.sp1/circuits/groth16
+      - ${HOME}/.sp1:${HOME}/.sp1
     depends_on:
       - redis-zk
   redis-zk:
