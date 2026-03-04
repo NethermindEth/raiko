@@ -1,6 +1,5 @@
 use alethia_reth_evm::precompiles::l1sload::{
     clear_l1_storage, set_anchor_block_id, set_l1_origin_block_id, set_l1_storage_value,
-    L1SLOAD_MAX_BLOCK_LOOKBACK,
 };
 use alloy_primitives::{Bytes, B256, U256};
 use alloy_rlp::{Buf, Decodable, Header as RlpHeader};
@@ -28,22 +27,8 @@ pub fn acquire_l1sload_lock() -> MutexGuard<'static, ()> {
         .expect("L1SLOAD execution lock poisoned")
 }
 
-/// Verify and populate L1SLOAD cache with storage values before EVM execution.
-///
-/// This function:
-/// 1. Builds a verified map of `block_number → state_root` by walking back from the anchor block
-///    through predecessor and successor header chains, verifying parent_hash linkage at each step.
-/// 2. For each L1StorageProof, verifies the MPT proof against the state root of the
-///    requested block number.
-/// 3. Populates the L1SLOAD precompile cache with verified (address, key, block_number) → value.
-///
-/// # Arguments
-/// * `l1_storage_proofs` - Storage proofs to verify and populate
-/// * `anchor_state_root` - State root of the anchor block (trusted via anchor tx)
-/// * `anchor_block_number` - Block number of the anchor block
-/// * `l1_origin_block_number` - L1 origin block number (upper bound for forward L1SLOAD reads)
-/// * `l1_ancestor_headers` - Chain of L1 headers from oldest requested block to anchor block - 1.
-/// * `l1_successor_headers` - Chain of L1 headers from anchor block to newest requested forward block.
+/// Verify L1SLOAD proofs via MPT against header-chain state roots, then populate the cache.
+/// Walks ancestor/successor headers from the anchor block to derive trusted state roots.
 pub fn verify_and_populate_l1sload_proofs(
     l1_storage_proofs: &[L1StorageProof],
     anchor_state_root: B256,
@@ -53,12 +38,12 @@ pub fn verify_and_populate_l1sload_proofs(
     l1_successor_headers: &[Header],
 ) -> Result<()> {
     if l1_storage_proofs.is_empty() {
-        info!("[jmadibekov] verify_and_populate_l1sload_proofs: no proofs to verify, skipping");
+        debug!("verify_and_populate_l1sload_proofs: no proofs to verify, skipping");
         return Ok(());
     }
 
     info!(
-        "[jmadibekov] verify_and_populate_l1sload_proofs: starting with {} proofs, anchor={}, l1origin={}",
+        "verify_and_populate_l1sload_proofs: {} proofs, anchor={}, l1origin={}",
         l1_storage_proofs.len(), anchor_block_number, l1_origin_block_number
     );
 
@@ -86,12 +71,6 @@ pub fn verify_and_populate_l1sload_proofs(
     for (i, proof) in l1_storage_proofs.iter().enumerate() {
         let requested_block = block_number_from_b256(&proof.block_number)?;
 
-        info!(
-            "[jmadibekov] verify proof #{}: contract={:?}, key={:?}, block={}, claimed_value={:?}",
-            i, proof.contract_address, proof.storage_key, requested_block, proof.value
-        );
-
-        // Look up the verified state root for this block number
         let state_root = state_root_map.get(&requested_block).ok_or_else(|| {
             anyhow::anyhow!(
                 "No verified state root for L1 block {} (anchor={}, available blocks: {:?})",
@@ -101,12 +80,6 @@ pub fn verify_and_populate_l1sload_proofs(
             )
         })?;
 
-        info!(
-            "[jmadibekov] verify proof #{}: using state_root={:?} for block {}",
-            i, state_root, requested_block
-        );
-
-        // Verify L1 storage proof against this block's state root
         if let Err(e) = verify_l1_proof(proof, *state_root) {
             bail!(
                 "L1SLOAD proof verification failed for proof #{} \
@@ -120,64 +93,45 @@ pub fn verify_and_populate_l1sload_proofs(
             );
         }
 
-        // Populate cache with block-number-aware key (B256 block number)
         set_l1_storage_value(
             proof.contract_address,
             proof.storage_key,
             proof.block_number,
             proof.value,
         );
-
-        info!(
-            "[jmadibekov] verify proof #{}: VERIFIED + CACHED — contract={:?}, key={:?}, block={}, value={:?}",
-            i, proof.contract_address, proof.storage_key, requested_block, proof.value
-        );
     }
 
     info!(
-        "[jmadibekov] Successfully verified and populated {} L1SLOAD storage proofs",
+        "Verified and populated {} L1SLOAD storage proofs",
         l1_storage_proofs.len()
     );
     Ok(())
 }
 
-/// Populate L1SLOAD cache with storage values before EVM execution (preflight phase).
-///
-/// This is used during the preflight phase where proofs are not yet verified.
-/// Verification happens later in the proving phase via `verify_and_populate_l1sload_proofs`.
-///
-/// Must be called before any EVM execution to ensure L1SLOAD precompile has access to L1 data.
+/// Set L1SLOAD context (anchor/l1origin) and optionally populate cache with pre-fetched proofs.
 pub fn populate_l1sload_cache(
     l1_storage_proofs: &[L1StorageProof],
     anchor_block_number: u64,
     l1_origin_block_number: u64,
 ) {
-    // Always set anchor/l1origin block IDs so indirect L1SLOAD calls can pass range checks
-    // even when there are no direct pre-fetched proofs.
     set_anchor_block_id(anchor_block_number);
     set_l1_origin_block_id(l1_origin_block_number);
-    info!(
-        "[jmadibekov] populate_l1sload_cache: context set — anchor={}, l1origin={}, proofs={}",
-        anchor_block_number, l1_origin_block_number, l1_storage_proofs.len()
-    );
 
     if l1_storage_proofs.is_empty() {
-        info!("[jmadibekov] populate_l1sload_cache: no proofs to populate (indirect calls only)");
         return;
     }
 
-    for (i, proof) in l1_storage_proofs.iter().enumerate() {
-        // Use the B256 block_number directly from the proof
+    info!(
+        "populate_l1sload_cache: anchor={}, l1origin={}, proofs={}",
+        anchor_block_number, l1_origin_block_number, l1_storage_proofs.len()
+    );
+
+    for proof in l1_storage_proofs {
         set_l1_storage_value(
             proof.contract_address,
             proof.storage_key,
             proof.block_number,
             proof.value,
-        );
-
-        info!(
-            "[jmadibekov] populate_l1sload_cache: cached proof #{} — contract={:?}, key={:?}, block={:?}, value={:?}",
-            i, proof.contract_address, proof.storage_key, proof.block_number, proof.value
         );
     }
 }
@@ -207,26 +161,10 @@ fn build_verified_state_root_map(
 ) -> Result<HashMap<u64, B256>> {
     let mut state_root_map = HashMap::new();
 
-    info!(
-        "[jmadibekov] build_verified_state_root_map: anchor={}, anchor_state_root={:?}, ancestors={}, successors={}",
-        anchor_block_number, anchor_state_root, l1_ancestor_headers.len(), l1_successor_headers.len()
-    );
-
     // The anchor block's state root is trusted
     state_root_map.insert(anchor_block_number, anchor_state_root);
 
     if !l1_ancestor_headers.is_empty() {
-        // Validate lookback limit
-        let oldest_header = l1_ancestor_headers.first().unwrap();
-        if anchor_block_number.saturating_sub(oldest_header.number) > L1SLOAD_MAX_BLOCK_LOOKBACK {
-            bail!(
-                "L1 ancestor headers span too many blocks: anchor={}, oldest={}, max={}",
-                anchor_block_number,
-                oldest_header.number,
-                L1SLOAD_MAX_BLOCK_LOOKBACK
-            );
-        }
-
         // The l1_ancestor_headers are ordered from oldest to newest (up to anchor - 1).
         // We walk from the anchor block backwards, verifying parent_hash linkage.
         let mut header_by_number: HashMap<u64, &Header> = HashMap::new();
@@ -360,12 +298,6 @@ fn block_number_from_b256(block_number: &B256) -> Result<u64> {
 /// Verify L1 storage and account proof against a given state root using MPT proof verification.
 /// For non-existent accounts/storage should return zero, given that the provided proofs are empty.
 fn verify_l1_proof(proof: &L1StorageProof, state_root: B256) -> Result<()> {
-    info!(
-        "[jmadibekov] verify_l1_proof: contract={:?}, key={:?}, state_root={:?}, account_proof_nodes={}, storage_proof_nodes={}",
-        proof.contract_address, proof.storage_key, state_root, proof.account_proof.len(), proof.storage_proof.len()
-    );
-
-    // Get and verify account data
     let account_key = B256::from(keccak(proof.contract_address.as_slice()));
     let account_rlp = get_and_verify_value(account_key, state_root, &proof.account_proof)?;
 
@@ -415,10 +347,6 @@ fn verify_l1_proof(proof: &L1StorageProof, state_root: B256) -> Result<()> {
         );
     }
 
-    info!(
-        "[jmadibekov] verify_l1_proof: MPT VERIFIED — contract={:?}, key={:?}, value={:?}",
-        proof.contract_address, proof.storage_key, proof.value
-    );
     Ok(())
 }
 

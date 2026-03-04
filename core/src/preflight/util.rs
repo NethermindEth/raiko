@@ -749,248 +749,18 @@ pub struct L1StorageProofCollection {
     pub l1_successor_headers: Vec<reth_primitives::Header>,
 }
 
-/// Collect L1 storage proofs by detecting all L1SLOAD calls (direct and indirect).
+/// Fetch L1 Merkle proofs for L1SLOAD calls discovered during EVM execution.
 ///
-/// The L1SLOAD precompile input format is 84 bytes:
-/// - [0:20]   = L1 contract address (20 bytes)
-/// - [20:52]  = storage key (32 bytes)
-/// - [52:84]  = L1 block number (32 bytes, big-endian uint256)
-///
-/// For each detected call, a storage proof is fetched from the L1 provider for the
-/// specific requested block number. Additionally, L1 ancestor headers are fetched
-/// for blocks between the oldest requested block and the anchor block, enabling
-/// the prover to verify parent_hash linkage and derive trusted state roots.
-///
-/// The requested block number must satisfy the same bidirectional range as the runtime precompile:
-/// - `requested <= l1_origin_block_id`
-/// - `requested < anchor => anchor - requested <= L1SLOAD_MAX_BLOCK_LOOKBACK`
-pub async fn collect_l1_storage_proofs(
-    block: &alethia_reth_primitives::TaikoBlock,
-    l1_provider: &RpcBlockDataProvider,
-    anchor_block_id: u64,
-    l1_origin_block_id: u64,
-) -> RaikoResult<L1StorageProofCollection> {
-    let mut proofs = Vec::new();
-    let mut detected_calls: std::collections::HashSet<(Address, B256, B256)> =
-        std::collections::HashSet::new();
-
-    // L1SLOAD precompile address from RIP-7728 (0x0000000000000000000000000000000000010001)
-    let l1sload_address = Address::from_slice(&[
-        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0x01, 0, 0x01,
-    ]);
-
-    // Method 1: Detect direct calls by scanning transactions
-    info!("[jmadibekov] collect_l1_storage_proofs: scanning {} transactions for L1SLOAD calls (anchor={}, l1origin={})", block.body.transactions.len(), anchor_block_id, l1_origin_block_id);
-    for tx in &block.body.transactions {
-        if let Some(to_address) = tx.to() {
-            // L1SLOAD input format (84 bytes):
-            // [0:20]   = contract address (20 bytes)
-            // [20:52]  = storage key (32 bytes)
-            // [52:84]  = L1 block number (32 bytes, big-endian B256)
-            if to_address == l1sload_address && tx.input().len() == 84 {
-                let input = tx.input();
-                let contract_address = Address::from_slice(&input[0..20]);
-                let storage_key = B256::from_slice(&input[20..52]);
-                let block_number = B256::from_slice(&input[52..84]);
-
-                // Convert to u64 for range validation
-                let block_number_u256 = U256::from_be_bytes(block_number.0);
-                let block_number_u64: u64 = block_number_u256.try_into().map_err(|_| {
-                    RaikoError::Preflight("L1SLOAD block number too large for u64".to_owned())
-                })?;
-
-                // Validate block number is within allowed range
-                if block_number_u64 > l1_origin_block_id {
-                    return Err(RaikoError::Preflight(format!(
-                        "L1SLOAD requested block {} is after l1origin block {}",
-                        block_number_u64, l1_origin_block_id
-                    )));
-                }
-                if block_number_u64 < anchor_block_id
-                    && anchor_block_id - block_number_u64
-                        > raiko_lib::l1_precompiles::L1SLOAD_MAX_BLOCK_LOOKBACK
-                {
-                    return Err(RaikoError::Preflight(format!(
-                        "L1SLOAD requested block {} is too old: anchor={}, max lookback={}",
-                        block_number_u64,
-                        anchor_block_id,
-                        raiko_lib::l1_precompiles::L1SLOAD_MAX_BLOCK_LOOKBACK
-                    )));
-                }
-
-                detected_calls.insert((contract_address, storage_key, block_number));
-            }
-        }
-    }
-
-    info!("[jmadibekov] L1SLOAD direct calls detected: {}", detected_calls.len());
-    for (addr, key, block) in &detected_calls {
-        info!("[jmadibekov]   — contract={:?}, key={:?}, block={:?}", addr, key, block);
-    }
-
-    if detected_calls.is_empty() {
-        return Ok(L1StorageProofCollection {
-            proofs: Vec::new(),
-            l1_ancestor_headers: Vec::new(),
-            l1_successor_headers: Vec::new(),
-        });
-    }
-
-    // Group detected calls by block number (as u64) for efficient proof fetching
-    let mut calls_by_block: HashMap<u64, Vec<(Address, B256, B256)>> = HashMap::new();
-    for (contract_address, storage_key, block_number) in &detected_calls {
-        let block_number_u256 = U256::from_be_bytes(block_number.0);
-        let block_number_u64: u64 = block_number_u256.try_into().map_err(|_| {
-            RaikoError::Preflight(format!(
-                "L1SLOAD block number exceeds u64: {:?}",
-                block_number
-            ))
-        })?;
-        calls_by_block.entry(block_number_u64).or_default().push((
-            *contract_address,
-            *storage_key,
-            *block_number,
-        ));
-    }
-
-    info!(
-        "L1SLOAD calls grouped across {} distinct L1 block numbers: {:?}",
-        calls_by_block.len(),
-        calls_by_block.keys().collect::<Vec<_>>()
-    );
-
-    // Collect storage proofs for each block number, batching keys per address (PR #10).
-    // This reduces RPC calls from one-per-key to one-per-block-number.
-    for (block_number_u64, calls) in &calls_by_block {
-        // Group storage keys by contract address for batched RPC calls
-        let mut keys_by_address: HashMap<Address, Vec<(B256, U256)>> = HashMap::new();
-        for (contract_address, storage_key, _block_number_b256) in calls {
-            let storage_key_u256 = U256::from_be_bytes((*storage_key).into());
-            keys_by_address
-                .entry(*contract_address)
-                .or_default()
-                .push((*storage_key, storage_key_u256));
-        }
-
-        // Build the batched request: address → vec of U256 keys
-        let batch_request: HashMap<Address, Vec<U256>> = keys_by_address
-            .iter()
-            .map(|(addr, keys)| (*addr, keys.iter().map(|(_, u256)| *u256).collect()))
-            .collect();
-
-        let proof_response = l1_provider
-            .get_l1_storage_proofs(*block_number_u64, batch_request)
-            .await?;
-
-        // Extract individual proofs from the batched response
-        for (contract_address, keys) in &keys_by_address {
-            let account_proof_response = proof_response.get(contract_address).ok_or_else(|| {
-                RaikoError::Preflight(format!(
-                    "Missing account proof for L1SLOAD: contract={:?}, block={}",
-                    contract_address, block_number_u64
-                ))
-            })?;
-
-            for (storage_key_b256, _storage_key_u256) in keys {
-                // Match storage proof by key instead of relying on index ordering
-                let storage_proof = account_proof_response
-                    .storage_proof
-                    .iter()
-                    .find(|p| p.key.as_b256() == *storage_key_b256)
-                    .ok_or_else(|| {
-                        RaikoError::Preflight(format!(
-                            "Missing storage proof for L1SLOAD: contract={:?}, key={:?}, block={}",
-                            contract_address, storage_key_b256, block_number_u64
-                        ))
-                    })?;
-
-                // Find the B256 block number for this call
-                let block_number_b256 = calls
-                    .iter()
-                    .find(|(addr, key, _)| addr == contract_address && key == storage_key_b256)
-                    .map(|(_, _, bn)| *bn)
-                    .ok_or_else(|| {
-                        RaikoError::Preflight(format!(
-                            "Internal L1SLOAD call mapping error: missing call tuple for contract={:?}, key={:?}, block={}",
-                            contract_address, storage_key_b256, block_number_u64
-                        ))
-                    })?;
-
-                proofs.push(L1StorageProof {
-                    contract_address: *contract_address,
-                    storage_key: *storage_key_b256,
-                    block_number: block_number_b256,
-                    value: B256::from(storage_proof.value),
-                    account_proof: account_proof_response.account_proof.clone(),
-                    storage_proof: storage_proof.proof.clone(),
-                });
-            }
-        }
-    }
-
-    info!("[jmadibekov] Collected {} L1 storage proofs", proofs.len());
-    for (i, p) in proofs.iter().enumerate() {
-        info!("[jmadibekov]   proof #{}: contract={:?}, key={:?}, block={:?}, value={:?}", i, p.contract_address, p.storage_key, p.block_number, p.value);
-    }
-
-    // Fetch L1 predecessor/successor headers for proof verification.
-    let min_requested_block = calls_by_block
-        .keys()
-        .copied()
-        .min()
-        .unwrap_or(anchor_block_id);
-    let max_requested_block = calls_by_block
-        .keys()
-        .copied()
-        .max()
-        .unwrap_or(anchor_block_id);
-    let l1_ancestor_headers = if min_requested_block < anchor_block_id {
-        info!(
-            "Fetching L1 ancestor headers from block {} to {} (anchor - 1)",
-            min_requested_block,
-            anchor_block_id - 1
-        );
-        fetch_l1_ancestor_headers(l1_provider, min_requested_block, anchor_block_id).await?
-    } else {
-        Vec::new()
-    };
-    let l1_successor_headers = if max_requested_block > anchor_block_id {
-        info!(
-            "Fetching L1 successor headers from block {} to {}",
-            anchor_block_id, max_requested_block
-        );
-        fetch_l1_successor_headers(l1_provider, anchor_block_id, max_requested_block).await?
-    } else {
-        Vec::new()
-    };
-
-    info!(
-        "Collected header chains for L1SLOAD verification: {} predecessor headers, {} successor headers",
-        l1_ancestor_headers.len(),
-        l1_successor_headers.len()
-    );
-
-    Ok(L1StorageProofCollection {
-        proofs,
-        l1_ancestor_headers,
-        l1_successor_headers,
-    })
-}
-
-/// Fetch L1 Merkle proofs for calls discovered during EVM execution (indirect L1SLOAD calls).
-///
-/// These are calls that went through the live L1 RPC fallback because they weren't
-/// pre-fetched by transaction scanning (e.g., contract → 0x10001 internal calls).
+/// All L1SLOAD calls go through the live L1 RPC fallback during execution.
 /// The ZK prover needs Merkle proofs for these calls, so we fetch them after execution.
 pub async fn fetch_l1_proofs_for_rpc_served_calls(
     l1_provider: &RpcBlockDataProvider,
     calls: &std::collections::HashSet<(Address, B256, B256)>,
     anchor_block_id: u64,
-    l1_origin_block_id: u64,
 ) -> RaikoResult<L1StorageProofCollection> {
     let mut proofs = Vec::new();
 
-    // Group calls by block number, then by address (same batching as collect_l1_storage_proofs)
+    // Group calls by block number, then by address for batched proof fetching.
     let mut calls_by_block: HashMap<u64, Vec<(Address, B256, B256)>> = HashMap::new();
     for (contract_address, storage_key, block_number_b256) in calls {
         let block_number_u256 = U256::from_be_bytes(block_number_b256.0);
@@ -1000,23 +770,6 @@ pub async fn fetch_l1_proofs_for_rpc_served_calls(
                 block_number_b256
             ))
         })?;
-        if block_number_u64 > l1_origin_block_id {
-            return Err(RaikoError::Preflight(format!(
-                "Indirect L1SLOAD requested block {} is after l1origin block {}",
-                block_number_u64, l1_origin_block_id
-            )));
-        }
-        if block_number_u64 < anchor_block_id
-            && anchor_block_id - block_number_u64
-                > raiko_lib::l1_precompiles::L1SLOAD_MAX_BLOCK_LOOKBACK
-        {
-            return Err(RaikoError::Preflight(format!(
-                "Indirect L1SLOAD requested block {} is too old: anchor={}, max lookback={}",
-                block_number_u64,
-                anchor_block_id,
-                raiko_lib::l1_precompiles::L1SLOAD_MAX_BLOCK_LOOKBACK
-            )));
-        }
         calls_by_block.entry(block_number_u64).or_default().push((
             *contract_address,
             *storage_key,
@@ -1046,7 +799,7 @@ pub async fn fetch_l1_proofs_for_rpc_served_calls(
         for (contract_address, keys) in &keys_by_address {
             let account_proof_response = proof_response.get(contract_address).ok_or_else(|| {
                 RaikoError::Preflight(format!(
-                    "Missing account proof for indirect L1SLOAD: contract={:?}, block={}",
+                    "Missing account proof for L1SLOAD: contract={:?}, block={}",
                     contract_address, block_number_u64
                 ))
             })?;
@@ -1058,7 +811,7 @@ pub async fn fetch_l1_proofs_for_rpc_served_calls(
                     .find(|p| p.key.as_b256() == *storage_key_b256)
                     .ok_or_else(|| {
                         RaikoError::Preflight(format!(
-                            "Missing storage proof for indirect L1SLOAD: contract={:?}, key={:?}, block={}",
+                            "Missing storage proof for L1SLOAD: contract={:?}, key={:?}, block={}",
                             contract_address, storage_key_b256, block_number_u64
                         ))
                     })?;
@@ -1069,7 +822,7 @@ pub async fn fetch_l1_proofs_for_rpc_served_calls(
                     .map(|(_, _, bn)| *bn)
                     .ok_or_else(|| {
                         RaikoError::Preflight(format!(
-                            "Internal indirect L1SLOAD mapping error: missing call tuple for contract={:?}, key={:?}, block={}",
+                            "Internal L1SLOAD mapping error: missing call tuple for contract={:?}, key={:?}, block={}",
                             contract_address, storage_key_b256, block_number_u64
                         ))
                     })?;
@@ -1086,7 +839,7 @@ pub async fn fetch_l1_proofs_for_rpc_served_calls(
         }
     }
 
-    // Fetch predecessor/successor headers for indirect calls.
+    // Fetch predecessor/successor headers for L1SLOAD verification.
     let min_requested_block = calls_by_block
         .keys()
         .copied()
@@ -1099,7 +852,7 @@ pub async fn fetch_l1_proofs_for_rpc_served_calls(
         .unwrap_or(anchor_block_id);
     let l1_ancestor_headers = if min_requested_block < anchor_block_id {
         info!(
-            "Fetching L1 ancestor headers for indirect calls: blocks {} to {}",
+            "Fetching L1 ancestor headers: blocks {} to {}",
             min_requested_block,
             anchor_block_id - 1
         );
@@ -1109,7 +862,7 @@ pub async fn fetch_l1_proofs_for_rpc_served_calls(
     };
     let l1_successor_headers = if max_requested_block > anchor_block_id {
         info!(
-            "Fetching L1 successor headers for indirect calls: blocks {} to {}",
+            "Fetching L1 successor headers: blocks {} to {}",
             anchor_block_id, max_requested_block
         );
         fetch_l1_successor_headers(l1_provider, anchor_block_id, max_requested_block).await?

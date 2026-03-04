@@ -77,27 +77,11 @@ pub struct GuestInput {
     /// L1 storage proofs for L1SLOAD precompile calls
     #[serde(default)]
     pub l1_storage_proofs: Vec<L1StorageProof>,
-    /// L1 ancestor block headers for verifying L1SLOAD at non-anchor blocks.
-    ///
-    /// When L1SLOAD calls request state from an L1 block older than the anchor block,
-    /// we need a chain of L1 headers from the requested block up to the anchor block.
-    /// The prover verifies the parent_hash linkage from the anchor block backwards to
-    /// obtain a trusted state_root for each requested block.
-    ///
-    /// Ordered from oldest (requested block) to newest (anchor block - 1).
-    /// The anchor block header itself is available via `taiko.l1_header`.
-    /// At most 256 headers (matching L1SLOAD_MAX_BLOCK_LOOKBACK).
+    /// L1 ancestor headers (oldest→newest, up to anchor-1) for backward L1SLOAD verification.
     #[serde_as(as = "Vec<BincodeCompactHeader>")]
     #[serde(default)]
     pub l1_ancestor_headers: Vec<Header>,
-    /// L1 successor block headers for verifying L1SLOAD at blocks newer than anchor.
-    ///
-    /// When L1SLOAD calls request state from an L1 block after the anchor block,
-    /// we need a forward chain starting at the anchor header up to the newest requested block.
-    /// The prover verifies parent_hash linkage forward from the trusted anchor and
-    /// obtains trusted state roots for those newer blocks.
-    ///
-    /// Ordered from oldest to newest and starts with the anchor header when non-empty.
+    /// L1 successor headers (anchor→newest) for forward L1SLOAD verification.
     #[serde_as(as = "Vec<BincodeCompactHeader>")]
     #[serde(default)]
     pub l1_successor_headers: Vec<Header>,
