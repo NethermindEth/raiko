@@ -167,8 +167,9 @@ COPY reqactor reqactor
 COPY ballot ballot
 COPY redis-derive redis-derive
 
-# Bring in cached guest ELFs from guest-builder
+# Bring in cached guest ELFs and generated methods (with correct image IDs) from guest-builder
 COPY --from=guest-builder /opt/raiko/provers/sp1/guest/elf /opt/raiko/provers/sp1/guest/elf
+COPY --from=guest-builder /opt/raiko/provers/risc0/driver/src/methods /opt/raiko/provers/risc0/driver/src/methods
 COPY --from=guest-builder /opt/raiko/provers/risc0/guest /opt/raiko/provers/risc0/guest
 
 RUN mkdir -p ~/.cargo/bin
