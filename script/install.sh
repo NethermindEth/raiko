@@ -92,6 +92,7 @@ if [ -z "$1" ] || [ "$1" == "risc0" ]; then
 		exit 1
 	fi
 	$env_rzup install 
+	$env_rzup install risc0-groth16
 fi
 # SP1
 if [ -z "$1" ] || [ "$1" == "sp1" ]; then
