@@ -13,7 +13,7 @@ services:
       - .env
     environment:
       ZK: "true"
-      SP1_PLONK_CIRCUIT_PATH: "${HOME}/.sp1/circuits/plonk"
+      SP1_GROTH16_CIRCUIT_PATH: "${HOME}/.sp1/circuits/groth16"
       RAIKO_CONF_DIR: "/raiko/config/devnet"
       BASE_CONFIG_FILE: "config.json"
       BASE_CHAINSPEC_FILE: "chain_spec_list.json"
@@ -23,7 +23,7 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock
       - ../host/config:/raiko/config
       - /tmp:/tmp
-      - ${HOME}/.sp1/circuits/plonk:${HOME}/.sp1/circuits/plonk
+      - ${HOME}/.sp1/circuits/groth16:${HOME}/.sp1/circuits/groth16
     depends_on:
       - redis-zk
   redis-zk:

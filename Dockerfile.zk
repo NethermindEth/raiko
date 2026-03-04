@@ -91,7 +91,7 @@ ENV TARGET=sp1
 RUN echo "Building sp1 guest ELFs"
 RUN make guest
 # Verify sp1 guest ELFs were produced
-RUN ls provers/sp1/guest/elf/*.elf
+RUN ls provers/sp1/guest/elf/*
 
 # ── Stage 3: Host build with CUDA (depends on all source code) ──────
 FROM nvidia/cuda:12.4.0-devel-ubuntu22.04 AS builder
