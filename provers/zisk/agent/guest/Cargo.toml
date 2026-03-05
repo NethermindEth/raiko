@@ -4,7 +4,6 @@ name = "zisk-guest"
 version = "0.1.0"
 edition = "2021"
 
-# Ensure we only use base RISC-V instruction set without extensions
 [profile.release]
 panic = "abort"
 opt-level = "s"
@@ -24,41 +23,32 @@ name = "zisk-shasta-aggregation"
 path = "src/shasta_aggregation.rs"
 
 [dependencies]
-# Core Zisk dependencies
+# Core Zisk runtime
 ziskos = { git = "https://github.com/0xPolygonHermez/zisk.git" }
+
+# Raiko library - all reth/revm/alloy deps come transitively through this
+raiko-lib = { path = "../../../../lib", default-features = false, features = [
+    "std",
+    "zisk",
+] }
+
+# Serialization
 serde = { version = "1.0", default-features = false, features = ["derive"] }
 bincode = { version = "1.3", default-features = false }
 
-# Raiko library for full blockchain execution - attempt minimal features  
-raiko-lib = { path = "../../../../lib", default-features = false, features = ["std", "zisk"] }
-
-# Minimal dependencies for basic types - no heavy crypto libraries
-# These should compile for RISC-V without issues
-hex = { version = "0.4", default-features = false, features = ["alloc"] }
-
-# Override reth-primitives to remove k256 feature which pulls in secp256k1
-reth-primitives = { git = "https://github.com/taikoxyz/taiko-reth.git", branch = "taiko-shasta-zk", default-features = false, features = [
-    "alloy-compat",
-    "taiko",
+c-kzg = { git = "https://github.com/risc0/c-kzg-4844", tag = "v2.1.5-risczero.0", features = [
+    "eip-7594",
 ] }
 
-# Override raiko-lib dependencies to minimize crypto libraries - disable C libraries
-kzg = { package = "rust-kzg-zkcrypto", git = "https://github.com/smtmfft/rust-kzg.git", branch = "brecht/sp1-patch", default-features = false }
 
-# Override revm-precompile to disable c-kzg
-revm-precompile = { git = "https://github.com/taikoxyz/revm.git", branch = "v36-taiko-shasta", default-features = false, features = [
-    "std",
-    "secp256k1", 
-    "blst",
-    "taiko"
-] }
+blst = { git = "https://github.com/0xPolygonHermez/zisk-patch-blst.git", tag = "patch-0.3.15-zisk-0.15.0" }
+# blst = { git = "https://github.com/risc0/blst", tag = "v0.3.15-risczero.1" }
 
 [patch.crates-io]
-revm = { git = "https://github.com/taikoxyz/revm.git", branch = "v36-taiko-shasta" }
-revm-primitives = { git = "https://github.com/taikoxyz/revm.git", branch = "v36-taiko-shasta" }
-revm-precompile = { git = "https://github.com/taikoxyz/revm.git", branch = "v36-taiko-shasta" }
-blst = { git = "https://github.com/smtmfft/blst.git", branch = "v0.3.15-serialize" }
-c-kzg = { path = "../../../../lib/no-op-kzg" }
+# No-op c-kzg replacement: Zisk cannot compile C libraries
+# c-kzg = { path = "../../../../lib/no-op-kzg" }
 
-[patch."https://github.com/brechtpd/c-kzg-4844"]
-c-kzg = { path = "../../../../lib/no-op-kzg" }
+c-kzg = { git = "https://github.com/risc0/c-kzg-4844", tag = "v2.1.5-risczero.0" }
+# c-kzg = { git = "https://github.com/0xPolygonHermez/zisk-patch-c-kzg-4844.git", branch = "main" }
+blst = { git = "https://github.com/0xPolygonHermez/zisk-patch-blst.git", tag = "patch-0.3.15-zisk-0.15.0" }
+# blst = { git = "https://github.com/risc0/blst", tag = "v0.3.15-risczero.1" }

@@ -182,16 +182,11 @@ pub async fn run_prover(
         }
         ProofType::Zisk => {
             #[cfg(feature = "zisk")]
-            {
-                let zisk_input = zisk_adapter::convert_guest_input(&input);
-                let zisk_output = zisk_adapter::convert_guest_output(output);
-                let result = (&zisk_agent_driver::ZiskAgentProver)
-                    .run(zisk_input, &zisk_output, config, None)
-                    .await
-                    .map(zisk_adapter::convert_proof)
-                    .map_err(zisk_adapter::convert_error);
-                return result.map_err(|e| e.into());
-            }
+            return zisk_agent_driver::ZiskAgentProver
+                .run(input, &output, config, None)
+                .await
+                .map_err(|e| e.into());
+
             #[cfg(not(feature = "zisk"))]
             Err(RaikoError::FeatureNotSupportedError(proof_type))
         }
@@ -258,16 +253,11 @@ pub async fn run_batch_prover(
         }
         ProofType::Zisk => {
             #[cfg(feature = "zisk")]
-            {
-                let zisk_input = zisk_adapter::convert_guest_batch_input(&input);
-                let zisk_output = zisk_adapter::convert_guest_batch_output(output);
-                let result = (&zisk_agent_driver::ZiskAgentProver)
-                    .batch_run(zisk_input, &zisk_output, config, None)
-                    .await
-                    .map(zisk_adapter::convert_proof)
-                    .map_err(zisk_adapter::convert_error);
-                return result.map_err(|e| e.into());
-            }
+            return zisk_agent_driver::ZiskAgentProver
+                .batch_run(input, &output, config, None)
+                .await
+                .map_err(|e| e.into());
+
             #[cfg(not(feature = "zisk"))]
             Err(RaikoError::FeatureNotSupportedError(proof_type))
         }
@@ -404,16 +394,11 @@ pub async fn aggregate_proofs(
         }
         ProofType::Zisk => {
             #[cfg(feature = "zisk")]
-            {
-                let zisk_input = zisk_adapter::convert_aggregation_input(&input);
-                let zisk_output = zisk_adapter::convert_aggregation_output(output);
-                let result = (&zisk_agent_driver::ZiskAgentProver)
-                    .aggregate(zisk_input, &zisk_output, config, None)
-                    .await
-                    .map(zisk_adapter::convert_proof)
-                    .map_err(zisk_adapter::convert_error);
-                return result.map_err(|e| e.into());
-            }
+            return zisk_agent_driver::ZiskAgentProver
+                .aggregate(input.clone(), output, config, None)
+                .await
+                .map_err(|e| e.into());
+
             #[cfg(not(feature = "zisk"))]
             Err(RaikoError::FeatureNotSupportedError(proof_type))
         }
@@ -481,14 +466,11 @@ pub async fn aggregate_shasta_proposals(
         }
         ProofType::Zisk => {
             #[cfg(feature = "zisk")]
-            {
-                let result = (&zisk_agent_driver::ZiskAgentProver)
-                    .shasta_aggregate(input.clone(), output, config, None)
-                    .await
-                    .map(zisk_adapter::convert_proof)
-                    .map_err(zisk_adapter::convert_error);
-                return result.map_err(|e| e.into());
-            }
+            return zisk_agent_driver::ZiskAgentProver
+                .shasta_aggregate(input.clone(), output, config, None)
+                .await
+                .map_err(|e| e.into());
+
             #[cfg(not(feature = "zisk"))]
             Err(RaikoError::FeatureNotSupportedError(proof_type))
         }
@@ -545,17 +527,11 @@ pub async fn cancel_proof(
         }
         ProofType::Zisk => {
             #[cfg(feature = "zisk")]
-            {
-                let zisk_key = zisk_adapter::convert_proof_key(proof_key);
-                // Create a dummy box for the parameter since cancel is not implemented
-                let dummy_store: Box<&mut dyn zisk_agent_driver::types::IdStore> =
-                    unsafe { std::mem::transmute(Box::new(read)) };
-                let result = (&zisk_agent_driver::ZiskAgentProver)
-                    .cancel(zisk_key, dummy_store)
-                    .await
-                    .map_err(zisk_adapter::convert_error);
-                return result.map_err(|e| e.into());
-            }
+            return zisk_agent_driver::ZiskAgentProver
+                .cancel(proof_key, read)
+                .await
+                .map_err(|e| e.into());
+
             #[cfg(not(feature = "zisk"))]
             Err(RaikoError::FeatureNotSupportedError(proof_type))
         }
@@ -1152,70 +1128,5 @@ impl AggregationOnlyRequest {
         merge(&mut opts, &this);
         *self = serde_json::from_value(opts)?;
         Ok(())
-    }
-}
-
-// Helper functions for ZISK agent driver type conversion
-#[cfg(feature = "zisk")]
-mod zisk_adapter {
-    use super::*;
-
-    // Convert raiko-lib types to ZISK driver types (now they're the same types, so just pass through)
-    pub fn convert_guest_input(input: &GuestInput) -> zisk_agent_driver::types::GuestInput {
-        input.clone()
-    }
-
-    pub fn convert_guest_output(output: &GuestOutput) -> zisk_agent_driver::types::GuestOutput {
-        output.clone()
-    }
-
-    pub fn convert_guest_batch_input(
-        input: &GuestBatchInput,
-    ) -> zisk_agent_driver::types::GuestBatchInput {
-        input.clone()
-    }
-
-    pub fn convert_guest_batch_output(
-        output: &GuestBatchOutput,
-    ) -> zisk_agent_driver::types::GuestBatchOutput {
-        output.clone()
-    }
-
-    pub fn convert_aggregation_input(
-        input: &AggregationGuestInput,
-    ) -> zisk_agent_driver::types::AggregationGuestInput {
-        input.clone()
-    }
-
-    pub fn convert_aggregation_output(
-        output: &AggregationGuestOutput,
-    ) -> zisk_agent_driver::types::AggregationGuestOutput {
-        output.clone()
-    }
-
-    pub fn convert_proof_key(key: ProofKey) -> zisk_agent_driver::types::ProofKey {
-        key // Same structure: (u64, u64, B256, u8)
-    }
-
-    // Convert ZISK driver Proof back to raiko-lib Proof
-    pub fn convert_proof(proof: zisk_agent_driver::types::Proof) -> Proof {
-        Proof {
-            proof: proof.proof,
-            input: proof.input,
-            quote: proof.quote,
-            uuid: proof.uuid,
-            kzg_proof: proof.kzg_proof,
-            extra_data: proof.extra_data,
-        }
-    }
-
-    // Convert ZISK driver error to raiko-lib error
-    pub fn convert_error(e: zisk_agent_driver::types::ProverError) -> ProverError {
-        match e {
-            zisk_agent_driver::types::ProverError::GuestError(msg) => ProverError::GuestError(msg),
-            zisk_agent_driver::types::ProverError::FileIo(err) => ProverError::FileIo(err),
-            zisk_agent_driver::types::ProverError::Param(err) => ProverError::Param(err),
-            zisk_agent_driver::types::ProverError::StoreError(msg) => ProverError::StoreError(msg),
-        }
     }
 }

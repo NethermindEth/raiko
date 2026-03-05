@@ -72,7 +72,7 @@ build_guest_programs() {
     # Use cargo-zisk for RISC-V compilation, not regular cargo
     # cargo-zisk handles the custom target automatically
     log "Running: cargo-zisk build --release"
-    cargo-zisk build --release
+    CC_riscv64ima_zisk_zkvm_elf="riscv64-unknown-elf-gcc -march=rv64ima -mabi=lp64 -mstrict-align -falign-functions=2" RUSTFLAGS='--cfg getrandom_backend="custom"' cargo-zisk build --release 
     
     # Create ELF directory in guest if it doesn't exist
     mkdir -p "$SCRIPT_DIR/guest/elf"
@@ -195,11 +195,6 @@ check_dependencies() {
         exit 1
     fi
     
-    # Check nightly toolchain
-    if ! rustup toolchain list | grep -q "nightly-2024-12-20"; then
-        warn "Required nightly toolchain not found, installing..."
-        rustup toolchain install nightly-2024-12-20
-    fi
     
     check_zisk_toolchain
     check_gpu_support

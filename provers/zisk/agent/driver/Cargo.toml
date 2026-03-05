@@ -18,11 +18,21 @@ hex = { workspace = true }
 bincode = { workspace = true }
 reqwest = { workspace = true }
 anyhow = { workspace = true }
-alloy-primitives = { workspace = true }
 
 # Minimal external dependencies to avoid conflicts
 async-trait = "0.1"
 thiserror = { workspace = true }
+bytemuck = "1"
+tempfile = "3"
 
 # Raiko lib dependency (path relative to driver directory)
 raiko-lib = { path = "../../../../lib", features = ["std"] }
+
+# Zisk SDK and related dependencies
+# NOTE: these revs must match. zisk rev must be from feature/pre-develop-0.16.0-stable,
+# and proofman rev must match what that zisk commit uses in its Cargo.lock.
+zisk-sdk = { git = "https://github.com/0xPolygonHermez/zisk.git", rev = "e4ac8bfe1cafe87cc95503530fcf297dbf1aea55" }
+zisk-common = { git = "https://github.com/0xPolygonHermez/zisk.git", rev = "e4ac8bfe1cafe87cc95503530fcf297dbf1aea55" }
+proofman = { git = "https://github.com/0xPolygonHermez/pil2-proofman.git", rev = "74b7c04f96386fc312d09f43530084bd04fd3d5d" }
+proofman-common = { git = "https://github.com/0xPolygonHermez/pil2-proofman.git", rev = "74b7c04f96386fc312d09f43530084bd04fd3d5d" }
+fields = { git = "https://github.com/0xPolygonHermez/pil2-proofman.git", rev = "74b7c04f96386fc312d09f43530084bd04fd3d5d" }

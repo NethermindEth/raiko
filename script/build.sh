@@ -272,6 +272,8 @@ if [ "$1" == "zisk" ]; then
     echo "Build script:    $ZISK_AGENT_DIR/build.sh"
     echo "Service:         use raiko-agent (default http://localhost:9999/proof)"
     echo ""
+fi
+
 # TDX
 if [ "$1" == "tdx" ]; then
     check_toolchain $TOOLCHAIN_TDX

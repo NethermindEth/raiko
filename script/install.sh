@@ -203,6 +203,7 @@ if [ -z "$1" ] || [ "$1" == "risc0" ]; then
 	$env_rzup install 
 	$env_rzup install risc0-groth16
 fi
+
 # SP1
 if [ -z "$1" ] || [ "$1" == "sp1" ]; then
 	curl -L https://sp1.succinct.xyz | bash
@@ -393,6 +394,8 @@ if [ -z "$1" ] || [ "$1" == "zisk" ]; then
 			exit 1
 		fi
 	fi
+fi 
+
 # TDX
 if [ -z "$1" ] || [ "$1" == "tdx" ]; then
 	echo "TDX prover doesn't require additional toolchain installation"

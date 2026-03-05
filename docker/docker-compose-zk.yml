@@ -4,8 +4,6 @@ services:
     build:
       context: ..
       dockerfile: Dockerfile.zk
-      args:
-        - CARGO_BUILD_JOBS=${CARGO_BUILD_JOBS:-8}
     image: nethermind.jfrog.io/core-oci-local-staging/raiko-zk:latest
     container_name: raiko-zk
     network_mode: host

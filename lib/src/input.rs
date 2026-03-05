@@ -159,6 +159,14 @@ pub struct ShastaRisc0AggregationGuestInput {
     pub proof_carry_data_vec: Vec<ProofCarryData>,
 }
 
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct ShastaZiskAggregationGuestInput {
+    pub image_id: [u32; 8],
+    pub block_inputs: Vec<B256>,
+    pub proof_carry_data_vec: Vec<ProofCarryData>,
+    pub prover_address: Address,
+}
+
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
 pub struct ShastaSp1AggregationGuestInput {
     /// Verifier image id for the SP1 proofs being aggregated

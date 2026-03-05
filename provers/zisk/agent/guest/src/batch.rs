@@ -13,11 +13,11 @@ pub fn main() {
     let input_data = ziskos::read_input();
 
     // Deserialize the batch input using the standard GuestBatchInput format
-    let batch_input: GuestBatchInput =
+    let mut batch_input: GuestBatchInput =
         bincode::deserialize(&input_data).expect("failed to deserialize GuestBatchInput");
 
     // This executes all transactions and validates state transitions
-    let final_blocks = calculate_batch_blocks_final_header(&batch_input);
+    let final_blocks = calculate_batch_blocks_final_header(&mut batch_input);
     
     // Create protocol instance from executed blocks
     let protocol_instance = ProtocolInstance::new_batch(&batch_input, final_blocks, ProofType::Zisk)
