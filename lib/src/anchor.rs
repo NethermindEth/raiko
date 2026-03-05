@@ -1,7 +1,9 @@
 //! Taiko's anchor related functionality and checks.
 
 use alethia_reth_consensus::transaction::TaikoTxEnvelope;
-use alloy_primitives::{uint, Address, U256};
+use alethia_reth_evm::spec::TaikoSpecId;
+use alloy_consensus::Transaction;
+use alloy_primitives::{uint, Address, B256, U256};
 use anyhow::{anyhow, bail, Result};
 use once_cell::sync::Lazy;
 use reth_primitives::Header;
@@ -203,4 +205,32 @@ pub fn decode_anchor_pacaya(bytes: &[u8]) -> Result<anchorV3Call> {
 /// Decode anchor tx data for shasta fork, using anchorV4
 pub fn decode_anchor_shasta(bytes: &[u8]) -> Result<anchorV4Call> {
     anchorV4Call::abi_decode_validate(bytes).map_err(|e| anyhow!(e))
+}
+
+/// Get the anchor block number and state root from the anchor tx, based on the active fork.
+pub fn get_anchor_tx_info_by_fork(
+    fork: TaikoSpecId,
+    anchor_tx: &TaikoTxEnvelope,
+) -> Result<(u64, B256)> {
+    match fork {
+        TaikoSpecId::SHASTA => {
+            let anchor_call = decode_anchor_shasta(anchor_tx.input())?;
+            Ok((
+                anchor_call._checkpoint.blockNumber.to(),
+                anchor_call._checkpoint.stateRoot,
+            ))
+        }
+        TaikoSpecId::PACAYA => {
+            let anchor_call = decode_anchor_pacaya(anchor_tx.input())?;
+            Ok((anchor_call._anchorBlockId, anchor_call._anchorStateRoot))
+        }
+        TaikoSpecId::ONTAKE => {
+            let anchor_call = decode_anchor_ontake(anchor_tx.input())?;
+            Ok((anchor_call._anchorBlockId, anchor_call._anchorStateRoot))
+        }
+        _ => {
+            let anchor_call = decode_anchor(anchor_tx.input())?;
+            Ok((anchor_call.l1BlockId, anchor_call.l1StateRoot))
+        }
+    }
 }

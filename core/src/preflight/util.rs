@@ -1,6 +1,6 @@
 use alethia_reth_primitives::{TaikoBlock, TaikoTxEnvelope};
 use alloy_consensus::{Blob, Transaction};
-use alloy_primitives::{hex, Log as LogStruct, Uint, B256};
+use alloy_primitives::{hex, Address, Log as LogStruct, Uint, B256, U256};
 use alloy_provider::{Provider, RootProvider};
 use alloy_rpc_types::{BlockId, Filter, Header, Log, Transaction as AlloyRpcTransaction};
 use alloy_sol_types::{SolCall, SolEvent};
@@ -8,7 +8,7 @@ use anyhow::{anyhow, bail, ensure, Result};
 use kzg::kzg_types::ZFr;
 use kzg_traits::{eip_4844::blob_to_kzg_commitment_rust, Fr, G1};
 use raiko_lib::{
-    anchor::{decode_anchor, decode_anchor_ontake, decode_anchor_pacaya, decode_anchor_shasta},
+    anchor::{decode_anchor, decode_anchor_ontake},
     builder::{OptimisticDatabase, RethBlockBuilder},
     clear_line,
     consts::{ChainSpec, TaikoSpecId},
@@ -24,7 +24,10 @@ use raiko_lib::{
     primitives::eip4844::{self, commitment_to_version_hash, KZG_SETTINGS},
     utils::shasta_rules::ANCHOR_MAX_OFFSET,
 };
+
+use raiko_lib::input::L1StorageProof;
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::iter;
 use tracing::{debug, error, info, instrument, warn};
 
@@ -230,31 +233,12 @@ pub async fn prepare_taiko_chain_input(
 }
 
 // get fork corresponding anchor block height and state root
-fn get_anchor_tx_info_by_fork(
+pub fn get_anchor_tx_info_by_fork(
     fork: TaikoSpecId,
     anchor_tx: &TaikoTxEnvelope,
 ) -> RaikoResult<(u64, B256)> {
-    match fork {
-        TaikoSpecId::SHASTA => {
-            let anchor_call = decode_anchor_shasta(anchor_tx.input())?;
-            Ok((
-                anchor_call._checkpoint.blockNumber.to(),
-                anchor_call._checkpoint.stateRoot,
-            ))
-        }
-        TaikoSpecId::PACAYA => {
-            let anchor_call = decode_anchor_pacaya(anchor_tx.input())?;
-            Ok((anchor_call._anchorBlockId, anchor_call._anchorStateRoot))
-        }
-        TaikoSpecId::ONTAKE => {
-            let anchor_call = decode_anchor_ontake(anchor_tx.input())?;
-            Ok((anchor_call._anchorBlockId, anchor_call._anchorStateRoot))
-        }
-        _ => {
-            let anchor_call = decode_anchor(anchor_tx.input())?;
-            Ok((anchor_call.l1BlockId, anchor_call.l1StateRoot))
-        }
-    }
+    raiko_lib::anchor::get_anchor_tx_info_by_fork(fork, anchor_tx)
+        .map_err(|e| RaikoError::Preflight(e.to_string()))
 }
 
 /// a problem here is that we need to know the fork of the batch proposal tx
@@ -750,6 +734,145 @@ pub async fn filter_tx_blob_beacon_with_proof(
     info!("get_tx_data: blob_proof done");
 
     Ok((blob, Some(commitment.to_vec()), blob_proof))
+}
+
+/// Result of L1 storage proof collection, containing both the proofs and required L1 headers.
+pub struct L1StorageProofCollection {
+    /// Storage proofs for each detected L1SLOAD call (one per unique (address, key, block_number))
+    pub proofs: Vec<L1StorageProof>,
+    /// L1 headers covering [min_requested_block, l1_origin), ordered oldest→newest.
+    /// The L1 origin header itself is not included (it's `input.taiko.l1_header`).
+    pub l1_headers: Vec<reth_primitives::Header>,
+}
+
+/// Fetch L1 Merkle proofs for L1SLOAD calls discovered during EVM execution.
+///
+/// All L1SLOAD calls go through the live L1 RPC fallback during execution.
+/// The ZK prover needs Merkle proofs for these calls, so we fetch them after execution.
+pub async fn fetch_l1_proofs_for_rpc_served_calls(
+    l1_provider: &RpcBlockDataProvider,
+    calls: &std::collections::HashSet<(Address, B256, B256)>,
+    l1_origin_block_number: u64,
+) -> RaikoResult<L1StorageProofCollection> {
+    let mut proofs = Vec::new();
+
+    // Group calls by block number, then by address for batched proof fetching.
+    let mut calls_by_block: HashMap<u64, Vec<(Address, B256, B256)>> = HashMap::new();
+    for (contract_address, storage_key, block_number_b256) in calls {
+        let block_number_u256 = U256::from_be_bytes(block_number_b256.0);
+        let block_number_u64: u64 = block_number_u256.try_into().map_err(|_| {
+            RaikoError::Preflight(format!(
+                "L1SLOAD block number exceeds u64: {:?}",
+                block_number_b256
+            ))
+        })?;
+        calls_by_block.entry(block_number_u64).or_default().push((
+            *contract_address,
+            *storage_key,
+            *block_number_b256,
+        ));
+    }
+
+    for (block_number_u64, block_calls) in &calls_by_block {
+        let mut keys_by_address: HashMap<Address, Vec<(B256, U256)>> = HashMap::new();
+        for (contract_address, storage_key, _) in block_calls {
+            let storage_key_u256 = U256::from_be_bytes((*storage_key).into());
+            keys_by_address
+                .entry(*contract_address)
+                .or_default()
+                .push((*storage_key, storage_key_u256));
+        }
+
+        let batch_request: HashMap<Address, Vec<U256>> = keys_by_address
+            .iter()
+            .map(|(addr, keys)| (*addr, keys.iter().map(|(_, u256)| *u256).collect()))
+            .collect();
+
+        let proof_response = l1_provider
+            .get_l1_storage_proofs(*block_number_u64, batch_request)
+            .await?;
+
+        for (contract_address, keys) in &keys_by_address {
+            let account_proof_response = proof_response.get(contract_address).ok_or_else(|| {
+                RaikoError::Preflight(format!(
+                    "Missing account proof for L1SLOAD: contract={:?}, block={}",
+                    contract_address, block_number_u64
+                ))
+            })?;
+
+            for (storage_key_b256, _storage_key_u256) in keys {
+                let storage_proof = account_proof_response
+                    .storage_proof
+                    .iter()
+                    .find(|p| p.key.as_b256() == *storage_key_b256)
+                    .ok_or_else(|| {
+                        RaikoError::Preflight(format!(
+                            "Missing storage proof for L1SLOAD: contract={:?}, key={:?}, block={}",
+                            contract_address, storage_key_b256, block_number_u64
+                        ))
+                    })?;
+
+                let block_number_b256 = B256::from(U256::from(*block_number_u64));
+
+                proofs.push(L1StorageProof {
+                    contract_address: *contract_address,
+                    storage_key: *storage_key_b256,
+                    block_number: block_number_b256,
+                    value: B256::from(storage_proof.value),
+                    account_proof: account_proof_response.account_proof.clone(),
+                    storage_proof: storage_proof.proof.clone(),
+                });
+            }
+        }
+    }
+
+    // Fetch headers from the earliest requested block up to (but not including) L1 origin.
+    // The L1 origin header itself is the root of trust (input.taiko.l1_header).
+    let min_requested_block = calls_by_block
+        .keys()
+        .copied()
+        .min()
+        .unwrap_or(l1_origin_block_number);
+    let l1_headers =
+        fetch_l1_headers_in_range(l1_provider, min_requested_block, l1_origin_block_number).await?;
+
+    Ok(L1StorageProofCollection {
+        proofs,
+        l1_headers,
+    })
+}
+
+/// Fetch L1 block headers in the range `[from_block, to_block)`.
+///
+/// Returns an empty vec if `from_block >= to_block`.
+/// Headers are returned ordered from oldest to newest.
+async fn fetch_l1_headers_in_range(
+    l1_provider: &RpcBlockDataProvider,
+    from_block: u64,
+    to_block: u64,
+) -> RaikoResult<Vec<reth_primitives::Header>> {
+    if from_block >= to_block {
+        return Ok(Vec::new());
+    }
+
+    info!(
+        "Fetching L1 headers: blocks {}..{}",
+        from_block, to_block
+    );
+
+    let blocks_to_fetch: Vec<(u64, bool)> =
+        (from_block..to_block).map(|n| (n, false)).collect();
+
+    let blocks = l1_provider.get_blocks(&blocks_to_fetch).await?;
+
+    let mut headers: Vec<reth_primitives::Header> = blocks
+        .into_iter()
+        .map(|block| block.header.inner.clone())
+        .collect();
+
+    headers.sort_by_key(|h| h.number);
+
+    Ok(headers)
 }
 
 /// get tx data(blob data) vec from blob hashes

@@ -15,6 +15,10 @@ use raiko_lib::{
         BlobProofType, BlockProposedFork, GuestBatchInput, GuestInput, TaikoGuestInput,
         TaikoProverData,
     },
+    l1_precompiles::{
+        acquire_l1sload_lock, clear_l1_rpc_fetcher, clear_l1_rpc_served_calls, clear_l1sload_cache,
+        populate_l1sload_cache, set_l1_rpc_fetcher, take_l1_rpc_served_calls,
+    },
     primitives::mpt::proofs_to_tries,
     proof_type::ProofType,
     utils::txs::{generate_transactions, generate_transactions_for_batch_blocks},
@@ -23,12 +27,13 @@ use raiko_lib::{
 use tracing::{debug, info};
 
 use util::{
-    execute_txs, get_batch_blocks_and_parent_data, get_block_and_parent_data,
-    prepare_taiko_chain_batch_input, prepare_taiko_chain_input,
+    execute_txs, fetch_l1_proofs_for_rpc_served_calls, get_batch_blocks_and_parent_data,
+    get_block_and_parent_data, prepare_taiko_chain_batch_input, prepare_taiko_chain_input,
 };
 
 pub use util::{
-    parse_l1_batch_proposal_tx_for_pacaya_fork, parse_l1_batch_proposal_tx_for_shasta_fork,
+    get_anchor_tx_info_by_fork, parse_l1_batch_proposal_tx_for_pacaya_fork,
+    parse_l1_batch_proposal_tx_for_shasta_fork,
 };
 
 #[cfg(feature = "statedb_lru")]
@@ -124,8 +129,22 @@ pub async fn preflight<BDP: BlockDataProvider>(
 
     info!("preflight: parent header done");
 
-    // Create the guest input
-    let input = GuestInput {
+    // Extract anchor block context for L1SLOAD.
+    let (anchor_block_id, l1_origin_block_id) = if taiko_chain_spec.is_taiko() {
+        let anchor_tx = taiko_guest_input
+            .anchor_tx
+            .as_ref()
+            .ok_or_else(|| RaikoError::Preflight("No anchor tx available".to_owned()))?;
+        let fork = taiko_chain_spec.active_fork(block_number, block.timestamp)?;
+        let (anchor_block_id, _anchor_state_root) = get_anchor_tx_info_by_fork(fork, anchor_tx)?;
+        let l1_origin_block_id = taiko_guest_input.l1_header.number;
+        (anchor_block_id, l1_origin_block_id)
+    } else {
+        (0u64, 0u64)
+    };
+
+    // Create the guest input (mutable: L1SLOAD proofs added after execution via RPC fallback)
+    let mut input = GuestInput {
         block: block.clone(),
         parent_header,
         chain_spec: taiko_chain_spec.clone(),
@@ -167,10 +186,62 @@ pub async fn preflight<BDP: BlockDataProvider>(
         &input.taiko.anchor_tx,
     );
 
-    println!("TXS: {:#?}", pool_tx.first().unwrap());
+    // Optimize data gathering by executing the transactions multiple times so data can be requested in batches.
+    // L1SLOAD precompile globals are process-wide, so run clear/populate/execute/cleanup under lock.
+    let mut rpc_served_calls = std::collections::HashSet::new();
+    if input.chain_spec.is_taiko() {
+        let _l1sload_guard = acquire_l1sload_lock();
+        clear_l1sload_cache();
+        populate_l1sload_cache(&[], anchor_block_id, l1_origin_block_id);
+        clear_l1_rpc_served_calls();
 
-    // Optimize data gathering by executing the transactions multiple times so data can be requested in batches
-    execute_txs(&mut builder, pool_tx).await?;
+        let l1_rpc_url = l1_chain_spec.rpc.clone();
+        let handle = tokio::runtime::Handle::current();
+        set_l1_rpc_fetcher(move |address, storage_key, block_number| {
+            tokio::task::block_in_place(|| {
+                handle.block_on(async {
+                    let client = alloy_rpc_client::ClientBuilder::default()
+                        .http(l1_rpc_url.parse().unwrap());
+                    let block_id = alloy_rpc_types::BlockId::Number(block_number.into());
+                    let value: alloy_primitives::U256 = client
+                        .request("eth_getStorageAt", (address, storage_key, Some(block_id)))
+                        .await
+                        .map_err(|e| format!("eth_getStorageAt failed: {e}"))?;
+                    Ok(alloy_primitives::B256::from(value.to_be_bytes::<32>()))
+                })
+            })
+        });
+
+        let handle = tokio::runtime::Handle::current();
+        let exec_result =
+            tokio::task::block_in_place(|| handle.block_on(execute_txs(&mut builder, pool_tx)));
+
+        rpc_served_calls = take_l1_rpc_served_calls();
+        clear_l1_rpc_fetcher();
+
+        if let Err(err) = exec_result {
+            return Err(err);
+        }
+    } else {
+        execute_txs(&mut builder, pool_tx).await?;
+    }
+
+    // Collect L1SLOAD calls discovered during execution via RPC fallback.
+    if input.chain_spec.is_taiko() && !rpc_served_calls.is_empty() {
+        info!(
+            "Detected {} L1SLOAD calls via RPC fallback",
+            rpc_served_calls.len()
+        );
+        let l1_provider = RpcBlockDataProvider::new(&l1_chain_spec.rpc).await?;
+        let collection = fetch_l1_proofs_for_rpc_served_calls(
+            &l1_provider,
+            &rpc_served_calls,
+            l1_origin_block_id,
+        )
+        .await?;
+        input.l1_storage_proofs = collection.proofs;
+        input.l1_headers = collection.l1_headers;
+    }
 
     let db = if let Some(db) = builder.db.as_mut() {
         // use committed state as the init state of next block
@@ -346,10 +417,14 @@ pub async fn batch_preflight<BDP: BlockDataProvider>(
         .zip(pool_txs_list.iter().cloned())
         .collect();
 
+    // Create L1 provider once and share across all chunks (PR #14)
+    let shared_l1_provider = RpcBlockDataProvider::new(&l1_chain_spec.rpc).await?;
+
     for task_batch in tasks.chunks(chunk_size) {
         let task_batch_vec = task_batch.to_vec();
         let taiko_guest_batch_input = taiko_guest_batch_input.clone();
         let taiko_chain_spec = taiko_chain_spec.clone();
+        let l1_rpc_url_for_chunk = l1_chain_spec.rpc.clone();
 
         // Get first block number in batch, needed for grandparent timestamp fetch
         let first_block_number_in_batch = task_batch_vec
@@ -361,8 +436,10 @@ pub async fn batch_preflight<BDP: BlockDataProvider>(
         let mut grandparent_timestamp =
             get_grandparent_timestamp(&provider, first_block_number_in_batch).await?;
 
+        let l1_provider = shared_l1_provider.clone();
         let handle = tokio::spawn(async move {
             let mut chunk_guest_input = Vec::new();
+
             for ((prove_block, parent_block), txs_with_force_inc_flag) in task_batch_vec {
                 let taiko_chain_spec = taiko_chain_spec.clone();
                 let taiko_guest_batch_input = taiko_guest_batch_input.clone();
@@ -398,8 +475,20 @@ pub async fn batch_preflight<BDP: BlockDataProvider>(
                 // Current block's parent becomes next block's grandparent
                 grandparent_timestamp = Some(parent_header.timestamp);
 
-                // Create the guest input
-                let input = GuestInput {
+                // Extract anchor block context for L1SLOAD.
+                let (anchor_block_id, l1_origin_block_id) = if taiko_chain_spec.is_taiko() {
+                    let fork = taiko_chain_spec
+                        .active_fork(prove_block.header.number, prove_block.timestamp)?;
+                    let (anchor_block_id, _anchor_state_root) =
+                        get_anchor_tx_info_by_fork(fork, &anchor_tx)?;
+                    let l1_origin_block_id = taiko_input.l1_header.number;
+                    (anchor_block_id, l1_origin_block_id)
+                } else {
+                    (0u64, 0u64)
+                };
+
+                // Create the guest input (mutable: L1SLOAD proofs added after execution via RPC fallback)
+                let mut input = GuestInput {
                     block: prove_block.clone(),
                     parent_header,
                     chain_spec: taiko_chain_spec.clone(),
@@ -434,7 +523,64 @@ pub async fn batch_preflight<BDP: BlockDataProvider>(
                 // Optimize data gathering by executing the transactions multiple times so data can be requested in batches
                 let mut pool_txs = vec![anchor_tx.clone()];
                 pool_txs.extend_from_slice(&pure_pool_txs);
-                execute_txs(&mut builder, pool_txs).await?;
+                let mut rpc_served_calls = std::collections::HashSet::new();
+                if taiko_chain_spec.is_taiko() {
+                    let _l1sload_guard = acquire_l1sload_lock();
+                    clear_l1sload_cache();
+                    populate_l1sload_cache(&[], anchor_block_id, l1_origin_block_id);
+                    clear_l1_rpc_served_calls();
+
+                    let l1_rpc_url = l1_rpc_url_for_chunk.clone();
+                    let handle = tokio::runtime::Handle::current();
+                    set_l1_rpc_fetcher(move |address, storage_key, block_number| {
+                        tokio::task::block_in_place(|| {
+                            handle.block_on(async {
+                                let client = alloy_rpc_client::ClientBuilder::default()
+                                    .http(l1_rpc_url.parse().unwrap());
+                                let block_id =
+                                    alloy_rpc_types::BlockId::Number(block_number.into());
+                                let value: alloy_primitives::U256 = client
+                                    .request(
+                                        "eth_getStorageAt",
+                                        (address, storage_key, Some(block_id)),
+                                    )
+                                    .await
+                                    .map_err(|e| format!("eth_getStorageAt failed: {e}"))?;
+                                Ok(alloy_primitives::B256::from(value.to_be_bytes::<32>()))
+                            })
+                        })
+                    });
+
+                    let handle = tokio::runtime::Handle::current();
+                    let exec_result = tokio::task::block_in_place(|| {
+                        handle.block_on(execute_txs(&mut builder, pool_txs))
+                    });
+                    rpc_served_calls = take_l1_rpc_served_calls();
+                    clear_l1_rpc_fetcher();
+
+                    if let Err(err) = exec_result {
+                        return Err(err);
+                    }
+                } else {
+                    execute_txs(&mut builder, pool_txs).await?;
+                }
+
+                // Collect L1SLOAD calls discovered during execution via RPC fallback.
+                if taiko_chain_spec.is_taiko() && !rpc_served_calls.is_empty() {
+                    info!(
+                        "Detected {} L1SLOAD calls via RPC fallback (batch block {})",
+                        rpc_served_calls.len(),
+                        prove_block.header.number
+                    );
+                    let collection = fetch_l1_proofs_for_rpc_served_calls(
+                        &l1_provider,
+                        &rpc_served_calls,
+                        l1_origin_block_id,
+                    )
+                    .await?;
+                    input.l1_storage_proofs = collection.proofs;
+                    input.l1_headers = collection.l1_headers;
+                }
 
                 let db = if let Some(db) = builder.db.as_mut() {
                     // save committed state as the init state of next block
