@@ -1,3 +1,4 @@
+use alethia_reth_primitives::{TaikoBlock, TaikoTxEnvelope};
 use alloy_consensus::{Blob, Transaction};
 use alloy_primitives::{hex, Log as LogStruct, Uint, B256};
 use alloy_provider::{Provider, RootProvider};
@@ -23,7 +24,6 @@ use raiko_lib::{
     primitives::eip4844::{self, commitment_to_version_hash, KZG_SETTINGS},
     utils::shasta_rules::ANCHOR_MAX_OFFSET,
 };
-use reth_primitives::{Block as RethBlock, TransactionSigned};
 use serde::{Deserialize, Serialize};
 use std::iter;
 use tracing::{debug, error, info, instrument, warn};
@@ -37,7 +37,7 @@ use crate::{
 /// Optimize data gathering by executing the transactions multiple times so data can be requested in batches
 pub async fn execute_txs<'a, BDP>(
     builder: &mut RethBlockBuilder<ProviderDb<'a, BDP>>,
-    pool_txs: Vec<reth_primitives::TransactionSigned>,
+    pool_txs: Vec<TaikoTxEnvelope>,
 ) -> RaikoResult<()>
 where
     BDP: BlockDataProvider,
@@ -69,7 +69,7 @@ where
         info!("execute_txs: fetch_data start");
         if db.fetch_data().await {
             clear_line();
-            info!("State data fetched in {num_iterations} iterations");
+            debug!("State data fetched in {num_iterations} iterations");
             break;
         }
     }
@@ -83,7 +83,7 @@ pub async fn prepare_taiko_chain_input(
     taiko_chain_spec: &ChainSpec,
     block_number: u64,
     l1_inclusion_block_number: Option<u64>,
-    block: &RethBlock,
+    block: &TaikoBlock,
     prover_data: TaikoProverData,
     blob_proof_type: &BlobProofType,
 ) -> RaikoResult<TaikoGuestInput> {
@@ -232,7 +232,7 @@ pub async fn prepare_taiko_chain_input(
 // get fork corresponding anchor block height and state root
 fn get_anchor_tx_info_by_fork(
     fork: TaikoSpecId,
-    anchor_tx: &TransactionSigned,
+    anchor_tx: &TaikoTxEnvelope,
 ) -> RaikoResult<(u64, B256)> {
     match fork {
         TaikoSpecId::SHASTA => {
@@ -346,6 +346,7 @@ async fn prepare_pacaya_batch_input(
     prover_data: TaikoProverData,
     blob_proof_type: &BlobProofType,
     provider_l1: &RpcBlockDataProvider,
+    grandparent_header: Option<reth_primitives::Header>,
 ) -> RaikoResult<TaikoGuestBatchInput> {
     let batch_info = &batch_proposed.info;
     let blob_hashes = batch_info.blobHashes.clone();
@@ -389,6 +390,7 @@ async fn prepare_pacaya_batch_input(
         l1_ancestor_headers: Vec::new(),
         chain_spec: taiko_chain_spec.clone(),
         prover_data: prover_data,
+        l2_grandparent_header: grandparent_header,
         data_sources: vec![InputDataSource {
             tx_data_from_calldata,
             tx_data_from_blob: blob_tx_buffers_with_proofs
@@ -409,7 +411,7 @@ async fn prepare_pacaya_batch_input(
     })
 }
 
-/// Prepare Pacaya batch input
+/// Prepare Shasta batch input
 async fn prepare_shasta_batch_input(
     shasta_event_data: raiko_lib::input::shasta::ShastaEventData,
     batch_id: u64,
@@ -423,6 +425,7 @@ async fn prepare_shasta_batch_input(
     prover_data: TaikoProverData,
     blob_proof_type: &BlobProofType,
     _provider_l1: &RpcBlockDataProvider,
+    grandparent_header: Option<reth_primitives::Header>,
 ) -> RaikoResult<TaikoGuestBatchInput> {
     let mut data_sources = Vec::new();
     for derivation_source in shasta_event_data.proposal.sources.clone() {
@@ -478,6 +481,7 @@ async fn prepare_shasta_batch_input(
             .collect(),
         chain_spec: taiko_chain_spec.clone(),
         prover_data: prover_data,
+        l2_grandparent_header: grandparent_header,
         data_sources,
     })
 }
@@ -491,6 +495,7 @@ async fn prepare_taiko_chain_batch_input_pacaya(
     blob_proof_type: &BlobProofType,
     batch_anchor_tx_info: Vec<(u64, B256)>,
     batch_proposed: raiko_lib::input::pacaya::BatchProposed,
+    grandparent_header: Option<reth_primitives::Header>,
 ) -> RaikoResult<TaikoGuestBatchInput> {
     let (anchor_block_height, anchor_state_root) = batch_anchor_tx_info[0];
     let provider_l1 = RpcBlockDataProvider::new(&l1_chain_spec.rpc).await?;
@@ -514,6 +519,7 @@ async fn prepare_taiko_chain_batch_input_pacaya(
         prover_data,
         blob_proof_type,
         &provider_l1,
+        grandparent_header,
     )
     .await
 }
@@ -527,6 +533,7 @@ async fn prepare_taiko_chain_batch_input_shasta(
     blob_proof_type: &BlobProofType,
     batch_anchor_tx_info: Vec<(u64, B256)>,
     shasta_event_data: raiko_lib::input::shasta::ShastaEventData,
+    grandparent_header: Option<reth_primitives::Header>,
 ) -> RaikoResult<TaikoGuestBatchInput> {
     let (anchor_block_height, _) = batch_anchor_tx_info[0];
     let provider_l1 = RpcBlockDataProvider::new(&l1_chain_spec.rpc).await?;
@@ -564,6 +571,7 @@ async fn prepare_taiko_chain_batch_input_shasta(
         prover_data,
         blob_proof_type,
         &provider_l1,
+        grandparent_header,
     )
     .await
 }
@@ -574,10 +582,11 @@ pub async fn prepare_taiko_chain_batch_input(
     taiko_chain_spec: &ChainSpec,
     l1_inclusion_block_number: u64,
     batch_id: u64,
-    batch_blocks: &[RethBlock],
+    batch_blocks: &[TaikoBlock],
     prover_data: TaikoProverData,
     blob_proof_type: &BlobProofType,
     cached_event_data: Option<BlockProposedFork>,
+    grandparent_header: Option<reth_primitives::Header>,
 ) -> RaikoResult<TaikoGuestBatchInput> {
     // Get the L1 block in which the L2 block was included so we can fetch the DA data.
     // Also get the L1 state block header so that we can prove the L1 state root.
@@ -631,6 +640,7 @@ pub async fn prepare_taiko_chain_batch_input(
                 blob_proof_type,
                 batch_anchor_tx_info,
                 batch_proposed,
+                grandparent_header,
             )
             .await
         }
@@ -655,6 +665,7 @@ pub async fn prepare_taiko_chain_batch_input(
                 blob_proof_type,
                 batch_anchor_tx_info,
                 shasta_event_data,
+                grandparent_header,
             )
             .await
         }
@@ -905,7 +916,6 @@ pub async fn filter_block_proposed_event(
                         RaikoError::Anyhow(anyhow!("Could not decode Shasta event data"))
                     })?;
 
-                // let timestamp = log.block_timestamp.unwrap();
                 let current_block_number = log.block_number.unwrap();
                 let current_block = provider
                     .get_block(BlockId::number(current_block_number))
@@ -928,7 +938,6 @@ pub async fn filter_block_proposed_event(
                 event_data.proposal.originBlockNumber = Uint::from(origin_block_number);
                 event_data.proposal.originBlockHash = origin_block_hash;
                 event_data.proposal.timestamp = Uint::from(timestamp);
-                event_data.proposal.parentProposalHash = B256::ZERO;
                 (
                     raiko_lib::primitives::U256::from(event_data.proposal.id),
                     BlockProposedFork::Shasta(event_data),
@@ -1036,7 +1045,7 @@ pub async fn get_block_proposed_event_by_traversal(
 pub async fn get_block_and_parent_data<BDP>(
     provider: &BDP,
     block_number: u64,
-) -> RaikoResult<(RethBlock, alloy_rpc_types::Block)>
+) -> RaikoResult<(TaikoBlock, alloy_rpc_types::Block)>
 where
     BDP: BlockDataProvider,
 {
@@ -1065,7 +1074,7 @@ where
     debug!("block transactions: {:?}", block.transactions.len());
 
     // Convert the alloy block to a reth block
-    let block = RethBlock::try_from(block.clone())
+    let block = TaikoBlock::try_from(block.clone())
         .map_err(|e| RaikoError::Conversion(format!("Failed converting to reth block: {e}")))?;
     Ok((block, parent_block.clone()))
 }
@@ -1096,18 +1105,32 @@ pub async fn get_grandparent_timestamp<BDP: BlockDataProvider>(
 pub async fn get_batch_blocks_and_parent_data<BDP>(
     provider: &BDP,
     block_numbers: &[u64],
-) -> RaikoResult<Vec<(RethBlock, alloy_rpc_types::Block)>>
+) -> RaikoResult<Vec<(TaikoBlock, alloy_rpc_types::Block)>>
 where
     BDP: BlockDataProvider,
 {
-    let target_blocks = iter::once(block_numbers[0] - 1)
-        .chain(block_numbers.iter().cloned())
-        .enumerate()
-        .map(|(i, block_number)| (block_number, i != 0))
-        .collect::<Vec<(u64, bool)>>();
+    let is_first_block = block_numbers[0] == 1;
+    let target_blocks = if is_first_block {
+        iter::once(block_numbers[0] - 1)
+            .chain(block_numbers.iter().cloned())
+            .enumerate()
+            .map(|(i, block_number)| (block_number, i != 0))
+            .collect::<Vec<(u64, bool)>>()
+    } else {
+        std::iter::once(block_numbers[0] - 2)
+            .chain(std::iter::once(block_numbers[0] - 1))
+            .chain(block_numbers.iter().cloned())
+            .enumerate()
+            .map(|(i, block_number)| (block_number, i != 0))
+            .collect::<Vec<(u64, bool)>>()
+    };
     // Get the block and the parent block
     let blocks = provider.get_blocks(&target_blocks).await?;
-    assert!(blocks.len() == block_numbers.len() + 1);
+    if is_first_block {
+        assert!(blocks.len() == block_numbers.len() + 1);
+    } else {
+        assert!(blocks.len() == block_numbers.len() + 2);
+    }
 
     info!(
         "Processing {} blocks with (num, hash) from:({:?}, {:?}) to ({:?}, {:?})",
@@ -1122,7 +1145,7 @@ where
         .windows(2)
         .map(|window_blocks| {
             let parent_block = &window_blocks[0];
-            let prove_block = RethBlock::try_from(window_blocks[1].clone())
+            let prove_block = TaikoBlock::try_from(window_blocks[1].clone())
                 .map_err(|e| {
                     RaikoError::Conversion(format!("Failed converting to reth block: {e}"))
                 })
@@ -1372,28 +1395,6 @@ async fn get_and_filter_blob_data_by_blobscan(
     let blob = response.json::<BlobScanData>().await?;
     Ok(blob_to_bytes(&blob.data))
 }
-
-/// Decodes extra data for Taiko chain containing base fee sharing percentage and bond proposal flag
-///
-/// # Arguments
-/// * `extra_data` - The encoded extra data bytes
-///
-/// # Returns
-/// A tuple containing (basefee_sharing_pctg, is_low_bond_proposal)
-pub(crate) fn decode_extra_data(extra_data: &[u8]) -> (u8, bool) {
-    if extra_data.len() < 2 {
-        return (0, false);
-    }
-
-    // First byte: basefee sharing percentage
-    let basefee_sharing_pctg = extra_data[0];
-
-    // Second byte: is_low_bond_proposal in the lowest bit
-    let is_low_bond_proposal = (extra_data[1] & 0x01) != 0;
-
-    (basefee_sharing_pctg, is_low_bond_proposal)
-}
-
 #[cfg(test)]
 mod test {
     use alloy_rlp::Decodable;

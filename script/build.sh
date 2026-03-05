@@ -10,7 +10,8 @@ CHAIN_SPEC_PATH=${CHAIN_SPEC_PATH:-host/config/devnet/chain_spec_list.json}
 #TOOLCHAIN_RISC0=+nightly-2024-12-20
 #TOOLCHAIN_SP1=+nightly-2024-12-20
 #TOOLCHAIN_SGX=+nightly-2024-12-20
-# TOOLCHAIN_ZISK=+nightly-2024-12-20
+#TOOLCHAIN_ZISK=+nightly-2024-12-20
+#TOOLCHAIN_TDX=+nightly-2024-12-20
 
 
 check_toolchain() {
@@ -125,7 +126,7 @@ if [ "$1" == "risc0" ]; then
     elif [ -z "${RUN}" ]; then
         if [ -z "${TEST}" ]; then
             echo "Building Risc0 prover"
-            cargo ${TOOLCHAIN_RISC0} run --manifest-path provers/risc0/builder/Cargo.toml --bin risc0-builder 2>&1 | tee /tmp/risc0_build_output.txt
+            cargo ${TOOLCHAIN_RISC0} run --bin risc0-builder 2>&1 
         else
             echo "Building test elfs for Risc0 prover"
             cargo ${TOOLCHAIN_RISC0} run --manifest-path provers/risc0/builder/Cargo.toml --bin risc0-builder --no-default-features --features risc0,test,bench
@@ -169,7 +170,7 @@ if [ "$1" == "sp1" ]; then
     elif [ -z "${RUN}" ]; then
         if [ -z "${TEST}" ]; then
             echo "Building Sp1 prover"
-            cargo ${TOOLCHAIN_SP1} run --manifest-path provers/sp1/builder/Cargo.toml --bin sp1-builder 2>&1 | tee /tmp/sp1_build_output.txt
+            cargo ${TOOLCHAIN_SP1} run --bin sp1-builder 2>&1 
         else
             echo "Building test elfs for Sp1 prover"
             cargo ${TOOLCHAIN_SP1} run --manifest-path provers/sp1/builder/Cargo.toml --bin sp1-builder --no-default-features --features sp1,test,bench
@@ -271,4 +272,26 @@ if [ "$1" == "zisk" ]; then
     echo "Build script:    $ZISK_AGENT_DIR/build.sh"
     echo "Service:         use raiko-agent (default http://localhost:9999/proof)"
     echo ""
+# TDX
+if [ "$1" == "tdx" ]; then
+    check_toolchain $TOOLCHAIN_TDX
+    if [ -n "${CLIPPY}" ]; then
+        cargo ${TOOLCHAIN_TDX} clippy -p raiko-host -p tdx-prover -F "tdx enable" -- -D warnings
+    elif [ -z "${RUN}" ]; then
+        if [ -z "${TEST}" ]; then
+            echo "Building TDX prover"
+            cargo ${TOOLCHAIN_TDX} build ${FLAGS} --features tdx
+        else
+            echo "Building TDX tests"
+            cargo ${TOOLCHAIN_TDX} test ${FLAGS} -p raiko-host -p tdx-prover --features "tdx enable" --no-run
+        fi
+    else
+        if [ -z "${TEST}" ]; then
+            echo "Running TDX prover"
+            cargo ${TOOLCHAIN_TDX} run ${FLAGS} --features tdx
+        else
+            echo "Running TDX tests"
+            cargo ${TOOLCHAIN_TDX} test ${FLAGS} -p raiko-host -p tdx-prover --features "tdx enable"
+        fi
+    fi
 fi

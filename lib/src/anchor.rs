@@ -1,9 +1,10 @@
 //! Taiko's anchor related functionality and checks.
 
+use alethia_reth_consensus::transaction::TaikoTxEnvelope;
 use alloy_primitives::{uint, Address, U256};
 use anyhow::{anyhow, bail, Result};
 use once_cell::sync::Lazy;
-use reth_primitives::{Header, TransactionSigned};
+use reth_primitives::Header;
 use std::str::FromStr;
 
 #[derive(Clone, Debug, Default)]
@@ -54,8 +55,10 @@ static GX1_MUL_PRIVATEKEY: U256 =
 static GX2: U256 = uint!(0xc6047f9441ed7d6d3045406e95c07cd85c778e4b8cef3ca7abac09b95c709ee5_U256);
 
 /// check the anchor signature with fixed K value
-pub fn check_anchor_signature(anchor: &TransactionSigned) -> Result<()> {
-    let sign = anchor.signature();
+pub fn check_anchor_signature(anchor: &TaikoTxEnvelope) -> Result<()> {
+    let sign = anchor
+        .signature()
+        .ok_or_else(|| anyhow!("anchor transaction has no signature"))?;
     if sign.r() == GX1 {
         return Ok(());
     }
@@ -155,12 +158,10 @@ sol! {
 
     /// @notice Processes a block within a proposal and anchors L1 data.
     /// @dev Core function that processes blocks sequentially within a proposal:
-    ///      1. Designates prover when a new proposal starts (i.e. the first block of a proposal)
-    ///      2. Anchors L1 block data for cross-chain verification
+    ///      1. Anchors L1 block data for cross-chain verification
     /// @param _proposalParams Proposal-level parameters that define the overall batch.
     /// @param _checkpoint Checkpoint data for the L1 block being anchored.
     function anchorV4(
-        ProposalParams calldata _proposalParams,
         Checkpoint calldata _checkpoint
     )
         external

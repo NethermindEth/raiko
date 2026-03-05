@@ -25,8 +25,10 @@ use alethia_reth_chainspec::reth_chainspec::Hardforks;
 use alethia_reth_chainspec::spec::TaikoChainSpec;
 use alethia_reth_chainspec::TAIKO_DEVNET;
 use alethia_reth_chainspec::TAIKO_MAINNET;
+use alethia_reth_consensus::transaction::TaikoTxEnvelope;
 use alethia_reth_evm::factory::TaikoEvmFactory;
 use alethia_reth_evm::spec::TaikoSpecId;
+use alethia_reth_primitives::TaikoBlock;
 use alloy_primitives::map::HashMap;
 use alloy_primitives::Address;
 use alloy_primitives::Bytes;
@@ -40,9 +42,9 @@ use reth_evm::block::BlockExecutionResult;
 use reth_evm::execute::Executor;
 use reth_evm::execute::{BlockExecutionOutput, ProviderError};
 use reth_evm::Database;
+use reth_primitives::Header;
 use reth_primitives::RecoveredBlock;
 use reth_primitives::SealedHeader;
-use reth_primitives::{Block, Header, TransactionSigned};
 use revm::primitives::KECCAK_EMPTY;
 use revm::state::Account;
 use revm::state::AccountInfo;
@@ -97,6 +99,7 @@ pub static SURGE_DEV_HARDFORKS: LazyLock<ChainHardforks> = LazyLock::new(|| {
             ),
         ),
         (TaikoHardfork::Pacaya.boxed(), ForkCondition::Block(1)),
+        (TaikoHardfork::Shasta.boxed(), ForkCondition::Timestamp(0)),
     ])
 });
 
@@ -141,6 +144,7 @@ pub static SURGE_TEST_HARDFORKS: LazyLock<ChainHardforks> = LazyLock::new(|| {
             ),
         ),
         (TaikoHardfork::Pacaya.boxed(), ForkCondition::Block(1)),
+        (TaikoHardfork::Shasta.boxed(), ForkCondition::Timestamp(0)),
     ])
 });
 
@@ -185,6 +189,7 @@ pub static SURGE_STAGE_HARDFORKS: LazyLock<ChainHardforks> = LazyLock::new(|| {
             ),
         ),
         (TaikoHardfork::Pacaya.boxed(), ForkCondition::Block(1)),
+        (TaikoHardfork::Shasta.boxed(), ForkCondition::Timestamp(0)),
     ])
 });
 
@@ -244,18 +249,20 @@ pub static SURGE_MAINNET: LazyLock<Arc<TaikoChainSpec>> = LazyLock::new(|| {
     .into()
 });
 
-pub fn calculate_block_header(input: &GuestInput) -> Header {
+pub fn calculate_block_header(input: &mut GuestInput) -> Header {
     let cycle_tracker = CycleTracker::start("initialize_database");
-    let db = create_mem_db(&mut input.clone()).unwrap();
+    let db = create_mem_db(input).unwrap();
     cycle_tracker.end();
 
-    let mut builder = RethBlockBuilder::new(input, db);
     let pool_tx = generate_transactions(
         &input.chain_spec,
         &input.taiko.block_proposed,
         &input.taiko.tx_data,
         &input.taiko.anchor_tx,
     );
+
+    let guest_input = mem::take(input);
+    let mut builder = RethBlockBuilder::new(guest_input, db);
 
     let cycle_tracker = CycleTracker::start("execute_transactions");
     builder
@@ -267,19 +274,26 @@ pub fn calculate_block_header(input: &GuestInput) -> Header {
     let header = builder.finalize().expect("execute");
     cycle_tracker.end();
 
+    // Put the (partially consumed) input back so callers can still read
+    // metadata (chain_spec, block, taiko, parent_header) after this function.
+    *input = mem::take(&mut builder.input);
     header
 }
 
-pub fn calculate_batch_blocks_final_header(input: &GuestBatchInput) -> Vec<Block> {
+pub fn calculate_batch_blocks_final_header(input: &mut GuestBatchInput) -> Vec<TaikoBlock> {
     let pool_txs_list = generate_transactions_for_batch_blocks(&input);
     let mut final_blocks = Vec::new();
     for (i, pool_txs) in pool_txs_list.iter().enumerate() {
-        let mut builder = RethBlockBuilder::new(
-            &input.inputs[i],
-            create_mem_db(&mut input.inputs[i].clone()).unwrap(),
-        );
+        // First, create the MemDb using a mutable reference (no clone needed —
+        // create_mem_db only mem::takes `contracts` and storage `slots`).
+        let db = create_mem_db(&mut input.inputs[i]).unwrap();
+        // Then, take ownership of the GuestInput for the builder (no clone needed —
+        // parent_state_trie and parent_storage tries are still intact after create_mem_db).
+        let guest_input = mem::take(&mut input.inputs[i]);
+        let mut builder =
+            RethBlockBuilder::new(guest_input, db).set_is_first_block_in_proposal(i == 0);
 
-        let mut execute_tx = vec![input.inputs[i].taiko.anchor_tx.clone().unwrap()];
+        let mut execute_tx = vec![builder.input.taiko.anchor_tx.clone().unwrap()];
         execute_tx.extend_from_slice(&pool_txs.0);
         builder
             .execute_transactions(execute_tx.clone(), false)
@@ -289,8 +303,12 @@ pub fn calculate_batch_blocks_final_header(input: &GuestBatchInput) -> Vec<Block
                 .finalize_block()
                 .expect("execute single batched block"),
         );
+        // Put the (partially consumed) input back so callers can still read
+        // metadata (chain_spec, block, taiko, parent_header) after this function.
+        // Only contracts, storage slots, and parent_state_trie have been consumed.
+        input.inputs[i] = mem::take(&mut builder.input);
     }
-    validate_final_batch_blocks(input, &final_blocks);
+    validate_final_batch_blocks(&final_blocks);
 
     final_blocks
 }
@@ -298,36 +316,26 @@ pub fn calculate_batch_blocks_final_header(input: &GuestBatchInput) -> Vec<Block
 // to check the linkages between the blocks
 // 1. connect parent hash & state root
 // 2. block number should be in sequence
-fn validate_final_batch_blocks(input: &GuestBatchInput, final_blocks: &[Block]) {
-    input
-        .inputs
-        .iter()
-        .zip(final_blocks.iter())
-        .collect::<Vec<_>>()
-        .windows(2)
-        .for_each(|window| {
-            let (_parent_input, parent_block) = &window[0];
-            let (current_input, current_block) = &window[1];
-            let calculated_parent_hash = parent_block.header.hash_slow();
-            assert!(
-                calculated_parent_hash == current_block.header.parent_hash,
-                "Parent hash mismatch, expected: {}, got: {}",
-                calculated_parent_hash,
-                current_block.header.parent_hash
-            );
-            assert!(
-                parent_block.header.number + 1 == current_block.header.number,
-                "Block number mismatch, expected: {}, got: {}",
-                parent_block.header.number + 1,
-                current_block.header.number
-            );
-            assert!(
-                parent_block.header.state_root == current_input.parent_header.state_root,
-                "Parent hash mismatch, expected: {}, got: {}",
-                parent_block.header.hash_slow(),
-                current_block.header.parent_hash
-            );
-        });
+// Note: state_root linkage is already validated by create_mem_db which asserts
+// parent_state_trie.hash() == parent_header.state_root for each block.
+fn validate_final_batch_blocks(final_blocks: &[TaikoBlock]) {
+    final_blocks.windows(2).for_each(|window| {
+        let parent_block = &window[0];
+        let current_block = &window[1];
+        let calculated_parent_hash = parent_block.header.hash_slow();
+        assert!(
+            calculated_parent_hash == current_block.header.parent_hash,
+            "Parent hash mismatch, expected: {}, got: {}",
+            calculated_parent_hash,
+            current_block.header.parent_hash
+        );
+        assert!(
+            parent_block.header.number + 1 == current_block.header.number,
+            "Block number mismatch, expected: {}, got: {}",
+            parent_block.header.number + 1,
+            current_block.header.number
+        );
+    });
 }
 
 /// Optimistic database
@@ -345,24 +353,36 @@ pub struct RethBlockBuilder<DB> {
     pub chain_spec: crate::consts::ChainSpec,
     pub input: GuestInput,
     pub db: Option<DB>,
+    /// Whether this is the first block in a proposal batch (for Shasta)
+    pub is_first_block_in_proposal: bool,
 }
 
 impl<DB: Database<Error = ProviderError> + DatabaseCommit + OptimisticDatabase + Clone>
     RethBlockBuilder<DB>
 {
     /// Creates a new block builder.
-    pub fn new(input: &GuestInput, db: DB) -> RethBlockBuilder<DB> {
+    /// For single block execution, `is_first_block_in_proposal` defaults to `true`.
+    /// For batch execution, it should be set explicitly using `set_is_first_block_in_proposal`.
+    /// Takes ownership of the GuestInput to avoid expensive deep clones.
+    pub fn new(input: GuestInput, db: DB) -> RethBlockBuilder<DB> {
         RethBlockBuilder {
             chain_spec: input.chain_spec.clone(),
             db: Some(db),
-            input: input.clone(),
+            input,
+            is_first_block_in_proposal: true, // Default to true for single block execution
         }
+    }
+
+    /// Sets whether this is the first block in a proposal batch.
+    pub fn set_is_first_block_in_proposal(mut self, is_first: bool) -> Self {
+        self.is_first_block_in_proposal = is_first;
+        self
     }
 
     /// Executes all input transactions.
     pub fn execute_transactions(
         &mut self,
-        pool_txs: Vec<TransactionSigned>,
+        pool_txs: Vec<TaikoTxEnvelope>,
         optimistic: bool,
     ) -> Result<()> {
         info!("execute_transactions: start");
@@ -508,7 +528,13 @@ impl<DB: Database<Error = ProviderError> + DatabaseCommit + OptimisticDatabase +
             info!("execute_transactions: validate_block_pre_execution done");
 
             // Validates the gas used, the receipts root and the logs bloom
-            validate_block_post_execution(&recovered_block, &chain_spec, &receipts, &requests)?;
+            validate_block_post_execution(
+                &recovered_block,
+                &chain_spec,
+                &receipts,
+                &requests,
+                None,
+            )?;
             info!("execute_transactions: validate_block_post_execution done");
         }
 
@@ -519,8 +545,14 @@ impl<DB: Database<Error = ProviderError> + DatabaseCommit + OptimisticDatabase +
             .state
             .into_iter()
             .map(|(address, bundle_account)| {
+                let is_original_none = bundle_account.original_info.is_none();
+                let is_info_none = bundle_account.info.is_none();
+                let account_info = bundle_account.account_info().unwrap_or_default();
+                let original_info = bundle_account.original_info.unwrap_or_default();
+
                 let mut account = Account {
-                    info: bundle_account.account_info().unwrap_or_default(),
+                    original_info: Box::new(original_info),
+                    info: account_info,
                     storage: bundle_account
                         .storage
                         .into_iter()
@@ -541,10 +573,10 @@ impl<DB: Database<Error = ProviderError> + DatabaseCommit + OptimisticDatabase +
                     transaction_id: 0,
                 };
                 account.mark_touch();
-                if bundle_account.info.is_none() {
+                if is_info_none {
                     account.mark_selfdestruct();
                 }
-                if bundle_account.original_info.is_none() {
+                if is_original_none {
                     account.mark_created();
                 }
                 (address, account)
@@ -565,7 +597,7 @@ impl RethBlockBuilder<MemDb> {
     }
 
     /// Finalizes the block building and returns the header
-    pub fn finalize_block(&mut self) -> Result<Block> {
+    pub fn finalize_block(&mut self) -> Result<TaikoBlock> {
         let state_root = self.calculate_state_root()?;
         assert_eq!(self.input.block.state_root, state_root);
         ensure!(self.input.block.state_root == state_root);
@@ -708,6 +740,7 @@ pub fn create_mem_db(input: &mut GuestInput) -> Result<MemDb> {
 
         let mem_account = DbAccount {
             info: AccountInfo {
+                account_id: None,
                 balance: state_account.balance,
                 nonce: state_account.nonce,
                 code_hash: state_account.code_hash,

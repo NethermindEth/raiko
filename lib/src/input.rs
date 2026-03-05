@@ -1,7 +1,9 @@
 use core::{fmt::Debug, str::FromStr};
 use std::collections::HashMap;
 
+use alethia_reth_consensus::transaction::TaikoTxEnvelope;
 use alethia_reth_evm::spec::TaikoSpecId;
+use alethia_reth_primitives::TaikoBlock;
 use alloy_consensus::serde_bincode_compat;
 use alloy_primitives::Address;
 use alloy_primitives::Bytes;
@@ -10,7 +12,7 @@ use alloy_primitives::U256;
 use anyhow::{anyhow, Error, Result};
 use ontake::BlockProposedV2;
 use pacaya::{BatchInfo, BatchProposed};
-use reth_primitives::{Block, Header, TransactionSigned};
+use reth_primitives::Header;
 use serde::{Deserialize, Serialize};
 use serde_with::serde_as;
 use shasta::ShastaEventData;
@@ -29,6 +31,7 @@ use crate::{
     prover::{Proof, ProofCarryData},
     utils::blobs::zlib_compress_data,
 };
+use alethia_reth_primitives::serde_bincode_compat::TaikoTxEnvelope as BincodeCompactTaikoTxEnvelope;
 use alloy_consensus::serde_bincode_compat::Header as BincodeCompactHeader;
 use reth_primitives::serde_bincode_compat::Block as BincodeCompactBlock;
 
@@ -41,9 +44,9 @@ pub type StorageEntry = (MptNode, Vec<U256>);
 #[serde_as]
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
 pub struct GuestInput {
-    #[serde_as(as = "BincodeCompactBlock<TransactionSigned, Header>")]
+    #[serde_as(as = "BincodeCompactBlock<'_, TaikoTxEnvelope, Header>")]
     /// Reth block
-    pub block: Block,
+    pub block: TaikoBlock,
     /// The network to generate the proof for
     pub chain_spec: ChainSpec,
     #[serde_as(as = "BincodeCompactHeader")]
@@ -80,11 +83,15 @@ pub struct TaikoGuestBatchInput {
     #[serde_as(as = "BincodeCompactHeader")]
     pub l1_header: Header,
     /// List of at most MAX ANCHOR OFFSET previous block headers
+    #[serde_as(as = "Vec<BincodeCompactHeader>")]
     pub l1_ancestor_headers: Vec<Header>,
     pub batch_proposed: BlockProposedFork,
     pub chain_spec: ChainSpec,
     pub prover_data: TaikoProverData,
     pub data_sources: Vec<InputDataSource>,
+    /// L2 grandparent header for the first block in the batch (used for EIP-4396 base fee calculation)
+    #[serde_as(as = "Option<BincodeCompactHeader>")]
+    pub l2_grandparent_header: Option<Header>,
 }
 
 /// External block input.
@@ -150,7 +157,6 @@ pub struct ShastaRisc0AggregationGuestInput {
     pub image_id: [u32; 8],
     pub block_inputs: Vec<B256>,
     pub proof_carry_data_vec: Vec<ProofCarryData>,
-    pub prover_address: Address,
 }
 
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
@@ -160,8 +166,6 @@ pub struct ShastaSp1AggregationGuestInput {
     /// Public inputs associated with each underlying proof
     pub block_inputs: Vec<B256>,
     pub proof_carry_data_vec: Vec<ProofCarryData>,
-    /// Address representing the prover/aggregator (zero for zk provers today)
-    pub prover_address: Address,
 }
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
@@ -364,6 +368,7 @@ impl BlockProposedFork {
         decoded_blob_data_concat: &[u8],
     ) -> Option<(usize, usize)> {
         const SHASTA_BLOB_DATA_PREFIX_SIZE: usize = 64;
+        use crate::utils::blobs::BLOB_DATA_CAPACITY as BLOB_BYTES;
 
         let BlockProposedFork::Shasta(event_data) = self else {
             return None;
@@ -375,6 +380,9 @@ impl BlockProposedFork {
         }
 
         let offset = source.blobSlice.offset.to::<usize>();
+        if offset > BLOB_BYTES.saturating_sub(SHASTA_BLOB_DATA_PREFIX_SIZE) {
+            return None;
+        }
         if offset + SHASTA_BLOB_DATA_PREFIX_SIZE > decoded_blob_data_concat.len() {
             return None;
         }
@@ -406,15 +414,15 @@ pub struct TaikoGuestInput {
     /// header
     pub l1_header: Header,
     pub tx_data: Vec<u8>,
-    #[serde_as(as = "Option<serde_bincode_compat::EthereumTxEnvelope>")]
-    pub anchor_tx: Option<TransactionSigned>,
+    #[serde_as(as = "Option<BincodeCompactTaikoTxEnvelope<'_>>")]
+    pub anchor_tx: Option<TaikoTxEnvelope>,
     pub block_proposed: BlockProposedFork,
     pub prover_data: TaikoProverData,
     pub blob_commitment: Option<Vec<u8>>,
     pub blob_proof: Option<Vec<u8>>,
     pub blob_proof_type: BlobProofType,
-    // extra data: is low bond proposal, designated prover, is force inclusion
-    pub extra_data: Option<(bool, Address, bool)>,
+    // extra data: is force inclusion flag
+    pub extra_data: Option<bool>,
     /// The timestamp of the grandparent block, used for base fee calculations in shasta
     /// In raiko, this value is used for consensus validation.
     pub grandparent_timestamp: Option<u64>,
@@ -424,10 +432,10 @@ pub struct ZlibCompressError(pub String);
 
 // for non-taiko chain use only. As we need to decompress txs buffer in raiko, if txs comes from non-taiko chain,
 // we simply compress before sending to raiko, then, decompress will give the same txs inside raiko.
-impl TryFrom<Vec<TransactionSigned>> for TaikoGuestInput {
+impl TryFrom<Vec<TaikoTxEnvelope>> for TaikoGuestInput {
     type Error = ZlibCompressError;
 
-    fn try_from(value: Vec<TransactionSigned>) -> Result<Self, Self::Error> {
+    fn try_from(value: Vec<TaikoTxEnvelope>) -> Result<Self, Self::Error> {
         let tx_data = zlib_compress_data(&alloy_rlp::encode(&value))
             .map_err(|e| ZlibCompressError(e.to_string()))?;
         Ok(Self {
@@ -468,9 +476,7 @@ impl FromStr for BlobProofType {
 #[derive(Clone, Default, Debug, Serialize, Deserialize)]
 pub struct TaikoProverData {
     pub actual_prover: Address,
-    pub designated_prover: Option<Address>,
     pub graffiti: B256,
-    pub parent_transition_hash: Option<B256>,
     pub checkpoint: Option<Checkpoint>,
     pub last_anchor_block_number: Option<u64>,
 }
@@ -485,7 +491,7 @@ pub struct GuestOutput {
 #[serde_as]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct GuestBatchOutput {
-    pub blocks: Vec<Block>,
+    pub blocks: Vec<TaikoBlock>,
     pub hash: B256,
 }
 
@@ -509,11 +515,13 @@ pub use hekla::*;
 #[cfg(test)]
 mod test {
     use super::*;
+    use crate::input::shasta::{BlobSlice, DerivationSource, Proposal, ShastaEventData};
+    use alloy_primitives::{Uint, B256};
 
     #[test]
     fn test_guest_input_se_de() {
         let input = GuestInput {
-            block: Block::default(),
+            block: TaikoBlock::default(),
             chain_spec: ChainSpec::default(),
             parent_header: Header::default(),
             parent_state_trie: MptNode::default(),
@@ -530,7 +538,7 @@ mod test {
     #[test]
     fn test_guest_input_value_sede() {
         let input = GuestInput {
-            block: Block::default(),
+            block: TaikoBlock::default(),
             chain_spec: ChainSpec::default(),
             parent_header: Header::default(),
             parent_state_trie: MptNode::default(),
@@ -542,5 +550,35 @@ mod test {
         let input_ser = serde_json::to_value(&input).unwrap();
         let input_de: GuestInput = serde_json::from_value(input_ser).unwrap();
         print!("{:?}", input_de);
+    }
+
+    #[test]
+    fn test_shasta_blob_slice_offset_bounds() {
+        const BLOB_BYTES: usize = 4096 * 32;
+        const SHASTA_BLOB_DATA_PREFIX_SIZE: usize = 64;
+        let offset = (BLOB_BYTES - SHASTA_BLOB_DATA_PREFIX_SIZE + 1) as u32;
+
+        let proposal = Proposal {
+            sources: vec![DerivationSource {
+                isForcedInclusion: false,
+                blobSlice: BlobSlice {
+                    blobHashes: vec![B256::ZERO],
+                    offset: Uint::from(offset),
+                    timestamp: Uint::from(0),
+                },
+            }],
+            ..Default::default()
+        };
+        let event_data = ShastaEventData { proposal };
+        let fork = BlockProposedFork::Shasta(event_data);
+
+        let mut decoded = vec![0u8; (offset as usize) + SHASTA_BLOB_DATA_PREFIX_SIZE];
+        let version = B256::with_last_byte(1);
+        decoded[(offset as usize)..(offset as usize + 32)].copy_from_slice(version.as_slice());
+
+        assert!(
+            fork.blob_tx_slice_param_for_source(0, &decoded).is_none(),
+            "offset beyond blob prefix bound should be rejected"
+        );
     }
 }

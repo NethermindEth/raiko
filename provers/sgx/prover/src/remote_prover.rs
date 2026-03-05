@@ -481,7 +481,7 @@ mod tests {
             prove: false,
         };
         let spec_id = taiko_chain_spec
-            .active_fork(1, 0)
+            .active_fork(1, 1)
             .map_err(|e| ProverError::GuestError(e.to_string()))
             .expect("ok");
         assert_eq!(spec_id, TaikoSpecId::SHASTA);
@@ -497,7 +497,7 @@ mod tests {
         assert_eq!(instance_id, 10);
 
         let spec_id = taiko_chain_spec
-            .active_fork(15, 0)
+            .active_fork(15, 1)
             .map_err(|e| ProverError::GuestError(e.to_string()))
             .expect("ok");
         assert_eq!(spec_id, TaikoSpecId::SHASTA);

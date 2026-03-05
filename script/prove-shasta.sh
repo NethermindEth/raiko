@@ -86,7 +86,7 @@ elif [ "$chain" == "taiko_dev" ]; then
     l1_network="taiko_dev_l1"
 else
     echo "Using customized chain name $1. Please double check the RPCs."
-    l1_network="holesky"
+    l1_network="$chain"
 fi
 
 if [ "$proof" == "native" ]; then
@@ -102,9 +102,9 @@ elif [ "$proof" == "sp1" ]; then
     "proof_type": "sp1",
     "blob_proof_type": "proof_of_equivalence",
 	"sp1": {
-	    "recursion": "compressed",
-        "prover": "mock",
-        "verify": false
+	    "recursion": "plonk",
+        "prover": "network",
+        "verify": true
 	}
   '
 elif [ "$proof" == "sp1-aggregation" ]; then

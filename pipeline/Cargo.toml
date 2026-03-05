@@ -18,7 +18,7 @@ risc0-binfmt = { workspace = true, optional = true }
 risc0-zkos-v1compat = { workspace = true, optional = true }
 pathdiff = { workspace = true, optional = true }
 hex = { workspace = true, optional = true }
-sp1-sdk = { workspace = true, optional = true }
+sp1-sdk = { workspace = true, optional = true, features = ["blocking"] }
 serde_json = { workspace = true }
 
 [features]

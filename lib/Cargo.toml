@@ -74,6 +74,7 @@ alethia-reth-consensus = { workspace = true }
 alethia-reth-evm = { workspace = true }
 alethia-reth-chainspec = { workspace = true }
 alethia-reth-block = { workspace = true }
+alethia-reth-primitives = { workspace = true, features = ["serde"] }
 
 
 [dev-dependencies]

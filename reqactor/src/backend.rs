@@ -42,6 +42,7 @@ pub(crate) struct Backend {
     queue: Arc<Mutex<Queue>>,
     notifier: Arc<Notify>,
     gpu_semaphore: Arc<GpuSemaphore>,
+    mock_key: Option<String>,
 }
 
 impl Backend {
@@ -51,6 +52,7 @@ impl Backend {
         max_proving_concurrency: usize,
         queue: Arc<Mutex<Queue>>,
         notifier: Arc<Notify>,
+        mock_key: Option<String>,
     ) -> Self {
         Self {
             pool,
@@ -58,28 +60,64 @@ impl Backend {
             queue,
             notifier,
             gpu_semaphore: Arc::new(GpuSemaphore::new(max_proving_concurrency)),
+            mock_key,
         }
+    }
+
+    /// Drain all completed requests from the channel (non-blocking).
+    async fn drain_completions(&self, done_rx: &mut mpsc::Receiver<RequestKey>) {
+        while let Ok(request_key) = done_rx.try_recv() {
+            self.complete_request(request_key).await;
+        }
+    }
+
+    /// Mark a single request as complete in the queue.
+    async fn complete_request(&self, request_key: RequestKey) {
+        let mut queue = self.queue.lock().await;
+        queue.complete(request_key);
     }
 
     pub async fn serve_in_background(self) {
         let (done_tx, mut done_rx) = mpsc::channel(1000);
 
         loop {
-            // Handle completed requests
-            while let Ok(request_key) = done_rx.try_recv() {
-                let mut queue = self.queue.lock().await;
-                queue.complete(request_key);
+            // Drain all completions first (non-blocking)
+            self.drain_completions(&mut done_rx).await;
+
+            // Check if there are requests in the queue
+            let has_requests = {
+                let queue = self.queue.lock().await;
+                !queue.is_empty()
+            };
+
+            if !has_requests {
+                // Nothing to do — wait for new work or a completion
+                tokio::select! {
+                    _ = self.notifier.notified() => continue,
+                    Some(key) = done_rx.recv() => {
+                        self.complete_request(key).await;
+                        continue;
+                    }
+                }
             }
 
-            // Try to get a request from queue first (non-blocking check)
-            let (request_key, request_entity) = {
+            // There are requests — wait for a GPU slot while staying responsive
+            let gpu_permit = loop {
+                tokio::select! {
+                    permit = self.gpu_semaphore.acquire() => break permit,
+                    Some(key) = done_rx.recv() => self.complete_request(key).await,
+                }
+            };
+
+            // Pull highest-priority request with GPU slot in hand
+            let next = {
                 let mut queue = self.queue.lock().await;
-                if let Some((request_key, request_entity)) = queue.try_next() {
-                    (request_key, request_entity)
-                } else {
-                    drop(queue);
-                    // No requests in queue, wait for new requests
-                    self.notifier.notified().await;
+                queue.try_next()
+            };
+            let (request_key, request_entity) = match next {
+                Some(pair) => pair,
+                None => {
+                    drop(gpu_permit);
                     continue;
                 }
             };
@@ -87,13 +125,20 @@ impl Backend {
             let request_key_ = request_key.clone();
             let mut pool_ = self.pool.clone();
             let chain_specs = self.chain_specs.clone();
-            let gpu_semaphore = self.gpu_semaphore.clone();
+            let mock_key = self.mock_key.clone();
+
+            // Clones for the watcher task (must be created before request_key is moved)
+            let request_key_for_watcher = request_key;
+            let done_tx_ = done_tx.clone();
+            let notifier_ = self.notifier.clone();
+            let mut pool_for_panic = self.pool.clone();
+
+            let _ = pool_.update_status(
+                request_key_for_watcher.clone(),
+                StatusWithContext::new(Status::WorkInProgress, chrono::Utc::now()),
+            );
 
             let handle = tokio::spawn(async move {
-                // Acquire GPU permit (combines semaphore permit + optional GPU number assignment)
-                // This ensures concurrency control and GPU allocation in one step
-                let gpu_permit = gpu_semaphore.acquire().await;
-
                 let result = match request_entity {
                     RequestEntity::SingleProof(entity) => {
                         do_prove_single(
@@ -111,6 +156,7 @@ impl Backend {
                             request_key_.clone(),
                             entity,
                             Some(gpu_permit.gpu_number()),
+                            mock_key.clone(),
                         )
                         .await
                     }
@@ -121,6 +167,7 @@ impl Backend {
                             request_key_.clone(),
                             entity,
                             Some(gpu_permit.gpu_number()),
+                            mock_key.clone(),
                         )
                         .await
                     }
@@ -158,11 +205,19 @@ impl Backend {
                             request_key_.clone(),
                             entity,
                             Some(gpu_permit.gpu_number()),
+                            mock_key.clone(),
                         )
                         .await
                     }
                     RequestEntity::ShastaAggregation(entity) => {
-                        do_shasta_aggregation(&mut pool_, request_key_.clone(), entity).await
+                        do_shasta_aggregation(
+                            &mut pool_,
+                            request_key_.clone(),
+                            entity,
+                            Some(gpu_permit.gpu_number()),
+                            mock_key.clone(),
+                        )
+                        .await
                     }
                 };
 
@@ -182,22 +237,34 @@ impl Backend {
                     request_key_.clone(),
                     StatusWithContext::new(status, chrono::Utc::now()),
                 );
+
+                // GPU permit is automatically dropped here, releasing the semaphore
+                drop(gpu_permit);
             });
 
-            let mut pool_ = self.pool.clone();
-            let done_tx_ = done_tx.clone();
-            let notifier_ = self.notifier.clone();
-
+            // Spawn a watcher task that handles both success and panic
             tokio::spawn(async move {
-                if let Err(e) = handle.await {
-                    tracing::error!("Actor thread errored while proving {request_key}: {e:?}");
-                    let status = Status::Failed {
-                        error: e.to_string(),
-                    };
-                    let _ = pool_.update_status(request_key.clone(), status.clone().into());
+                match handle.await {
+                    Ok(()) => {
+                        let _ = done_tx_.send(request_key_for_watcher).await;
+                    }
+                    Err(join_err) => {
+                        // Task panicked — mark as failed and release the queue slot
+                        tracing::error!(
+                            "Proving task panicked for {request_key_for_watcher}: {join_err}"
+                        );
+                        let _ = pool_for_panic.update_status(
+                            request_key_for_watcher.clone(),
+                            StatusWithContext::new(
+                                Status::Failed {
+                                    error: format!("proving task panicked: {join_err}"),
+                                },
+                                chrono::Utc::now(),
+                            ),
+                        );
+                        let _ = done_tx_.send(request_key_for_watcher).await;
+                    }
                 }
-
-                let _res = done_tx_.send(request_key.clone()).await;
                 notifier_.notify_one();
             });
         }
@@ -240,9 +307,7 @@ pub async fn do_generate_guest_input(
         prover_args: request_entity.prover_args().clone(),
         batch_id: 0,
         l2_block_numbers: Vec::new(),
-        parent_transition_hash: Default::default(),
         checkpoint: Default::default(),
-        designated_prover: Default::default(),
         cached_event_data: None,
         gpu_number: None,
         last_anchor_block_number: None,
@@ -306,9 +371,7 @@ pub async fn do_prove_single(
         prover_args: request_entity.prover_args().clone(),
         batch_id: 0,
         l2_block_numbers: Vec::new(),
-        parent_transition_hash: Default::default(),
         checkpoint: Default::default(),
-        designated_prover: Default::default(),
         cached_event_data: None,
         gpu_number,
         last_anchor_block_number: None,
@@ -364,6 +427,7 @@ async fn do_prove_aggregation(
     request_key: RequestKey,
     request_entity: AggregationRequestEntity,
     gpu_number: Option<u32>,
+    mock_key: Option<String>,
 ) -> Result<Proof, String> {
     let proof_type = request_key.proof_type().clone();
     let proofs = request_entity.proofs().clone();
@@ -378,7 +442,7 @@ async fn do_prove_aggregation(
         config["gpu_number"] = gpu_number.into();
     }
 
-    let proof = aggregate_proofs(proof_type, input, &output, &config, Some(pool))
+    let proof = aggregate_proofs(proof_type, input, &output, &config, Some(pool), mock_key)
         .await
         .map_err(|err| format!("failed to generate aggregation proof: {err:?}"))?;
 
@@ -389,18 +453,26 @@ async fn do_shasta_aggregation(
     pool: &mut dyn IdWrite,
     request_key: RequestKey,
     request_entity: AggregationRequestEntity,
+    gpu_number: Option<u32>,
+    mock_key: Option<String>,
 ) -> Result<Proof, String> {
     let proof_type = request_key.proof_type().clone();
     let proofs = request_entity.proofs().clone();
 
     let input = ShastaAggregationGuestInput { proofs };
     let output = AggregationGuestOutput { hash: B256::ZERO };
-    let config = serde_json::to_value(request_entity.prover_args())
+    let mut config = serde_json::to_value(request_entity.prover_args())
         .map_err(|err| format!("failed to serialize prover args: {err:?}"))?;
 
-    let proof = aggregate_shasta_proposals(proof_type, input, &output, &config, Some(pool))
-        .await
-        .map_err(|err| format!("failed to generate aggregation proof: {err:?}"))?;
+    if let Some(gpu_number) = gpu_number {
+        // If gpu_number is provided, we set it in the config
+        config["gpu_number"] = gpu_number.into();
+    }
+
+    let proof =
+        aggregate_shasta_proposals(proof_type, input, &output, &config, Some(pool), mock_key)
+            .await
+            .map_err(|err| format!("failed to generate aggregation proof: {err:?}"))?;
 
     Ok(proof)
 }
@@ -447,9 +519,7 @@ async fn new_raiko_for_batch_request(
             .clone(),
         prover_args: request_entity.prover_args().clone(),
         l2_block_numbers: all_prove_blocks.clone(),
-        parent_transition_hash: Default::default(),
         checkpoint: Default::default(),
-        designated_prover: Default::default(),
         cached_event_data: Some(cached_event_data),
         gpu_number,
         last_anchor_block_number: None,
@@ -505,9 +575,9 @@ async fn do_prove_batch(
     request_key: RequestKey,
     request_entity: BatchProofRequestEntity,
     gpu_number: Option<u32>,
+    mock_key: Option<String>,
 ) -> Result<Proof, String> {
     tracing::info!("Generating proof for {request_key}");
-
     let raiko = new_raiko_for_batch_request(chain_specs, request_entity, gpu_number).await?;
     let input = if let Some(batch_guest_input) = raiko.request.prover_args.get("batch_guest_input")
     {
@@ -528,7 +598,7 @@ async fn do_prove_batch(
         .map_err(|e| format!("failed to get guest batch output: {e:?}"))?;
     debug!("batch guest output: {output:?}");
     let proof = raiko
-        .batch_prove(input, &output, Some(pool))
+        .batch_prove(input, &output, Some(pool), mock_key)
         .await
         .map_err(|e| format!("failed to generate batch proof: {e:?}"))?;
 
@@ -610,19 +680,7 @@ async fn new_raiko_for_shasta_proposal_request(
             .clone(),
         prover_args: request_entity.prover_args().clone(),
         l2_block_numbers: request_entity.guest_input_entity().l2_blocks().clone(),
-        parent_transition_hash: Some(
-            request_entity
-                .guest_input_entity()
-                .parent_transition_hash()
-                .clone(),
-        ),
         checkpoint: request_entity.guest_input_entity().checkpoint().clone(),
-        designated_prover: Some(
-            request_entity
-                .guest_input_entity()
-                .designated_prover()
-                .clone(),
-        ),
         last_anchor_block_number: Some(
             request_entity
                 .guest_input_entity()
@@ -642,6 +700,7 @@ pub async fn do_prove_shasta_proposal(
     request_key: RequestKey,
     request_entity: ShastaProofRequestEntity,
     gpu_number: Option<u32>,
+    mock_key: Option<String>,
 ) -> Result<Proof, String> {
     tracing::info!("generate shasta proposal proof for: {request_key:?}");
 
@@ -668,7 +727,7 @@ pub async fn do_prove_shasta_proposal(
 
     // Run the Shasta proposal prover
     let proof = raiko
-        .shasta_proposal_prove(input, &output, None)
+        .shasta_proposal_prove(input, &output, None, mock_key)
         .await
         .map_err(|err| format!("failed to run shasta proposal prover: {err:?}"))?;
 
@@ -698,7 +757,7 @@ mod tests {
         let queue = Arc::new(Mutex::new(Queue::new(1000)));
         let notifier = Arc::new(Notify::new());
 
-        let backend = Backend::new(pool, chain_specs, 1, queue.clone(), notifier.clone());
+        let backend = Backend::new(pool, chain_specs, 1, queue.clone(), notifier.clone(), None);
 
         let handle = tokio::spawn(async move {
             tokio::select! {

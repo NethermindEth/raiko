@@ -15,6 +15,8 @@ members = [
     "provers/sgx/prover",
     "provers/sgx/guest",
     "provers/sgx/setup",
+    "provers/tdx",
+    "provers/tdx/prover",
     "pipeline",
     "core",
     "taskdb",
@@ -33,7 +35,7 @@ opt-level = 3
 
 [profile.release]
 debug = 1
-lto = true
+lto = false
 
 [profile.release.build-override]
 opt-level = 3
@@ -50,8 +52,8 @@ raiko-reqactor = { path = "./reqactor" }
 raiko-ballot = { path = "./ballot" }
 
 # reth
-reth-chainspec = { git = "https://github.com/paradigmxyz/reth.git", tag = "v1.9.3", default-features = false }
-reth-primitives = { git = "https://github.com/paradigmxyz/reth.git", tag = "v1.9.3", default-features = false, features = [
+reth-chainspec = { git = "https://github.com/paradigmxyz/reth.git", tag = "v1.11.0", default-features = false }
+reth-primitives = { git = "https://github.com/paradigmxyz/reth.git", tag = "v1.11.0", default-features = false, features = [
     "alloy-compat",
     "c-kzg",
     "serde-bincode-compat",
@@ -59,47 +61,52 @@ reth-primitives = { git = "https://github.com/paradigmxyz/reth.git", tag = "v1.9
     # "k256",
 ] }
 
-reth-primitives-traits = { git = "https://github.com/paradigmxyz/reth.git", tag = "v1.9.3", default-features = false }
+reth-primitives-traits = { git = "https://github.com/paradigmxyz/reth.git", tag = "v1.11.0", default-features = false }
 
 
-reth-evm-ethereum = { git = "https://github.com/paradigmxyz/reth.git", tag = "v1.9.3", default-features = false }
-reth-consensus = { git = "https://github.com/paradigmxyz/reth.git", tag = "v1.9.3", default-features = false }
-reth-consensus-common = { git = "https://github.com/paradigmxyz/reth.git", tag = "v1.9.3", default-features = false }
-reth-ethereum-consensus = { git = "https://github.com/paradigmxyz/reth.git", tag = "v1.9.3", default-features = false }
-reth-evm = { git = "https://github.com/paradigmxyz/reth.git", tag = "v1.9.3", default-features = false }
-reth-rpc-types-compat = { git = "https://github.com/paradigmxyz/reth.git", tag = "v1.9.3", default-features = false }
-reth-revm = { git = "https://github.com/paradigmxyz/reth.git", tag = "v1.9.3", default-features = false }
-reth-provider = { git = "https://github.com/paradigmxyz/reth.git", tag = "v1.9.3", default-features = false }
-reth-storage-api = { git = "https://github.com/paradigmxyz/reth.git", tag = "v1.9.3", default-features = false }
+reth-evm-ethereum = { git = "https://github.com/paradigmxyz/reth.git", tag = "v1.11.0", default-features = false }
+reth-consensus = { git = "https://github.com/paradigmxyz/reth.git", tag = "v1.11.0", default-features = false }
+reth-consensus-common = { git = "https://github.com/paradigmxyz/reth.git", tag = "v1.11.0", default-features = false }
+reth-ethereum-consensus = { git = "https://github.com/paradigmxyz/reth.git", tag = "v1.11.0", default-features = false }
+reth-evm = { git = "https://github.com/paradigmxyz/reth.git", tag = "v1.11.0", default-features = false }
+reth-rpc-types-compat = { git = "https://github.com/paradigmxyz/reth.git", tag = "v1.11.0", default-features = false }
+reth-revm = { git = "https://github.com/paradigmxyz/reth.git", tag = "v1.11.0", default-features = false }
+reth-provider = { git = "https://github.com/paradigmxyz/reth.git", tag = "v1.11.0", default-features = false }
+reth-storage-api = { git = "https://github.com/paradigmxyz/reth.git", tag = "v1.11.0", default-features = false }
 
-alethia-reth-block = { git = "https://github.com/NethermindEth/alethia-reth.git", branch = "feat/raiko-support-shasta", default-features = false }
-alethia-reth-chainspec = { git = "https://github.com/NethermindEth/alethia-reth.git", branch = "feat/raiko-support-shasta", default-features = false }
-alethia-reth-consensus = { git = "https://github.com/NethermindEth/alethia-reth.git", branch = "feat/raiko-support-shasta", default-features = false }
-alethia-reth-evm = { git = "https://github.com/NethermindEth/alethia-reth.git", branch = "feat/raiko-support-shasta", default-features = false, features = [
+alethia-reth-block = { git = "https://github.com/NethermindEth/alethia-reth.git", branch = "main", default-features = false }
+alethia-reth-chainspec = { git = "https://github.com/NethermindEth/alethia-reth.git", branch = "main", default-features = false }
+alethia-reth-consensus = { git = "https://github.com/NethermindEth/alethia-reth.git", branch = "main", default-features = false }
+alethia-reth-evm = { git = "https://github.com/NethermindEth/alethia-reth.git", branch = "main", default-features = false, features = [
     "serde",
+] }
+alethia-reth-primitives = { git = "https://github.com/NethermindEth/alethia-reth.git", branch = "main", default-features = false, features = [
+    "serde-bincode-compat",
 ] }
 
 
 # revm
-revm = { version = "31.0.0", default-features = false, features = ["c-kzg"] }
+revm = { version = "34.0.0", default-features = false, features = [
+    "c-kzg",
+    "serde",
+] }
 
 
 reqwest_alloy = { package = "reqwest", version = "0.12.4", features = ["json"] }
 
 
 # risc zero
-risc0-zkvm = { version = "=3.0.3", features = ["prove", "getrandom"] }
-bonsai-sdk = { version = "=1.4.1" }
-risc0-binfmt = { version = "=3.0.2" }
-risc0-zkos-v1compat = { version = "=2.2.0" }
+risc0-zkvm = { version = "=3.0.5", features = ["prove", "getrandom"] }
+bonsai-sdk = { version = "=1.4.2" }
+risc0-binfmt = { version = "=3.0.4" }
+risc0-zkos-v1compat = { version = "=2.2.2" }
 
 # SP1
-sp1-sdk = { version = "5.2.0", features = ["cuda"] }
-sp1-prover = { version = "5.2.0" }
-sp1-zkvm = { version = "5.2.0" }
-sp1-helper = { version = "5.2.0" }
-sp1-primitives = { version = "5.2.0" }
-
+sp1-sdk = { version = "6.0.0", features = ["cuda"] }
+sp1-prover = { version = "6.0.0" }
+sp1-zkvm = { version = "6.0.0" }
+sp1-helper = { version = "6.0.0" }
+sp1-primitives = { version = "6.0.0" }
 
 # alloy
 alloy-rlp = { version = "0.3.10", default-features = false }
@@ -249,4 +256,4 @@ rkyv = "0.8.11"
 
 
 [patch.crates-io]
-secp256k1 = { git = "https://github.com/sp1-patches/rust-secp256k1", tag = "patch-0.30.0-sp1-5.0.0" }
+secp256k1 = { git = "https://github.com/sp1-patches/rust-secp256k1", tag = "patch-0.30.0-sp1-6.0.0" }

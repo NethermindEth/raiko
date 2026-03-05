@@ -5,7 +5,7 @@ use raiko_tasks::TaskStatus;
 use serde_json::json;
 
 /// This test is used to manually test the proof process. Operator can use this to test case to
-/// simplly test online service.
+/// simply test online service.
 ///
 /// To run this test, you need to set the `RAIKO_TEST_MANUAL_PROVE_ENABLED` environment variable to `true`, and
 /// specify the parameters via environment variables.
@@ -62,6 +62,7 @@ pub async fn test_manual_prove() {
             sp1: None,
             risc0: None,
             zisk: None,
+            tdx: None,
         },
     };
 

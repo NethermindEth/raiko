@@ -38,6 +38,11 @@ pub enum ProofType {
     /// Uses the Zisk prover to build the block.
     #[serde(alias = "ZISK")]
     Zisk = 5u8,
+    /// # Tdx
+    ///
+    /// Builds the block on a TDX supported CPU to create a proof.
+    #[serde(alias = "TDX")]
+    Tdx = 6u8,
 }
 
 impl std::fmt::Display for ProofType {
@@ -49,6 +54,7 @@ impl std::fmt::Display for ProofType {
             ProofType::Risc0 => "risc0",
             ProofType::SgxGeth => "sgxgeth",
             ProofType::Zisk => "zisk",
+            ProofType::Tdx => "tdx",
         })
     }
 }
@@ -64,6 +70,7 @@ impl std::str::FromStr for ProofType {
             "risc0" => Ok(ProofType::Risc0),
             "sgxgeth" => Ok(ProofType::SgxGeth),
             "zisk" => Ok(ProofType::Zisk),
+            "tdx" => Ok(ProofType::Tdx),
             _ => Err(format!("Unknown proof type {}", s)),
         }
     }
@@ -80,6 +87,7 @@ impl TryFrom<u8> for ProofType {
             3 => Ok(Self::Risc0),
             4 => Ok(Self::SgxGeth),
             5 => Ok(Self::Zisk),
+            6 => Ok(Self::Tdx),
             _ => Err(format!("Unknown proof type {}", value)),
         }
     }

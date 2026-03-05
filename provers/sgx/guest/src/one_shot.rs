@@ -19,8 +19,8 @@ use raiko_lib::{
     },
     proof_type::ProofType,
     protocol_instance::{
-        aggregation_output_combine, build_shasta_commitment_from_proof_carry_data_vec,
-        shasta_aggregation_output, validate_shasta_aggregate_proof_carry_data, ProtocolInstance,
+        aggregation_output_combine, shasta_pcd_aggregation_hash,
+        validate_shasta_aggregate_proof_carry_data, ProtocolInstance,
     },
 };
 use secp256k1::{Keypair, PublicKey, SecretKey};
@@ -130,7 +130,7 @@ pub fn bootstrap(global_opts: GlobalOpts) -> Result<()> {
 pub async fn one_shot(
     global_opts: GlobalOpts,
     args: OneShotArgs,
-    input: GuestInput,
+    mut input: GuestInput,
 ) -> Result<Value> {
     // Make sure this SGX instance was bootstrapped
     let prev_privkey = load_bootstrap(&global_opts.secrets_dir)
@@ -143,7 +143,7 @@ pub async fn one_shot(
     let new_instance = public_key_to_address(&new_pubkey);
 
     // Process the block
-    let header = calculate_block_header(&input);
+    let header = calculate_block_header(&mut input);
     // Calculate the public input hash
     let pi = ProtocolInstance::new(&input, &header, ProofType::Sgx)?.sgx_instance(new_instance);
     let pi_hash = pi.instance_hash();
@@ -198,14 +198,14 @@ pub fn load_bootstrap_privkey(secrets_dir: &Path) -> Result<(SecretKey, PublicKe
 pub async fn one_shot_batch(
     global_opts: GlobalOpts,
     args: OneShotArgs,
-    batch_input: GuestBatchInput,
+    mut batch_input: GuestBatchInput,
 ) -> Result<Value> {
     println!("Global options: {global_opts:?}, OneShot options: {args:?}");
     let (prev_privkey, new_pubkey, new_instance) =
         load_bootstrap_privkey(&global_opts.secrets_dir)?;
 
     // Process the block
-    let final_blocks = calculate_batch_blocks_final_header(&batch_input);
+    let final_blocks = calculate_batch_blocks_final_header(&mut batch_input);
     // Calculate the public input hash
     let pi = ProtocolInstance::new_batch(&batch_input, final_blocks, ProofType::Sgx)?
         .sgx_instance(new_instance);
@@ -348,6 +348,7 @@ pub async fn shasta_aggregate(
     // No key-rotation: every sub-proof must be signed by the same instance address and the
     // embedded instance bytes must match the recovered signer.
     let expected_instance = Address::from_slice(&input.proofs[0].proof.clone()[4..24]);
+    assert_eq!(expected_instance, sgx_instance);
 
     assert!(validate_shasta_aggregate_proof_carry_data(&input));
 
@@ -366,18 +367,10 @@ pub async fn shasta_aggregate(
         );
     }
 
-    let commitment = build_shasta_commitment_from_proof_carry_data_vec(&input.proof_carry_data_vec)
-        .expect("invalid shasta proof carry data for aggregation");
+    let aggregation_hash =
+        shasta_pcd_aggregation_hash(&input.proof_carry_data_vec, sgx_instance)
+            .ok_or_else(|| anyhow!("invalid shasta proof carry data for aggregation"))?;
 
-    // The aggregator must be the same instance as the sub-proof signer.
-    assert_eq!(expected_instance, sgx_instance);
-
-    let aggregation_hash = shasta_aggregation_output(
-        &commitment,
-        input.proof_carry_data_vec[0].chain_id,
-        input.proof_carry_data_vec[0].verifier,
-        sgx_instance,
-    );
     // Sign the public aggregation hash
     let sig = sign_message(&prev_privkey, aggregation_hash.into())?;
 

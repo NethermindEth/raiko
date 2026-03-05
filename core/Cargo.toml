@@ -10,6 +10,7 @@ sp1-driver = { path = "../provers/sp1/driver", optional = true }
 risc0-driver = { path = "../provers/risc0/driver", optional = true }
 zisk-agent-driver = { path = "../provers/zisk/agent/driver", optional = true }
 sgx-prover = { path = "../provers/sgx/prover", optional = true }
+tdx-prover = { path = "../provers/tdx/prover", optional = true }
 
 # raiko
 raiko-lib = { workspace = true }
@@ -20,6 +21,12 @@ reth-evm-ethereum = { workspace = true }
 reth-evm = { workspace = true }
 reth-revm = { workspace = true }
 reth-provider = { workspace = true }
+
+# alethia-reth
+alethia-reth-primitives = { workspace = true, features = [
+    "reth-codec",
+    "alloy-compat",
+] }
 
 # alloy
 alloy-rlp = { workspace = true }
@@ -46,6 +53,9 @@ eyre = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 serde_with = { workspace = true }
+
+# crypto
+secp256k1 = { workspace = true }
 
 # c-kzg
 kzg = { workspace = true }
@@ -81,4 +91,5 @@ sp1 = ["dep:sp1-driver", "sp1-driver/enable"]
 risc0 = ["dep:risc0-driver", "risc0-driver/enable"]
 zisk = ["dep:zisk-agent-driver", "zisk-agent-driver/enable"]
 sgx = ["dep:sgx-prover", "sgx-prover/enable"]
+tdx = ["dep:tdx-prover", "tdx-prover/enable"]
 statedb_lru = []

@@ -376,8 +376,6 @@ pub struct ShastaProofRequestKey {
     proof_type: ProofType,
     /// The actual prover of the request (affects public input binding)
     actual_prover_address: String,
-    /// The designated prover for this proposal (affects transition binding)
-    designated_prover_address: String,
     /// The image ID for zk provers (optional)
     image_id: Option<ImageId>,
 }
@@ -387,13 +385,11 @@ impl ShastaProofRequestKey {
         guest_input_key: ShastaInputRequestKey,
         proof_type: ProofType,
         actual_prover_address: String,
-        designated_prover_address: String,
     ) -> Self {
         Self {
             guest_input_key,
             proof_type,
             actual_prover_address,
-            designated_prover_address,
             image_id: None,
         }
     }
@@ -402,14 +398,12 @@ impl ShastaProofRequestKey {
         guest_input_key: ShastaInputRequestKey,
         proof_type: ProofType,
         actual_prover_address: String,
-        designated_prover_address: String,
         image_id: ImageId,
     ) -> Self {
         Self {
             guest_input_key,
             proof_type,
             actual_prover_address,
-            designated_prover_address,
             image_id: Some(image_id),
         }
     }
@@ -530,6 +524,63 @@ impl RequestKey {
             RequestKey::ShastaGuestInput(_) => None, // ShastaGuestInput doesn't have image_id
             RequestKey::ShastaProof(key) => key.image_id.as_ref(),
             RequestKey::ShastaAggregation(key) => key.image_id.as_ref(),
+        }
+    }
+
+    /// Primary sort key for the priority queue. Lower values are dequeued first.
+    pub fn batch_sort_key(&self) -> u64 {
+        match self {
+            RequestKey::SingleProof(ref key) => key.block_number,
+            &RequestKey::GuestInput(ref key) => key.block_number,
+            RequestKey::Aggregation(key) => key
+                .block_numbers()
+                .iter()
+                .min()
+                .expect("Block numbers should be present")
+                .clone(),
+            RequestKey::ShastaAggregation(key) => key
+                .block_numbers()
+                .iter()
+                .min()
+                .expect("Block numbers should be present")
+                .clone(),
+            RequestKey::BatchProof(key) => *key.guest_input_key().batch_id(),
+            RequestKey::BatchGuestInput(key) => *key.batch_id(),
+            RequestKey::ShastaProof(key) => *key.guest_input_key().proposal_id(),
+            RequestKey::ShastaGuestInput(key) => *key.proposal_id(),
+        }
+    }
+
+    /// Secondary sort key: within the same `batch_sort_key`, guest inputs run
+    /// before proofs, and proofs run before aggregations.
+    pub fn stage(&self) -> RequestStage {
+        match self {
+            RequestKey::GuestInput(_)
+            | RequestKey::BatchGuestInput(_)
+            | RequestKey::ShastaGuestInput(_) => RequestStage::GuestInput,
+            RequestKey::SingleProof(_)
+            | RequestKey::BatchProof(_)
+            | RequestKey::ShastaProof(_) => RequestStage::Proof,
+            RequestKey::Aggregation(_)
+            | RequestKey::ShastaAggregation(_) => RequestStage::Aggregation,
+        }
+    }
+}
+
+/// Processing stage of a request, used for priority ordering within the same batch_id.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum RequestStage {
+    GuestInput = 0,
+    Proof = 1,
+    Aggregation = 2,
+}
+
+impl std::fmt::Display for RequestStage {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::GuestInput => write!(f, "guest_input"),
+            Self::Proof => write!(f, "proof"),
+            Self::Aggregation => write!(f, "aggregation"),
         }
     }
 }
@@ -710,16 +761,10 @@ pub struct ShastaInputRequestEntity {
     blob_proof_type: BlobProofType,
     /// l2 blocks
     l2_blocks: Vec<u64>,
-    /// parent transition hash
-    parent_transition_hash: B256,
     /// checkpoint
     checkpoint: Option<ShastaProposalCheckpoint>,
     /// last anchor block number
     last_anchor_block_number: u64,
-    /// Designated prover.
-    designated_prover: Address,
-    /// L1 block number when the bond proposal was made (used to parse bond_proposal_hash)
-    l1_bond_proposal_block_number: Option<u64>,
 }
 
 impl ShastaInputRequestEntity {
@@ -731,11 +776,8 @@ impl ShastaInputRequestEntity {
         actual_prover: Address,
         blob_proof_type: BlobProofType,
         l2_blocks: Vec<u64>,
-        parent_transition_hash: B256,
         checkpoint: Option<ShastaProposalCheckpoint>,
-        designated_prover: Address,
         last_anchor_block_number: u64,
-        l1_bond_proposal_block_number: Option<u64>,
     ) -> Self {
         Self {
             proposal_id,
@@ -745,11 +787,8 @@ impl ShastaInputRequestEntity {
             actual_prover,
             blob_proof_type,
             l2_blocks,
-            parent_transition_hash,
             checkpoint,
-            designated_prover,
             last_anchor_block_number,
-            l1_bond_proposal_block_number,
         }
     }
 }
@@ -836,9 +875,7 @@ impl ShastaProofRequestEntity {
         blob_proof_type: BlobProofType,
         l2_blocks: Vec<u64>,
         prover_args: HashMap<String, serde_json::Value>,
-        parent_transition_hash: B256,
         checkpoint: Option<ShastaProposalCheckpoint>,
-        designated_prover: Address,
         last_anchor_block_number: u64,
     ) -> Self {
         Self {
@@ -850,11 +887,8 @@ impl ShastaProofRequestEntity {
                 actual_prover,
                 blob_proof_type,
                 l2_blocks,
-                parent_transition_hash,
                 checkpoint,
-                designated_prover,
                 last_anchor_block_number,
-                None, // l1_bond_proposal_block_number - will be set when creating from ShastaProposal
             ),
             proof_type,
             prover_args,

@@ -201,6 +201,7 @@ if [ -z "$1" ] || [ "$1" == "risc0" ]; then
 		exit 1
 	fi
 	$env_rzup install 
+	$env_rzup install risc0-groth16
 fi
 # SP1
 if [ -z "$1" ] || [ "$1" == "sp1" ]; then
@@ -214,10 +215,10 @@ if [ -z "$1" ] || [ "$1" == "sp1" ]; then
 	source ${PROFILE}
 	if command -v sp1up >/dev/null 2>&1; then
 		echo "sp1 found in path"
-		sp1up 
+		sp1up --c-toolchain
 	else
 		echo "sp1 not found in path"
-		"$HOME/.sp1/bin/sp1up" 
+		"$HOME/.sp1/bin/sp1up" --c-toolchain
 	fi
 	# else
 	# 	echo "CI environment"
@@ -392,4 +393,7 @@ if [ -z "$1" ] || [ "$1" == "zisk" ]; then
 			exit 1
 		fi
 	fi
+# TDX
+if [ -z "$1" ] || [ "$1" == "tdx" ]; then
+	echo "TDX prover doesn't require additional toolchain installation"
 fi

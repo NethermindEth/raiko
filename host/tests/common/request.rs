@@ -51,6 +51,7 @@ pub fn make_proof_request(
             sgxgeth: None,
             sp1: None,
             zisk: None,
+            tdx: None,
         },
     }
 }
@@ -90,6 +91,7 @@ pub async fn make_aggregate_proof_request(
             sp1: None,
             sgxgeth: None,
             zisk: None,
+            tdx: None,
         },
     }
 }

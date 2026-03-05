@@ -1,4 +1,4 @@
-use crate::{merge, prover::NativeProver};
+use crate::{merge, mock_prover::MockProver, prover::NativeProver};
 use alloy_primitives::{Address, B256};
 use clap::Args;
 use raiko_lib::{
@@ -125,6 +125,17 @@ pub async fn get_guest_data() -> RaikoResult<serde_json::Value> {
         guest_data_object.extend(sgx_map);
     }
 
+    #[cfg(feature = "tdx")]
+    {
+        let tdx_data = tdx_prover::TdxProver::get_guest_data().await?;
+        let tdx_map = tdx_data
+            .as_object()
+            .cloned()
+            .expect("tdx guest data is not an object");
+
+        guest_data_object.extend(tdx_map);
+    }
+
     Ok(serde_json::Value::Object(guest_data_object))
 }
 
@@ -184,6 +195,15 @@ pub async fn run_prover(
             #[cfg(not(feature = "zisk"))]
             Err(RaikoError::FeatureNotSupportedError(proof_type))
         }
+        ProofType::Tdx => {
+            #[cfg(feature = "tdx")]
+            return tdx_prover::TdxProver::new(proof_type)
+                .run(input.clone(), output, config, store)
+                .await
+                .map_err(|e| e.into());
+            #[cfg(not(feature = "tdx"))]
+            Err(RaikoError::FeatureNotSupportedError(proof_type))
+        }
     }
 }
 
@@ -194,7 +214,16 @@ pub async fn run_batch_prover(
     output: &GuestBatchOutput,
     config: &Value,
     store: Option<&mut dyn IdWrite>,
+    mock_key: Option<String>,
 ) -> RaikoResult<Proof> {
+    if let Some(mock_key) = mock_key {
+        info!("Using mock prover with mock key");
+        return MockProver::new(mock_key.clone())?
+            .batch_run(input.clone(), output, config, store)
+            .await
+            .map_err(<ProverError as Into<RaikoError>>::into);
+    }
+
     match proof_type {
         ProofType::Native => NativeProver
             .batch_run(input.clone(), output, config, store)
@@ -242,6 +271,15 @@ pub async fn run_batch_prover(
             #[cfg(not(feature = "zisk"))]
             Err(RaikoError::FeatureNotSupportedError(proof_type))
         }
+        ProofType::Tdx => {
+            #[cfg(feature = "tdx")]
+            return tdx_prover::TdxProver::new(proof_type)
+                .batch_run(input.clone(), output, config, store)
+                .await
+                .map_err(|e| e.into());
+            #[cfg(not(feature = "tdx"))]
+            Err(RaikoError::FeatureNotSupportedError(proof_type))
+        }
     }
 }
 
@@ -252,7 +290,16 @@ pub async fn run_shasta_proposal_prover(
     output: &GuestBatchOutput,
     config: &Value,
     store: Option<&mut dyn IdWrite>,
+    mock_key: Option<String>,
 ) -> RaikoResult<Proof> {
+    if let Some(mock_key) = mock_key {
+        info!("Using mock prover with mock key");
+        return MockProver::new(mock_key.clone())?
+            .proposal_run(input.clone(), output, config, store)
+            .await
+            .map_err(<ProverError as Into<RaikoError>>::into);
+    }
+
     match proof_type {
         ProofType::Native => NativeProver
             .proposal_run(input.clone(), output, config, store)
@@ -294,6 +341,15 @@ pub async fn run_shasta_proposal_prover(
             #[cfg(not(feature = "zisk"))]
             Err(RaikoError::FeatureNotSupportedError(proof_type))
         }
+        ProofType::Tdx => {
+            #[cfg(feature = "tdx")]
+            return tdx_prover::TdxProver::new(proof_type)
+                .proposal_run(input.clone(), output, config, store)
+                .await
+                .map_err(|e| e.into());
+            #[cfg(not(feature = "tdx"))]
+            Err(RaikoError::FeatureNotSupportedError(proof_type))
+        }
     }
 }
 
@@ -304,7 +360,16 @@ pub async fn aggregate_proofs(
     output: &AggregationGuestOutput,
     config: &Value,
     store: Option<&mut dyn IdWrite>,
+    mock_key: Option<String>,
 ) -> RaikoResult<Proof> {
+    if let Some(mock_key) = mock_key {
+        info!("Using mock prover with mock key");
+        return MockProver::new(mock_key.clone())?
+            .aggregate(input.clone(), output, config, store)
+            .await
+            .map_err(<ProverError as Into<RaikoError>>::into);
+    }
+
     let proof = match proof_type {
         ProofType::Native => NativeProver
             .aggregate(input.clone(), output, config, store)
@@ -352,6 +417,15 @@ pub async fn aggregate_proofs(
             #[cfg(not(feature = "zisk"))]
             Err(RaikoError::FeatureNotSupportedError(proof_type))
         }
+        ProofType::Tdx => {
+            #[cfg(feature = "tdx")]
+            return tdx_prover::TdxProver::new(proof_type)
+                .aggregate(input.clone(), output, config, store)
+                .await
+                .map_err(|e| e.into());
+            #[cfg(not(feature = "tdx"))]
+            Err(RaikoError::FeatureNotSupportedError(proof_type))
+        }
     }?;
 
     Ok(proof)
@@ -363,7 +437,16 @@ pub async fn aggregate_shasta_proposals(
     output: &AggregationGuestOutput,
     config: &Value,
     store: Option<&mut dyn IdWrite>,
+    mock_key: Option<String>,
 ) -> RaikoResult<Proof> {
+    if let Some(mock_key) = mock_key {
+        info!("Using mock prover with mock key");
+        return MockProver::new(mock_key.clone())?
+            .shasta_aggregate(input.clone(), output, config, store)
+            .await
+            .map_err(<ProverError as Into<RaikoError>>::into);
+    }
+
     let proof = match proof_type {
         ProofType::Native => NativeProver
             .shasta_aggregate(input.clone(), output, config, store)
@@ -407,6 +490,15 @@ pub async fn aggregate_shasta_proposals(
                 return result.map_err(|e| e.into());
             }
             #[cfg(not(feature = "zisk"))]
+            Err(RaikoError::FeatureNotSupportedError(proof_type))
+        }
+        ProofType::Tdx => {
+            #[cfg(feature = "tdx")]
+            return tdx_prover::TdxProver::new(proof_type)
+                .shasta_aggregate(input.clone(), output, config, store)
+                .await
+                .map_err(|e| e.into());
+            #[cfg(not(feature = "tdx"))]
             Err(RaikoError::FeatureNotSupportedError(proof_type))
         }
     }?;
@@ -467,6 +559,15 @@ pub async fn cancel_proof(
             #[cfg(not(feature = "zisk"))]
             Err(RaikoError::FeatureNotSupportedError(proof_type))
         }
+        ProofType::Tdx => {
+            #[cfg(feature = "tdx")]
+            return tdx_prover::TdxProver::new(proof_type)
+                .cancel(proof_key, read)
+                .await
+                .map_err(|e| e.into());
+            #[cfg(not(feature = "tdx"))]
+            Err(RaikoError::FeatureNotSupportedError(proof_type))
+        }
     }?;
     Ok(())
 }
@@ -500,21 +601,16 @@ pub struct ProofRequest {
     #[serde(flatten)]
     /// Additional prover params.
     pub prover_args: HashMap<String, Value>,
-    /// For shasta
-    /// parent transition hash, if not provided, it will be set to the default value
-    pub parent_transition_hash: Option<B256>,
     /// checkpoint, if not provided, it will be set to the default value
     /// in shasta, this is the checkpoint of the l2 block
     pub checkpoint: Option<ShastaProposalCheckpoint>,
-    /// designated_prover
-    pub designated_prover: Option<Address>,
+    /// last anchor number
+    pub last_anchor_block_number: Option<u64>,
     /// Cached block proposed event data to avoid duplicate RPC calls
     #[serde(skip)]
     pub cached_event_data: Option<raiko_lib::input::BlockProposedFork>,
     /// GPU number to use for proof generation
     pub gpu_number: Option<u32>,
-    /// last anchor number
-    pub last_anchor_block_number: Option<u64>,
 }
 
 impl ProofRequest {
@@ -666,11 +762,8 @@ impl From<ShastaProposalCheckpoint> for Checkpoint {
 #[derive(Clone, Debug, Serialize, Deserialize, ToSchema)]
 pub struct ShastaProposal {
     pub proposal_id: u64,
-    pub designated_prover: Address,
-    pub parent_transition_hash: Option<B256>,
     pub checkpoint: Option<ShastaProposalCheckpoint>,
     pub l1_inclusion_block_number: u64,
-    pub l1_bond_proposal_block_number: Option<u64>,
     pub l2_block_numbers: Vec<u64>,
     pub last_anchor_block_number: u64,
 }
@@ -679,12 +772,8 @@ impl std::fmt::Display for ShastaProposal {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
-            "{}:{:?}:{:?}:{}:{}",
-            self.proposal_id,
-            self.parent_transition_hash,
-            self.checkpoint,
-            self.l1_inclusion_block_number,
-            self.designated_prover
+            "{}:{:?}:{}",
+            self.proposal_id, self.checkpoint, self.l1_inclusion_block_number
         )
     }
 }
@@ -782,6 +871,8 @@ pub struct ProverSpecificOpts {
     pub risc0: Option<Value>,
     /// Zisk prover specific options.
     pub zisk: Option<Value>,
+    /// TDX prover specific options.
+    pub tdx: Option<Value>,
 }
 
 impl<S: ::std::hash::BuildHasher + ::std::default::Default> From<ProverSpecificOpts>
@@ -795,6 +886,7 @@ impl<S: ::std::hash::BuildHasher + ::std::default::Default> From<ProverSpecificO
             ("sp1", value.sp1.clone()),
             ("risc0", value.risc0.clone()),
             ("zisk", value.zisk.clone()),
+            ("tdx", value.tdx.clone()),
         ]
         .into_iter()
         .filter_map(|(name, value)| value.map(|v| (name.to_string(), v)))
@@ -867,9 +959,7 @@ impl TryFrom<ProofRequestOpt> for ProofRequest {
                     RaikoError::InvalidRequestConfig("Invalid blob_proof_type".to_string())
                 })?,
             prover_args: value.prover_args.into(),
-            parent_transition_hash: None,
             checkpoint: None,
-            designated_prover: None,
             cached_event_data: None,
             gpu_number: None,
             last_anchor_block_number: None,
