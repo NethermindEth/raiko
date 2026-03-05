@@ -100,6 +100,7 @@ pub static SURGE_DEV_HARDFORKS: LazyLock<ChainHardforks> = LazyLock::new(|| {
         ),
         (TaikoHardfork::Pacaya.boxed(), ForkCondition::Block(1)),
         (TaikoHardfork::Shasta.boxed(), ForkCondition::Timestamp(0)),
+        (TaikoHardfork::RealTime.boxed(), ForkCondition::Timestamp(0)),
     ])
 });
 
@@ -145,6 +146,7 @@ pub static SURGE_TEST_HARDFORKS: LazyLock<ChainHardforks> = LazyLock::new(|| {
         ),
         (TaikoHardfork::Pacaya.boxed(), ForkCondition::Block(1)),
         (TaikoHardfork::Shasta.boxed(), ForkCondition::Timestamp(0)),
+        (TaikoHardfork::RealTime.boxed(), ForkCondition::Timestamp(0)),
     ])
 });
 
@@ -190,6 +192,7 @@ pub static SURGE_STAGE_HARDFORKS: LazyLock<ChainHardforks> = LazyLock::new(|| {
         ),
         (TaikoHardfork::Pacaya.boxed(), ForkCondition::Block(1)),
         (TaikoHardfork::Shasta.boxed(), ForkCondition::Timestamp(0)),
+        (TaikoHardfork::RealTime.boxed(), ForkCondition::Timestamp(0)),
     ])
 });
 
@@ -427,6 +430,14 @@ impl<DB: Database<Error = ProviderError> + DatabaseCommit + OptimisticDatabase +
                         .fork(TaikoHardfork::Shasta)
                         .active_at_timestamp(block_ts),
                     "evm fork SHASTA is not active, please update the chain spec"
+                );
+            }
+            TaikoSpecId::REALTIME => {
+                assert!(
+                    chain_spec
+                        .fork(TaikoHardfork::RealTime)
+                        .active_at_timestamp(block_ts),
+                    "evm fork REALTIME is not active, please update the chain spec"
                 );
             }
             _ => unimplemented!(),

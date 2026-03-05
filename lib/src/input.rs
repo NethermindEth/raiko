@@ -335,8 +335,7 @@ impl BlockProposedFork {
     pub fn fork_spec(&self) -> TaikoSpecId {
         match self {
             BlockProposedFork::Shasta(_) => TaikoSpecId::SHASTA,
-            // TODO: use TaikoSpecId::REALTIME once alethia-reth-evm adds the variant
-            BlockProposedFork::RealTime(_) => TaikoSpecId::SHASTA,
+            BlockProposedFork::RealTime(_) => TaikoSpecId::REALTIME,
             BlockProposedFork::Pacaya(_) => TaikoSpecId::PACAYA,
             BlockProposedFork::Ontake(_) => TaikoSpecId::ONTAKE,
             _ => unimplemented!("unsupported fork spec"),

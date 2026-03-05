@@ -8,7 +8,10 @@ use anyhow::{anyhow, bail, ensure, Result};
 use kzg::kzg_types::ZFr;
 use kzg_traits::{eip_4844::blob_to_kzg_commitment_rust, Fr, G1};
 use raiko_lib::{
-    anchor::{decode_anchor, decode_anchor_ontake, decode_anchor_pacaya, decode_anchor_shasta},
+    anchor::{
+        decode_anchor, decode_anchor_ontake, decode_anchor_pacaya, decode_anchor_realtime,
+        decode_anchor_shasta,
+    },
     builder::{OptimisticDatabase, RethBlockBuilder},
     clear_line,
     consts::{ChainSpec, TaikoSpecId},
@@ -237,6 +240,13 @@ fn get_anchor_tx_info_by_fork(
     anchor_tx: &TaikoTxEnvelope,
 ) -> RaikoResult<(u64, B256)> {
     match fork {
+        TaikoSpecId::REALTIME => {
+            let anchor_call = decode_anchor_realtime(anchor_tx.input())?;
+            Ok((
+                anchor_call._checkpoint.blockNumber.to(),
+                anchor_call._checkpoint.stateRoot,
+            ))
+        }
         TaikoSpecId::SHASTA => {
             let anchor_call = decode_anchor_shasta(anchor_tx.input())?;
             Ok((
@@ -775,7 +785,6 @@ pub async fn prepare_taiko_chain_batch_input(
             )
             .await
         }
-        // RealTime: uses same TaikoSpecId as Shasta until REALTIME variant exists in alethia-reth-evm.
         // Cached event data MUST be provided (no on-chain Proposed event to fetch).
         (_, BlockProposedFork::RealTime(realtime_event_data)) => {
             assert!(
