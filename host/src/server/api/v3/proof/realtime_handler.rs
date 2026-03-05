@@ -1,0 +1,204 @@
+use crate::{
+    interfaces::HostResult,
+    server::{
+        api::v3::{ProofResponse, Status},
+        auth::AuthenticatedApiKey,
+        handler::prove_many,
+        utils::{
+            draw_shasta_zk_request, draw_shasta_sgx_request, is_sgx_any_request,
+            is_zk_any_request, to_v3_status,
+        },
+    },
+};
+use axum::{extract::State, routing::post, Extension, Json, Router};
+use raiko_core::{
+    interfaces::{RaikoError, RealTimeProofRequest, RealTimeProofRequestOpt},
+    merge,
+};
+use raiko_lib::proof_type::ProofType;
+use raiko_lib::utils::shasta_guest_input::{
+    encode_guest_input_str_to_prover_arg_value, PROVER_ARG_SHASTA_GUEST_INPUT,
+};
+use raiko_reqactor::Actor;
+use raiko_reqpool::{ImageId, RealTimeProofRequestEntity};
+use raiko_tasks::TaskStatus;
+use serde_json::Value;
+use utoipa::OpenApi;
+
+use super::batch::process_realtime_request;
+
+#[utoipa::path(post, path = "/batch/realtime",
+    tag = "Proving",
+    request_body = RealTimeProofRequest,
+    responses (
+        (status = 200, description = "Successfully submitted RealTime proof task, queried task in progress or retrieved proof.", body = Status)
+    )
+)]
+/// Submit a RealTime proof task with requested config, get task status or get proof value.
+///
+/// Accepts a RealTime proof request for atomic propose+prove.
+/// Unlike Shasta, there is no aggregation — one proposal per proof per transaction.
+async fn realtime_handler(
+    State(actor): State<Actor>,
+    Extension(authenticated_key): Extension<AuthenticatedApiKey>,
+    Json(mut realtime_request_opt): Json<Value>,
+) -> HostResult<Status> {
+    tracing::info!(
+        "Incoming RealTime request: {} from {}",
+        serde_json::to_string(&realtime_request_opt)?,
+        authenticated_key.name
+    );
+
+    // For zk_any request, draw zk proof type.
+    // Use the first L2 block number as a pseudo batch_id for drawing.
+    if is_zk_any_request(&realtime_request_opt) {
+        let first_block = realtime_request_opt["l2_block_numbers"]
+            .as_array()
+            .and_then(|a| a.first())
+            .and_then(|v| v.as_u64())
+            .unwrap_or(0);
+        let max_anchor = realtime_request_opt["max_anchor_block_number"]
+            .as_u64()
+            .unwrap_or(0);
+
+        match draw_shasta_zk_request(&actor, first_block, max_anchor).await? {
+            Some(proof_type) => {
+                realtime_request_opt["proof_type"] = serde_json::to_value(proof_type).unwrap()
+            }
+            None => {
+                return Ok(Status::Ok {
+                    proof_type: ProofType::Native,
+                    batch_id: None,
+                    data: ProofResponse::Status {
+                        status: TaskStatus::ZKAnyNotDrawn,
+                    },
+                });
+            }
+        }
+    }
+
+    // For sgx_any request, draw sgx proof type.
+    if is_sgx_any_request(&realtime_request_opt) {
+        let first_block = realtime_request_opt["l2_block_numbers"]
+            .as_array()
+            .and_then(|a| a.first())
+            .and_then(|v| v.as_u64())
+            .unwrap_or(0);
+        let max_anchor = realtime_request_opt["max_anchor_block_number"]
+            .as_u64()
+            .unwrap_or(0);
+
+        match draw_shasta_sgx_request(&actor, first_block, max_anchor).await? {
+            Some(proof_type) => {
+                realtime_request_opt["proof_type"] = serde_json::to_value(proof_type).unwrap()
+            }
+            None => {
+                return Ok(Status::Ok {
+                    proof_type: ProofType::Native,
+                    batch_id: None,
+                    data: ProofResponse::Status {
+                        status: TaskStatus::ZKAnyNotDrawn,
+                    },
+                });
+            }
+        }
+    }
+
+    let realtime_request: RealTimeProofRequest =
+        finalize_realtime_request(&actor, realtime_request_opt)?;
+
+    tracing::info!(
+        "Accepted {}'s RealTime request: {}",
+        authenticated_key.name,
+        serde_json::to_string(&realtime_request)?,
+    );
+
+    // No aggregation for RealTime
+    let image_id = ImageId::from_proof_type_and_request_type(&realtime_request.proof_type, false);
+
+    let (input_request_key, proof_request_key, input_request_entity, proof_request_entity) =
+        process_realtime_request(&realtime_request, &image_id);
+
+    // Two-stage proving: first generate guest input, then run real prover.
+    let statuses = prove_many(
+        &actor,
+        vec![input_request_key],
+        vec![input_request_entity],
+    )
+    .await?;
+
+    let is_all_sub_success = statuses
+        .iter()
+        .all(|status| matches!(status, raiko_reqpool::Status::Success { .. }));
+
+    let result = if !is_all_sub_success {
+        Ok(raiko_reqpool::Status::Registered)
+    } else {
+        let guest_input_str = match &statuses[0] {
+            raiko_reqpool::Status::Success { proof, .. } => proof.proof.clone().unwrap(),
+            _ => unreachable!("is_all_sub_success checked"),
+        };
+
+        // Inject guest input into the proof request entity's prover_args
+        let enriched_entity = match proof_request_entity {
+            raiko_reqpool::RequestEntity::RealTimeProof(ref entity) => {
+                let mut prover_args = entity.prover_args().clone();
+                prover_args.insert(
+                    PROVER_ARG_SHASTA_GUEST_INPUT.to_string(),
+                    encode_guest_input_str_to_prover_arg_value(&guest_input_str)
+                        .expect("failed to wrap guest_input string"),
+                );
+                RealTimeProofRequestEntity::new_with_guest_input_entity(
+                    entity.guest_input_entity().clone(),
+                    *entity.proof_type(),
+                    prover_args,
+                )
+                .into()
+            }
+            _ => unreachable!("Expected RealTimeProof entity"),
+        };
+
+        prove_many(&actor, vec![proof_request_key], vec![enriched_entity])
+            .await
+            .map(|statuses| {
+                statuses
+                    .into_iter()
+                    .next()
+                    .unwrap_or_else(|| raiko_reqpool::Status::Failed {
+                        error: "No status returned".to_string(),
+                    })
+            })
+    };
+
+    let status = to_v3_status(realtime_request.proof_type, None, result);
+    Ok(status)
+}
+
+fn finalize_realtime_request(
+    actor: &Actor,
+    realtime_request_opt: Value,
+) -> Result<RealTimeProofRequest, RaikoError> {
+    let mut opts = serde_json::to_value(actor.default_request_config())?;
+    merge(&mut opts, &realtime_request_opt);
+
+    let realtime_request_opt: RealTimeProofRequestOpt = serde_json::from_value(opts)?;
+    let realtime_request: RealTimeProofRequest = realtime_request_opt.try_into()?;
+
+    if realtime_request.l2_block_numbers.is_empty() {
+        return Err(anyhow::anyhow!("l2_block_numbers is empty").into());
+    }
+
+    Ok(realtime_request)
+}
+
+#[derive(OpenApi)]
+#[openapi(paths(realtime_handler))]
+struct Docs;
+
+pub fn create_docs() -> utoipa::openapi::OpenApi {
+    Docs::openapi()
+}
+
+pub fn create_router() -> Router<Actor> {
+    Router::new().route("/", post(realtime_handler))
+}
