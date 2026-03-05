@@ -736,17 +736,13 @@ pub async fn filter_tx_blob_beacon_with_proof(
     Ok((blob, Some(commitment.to_vec()), blob_proof))
 }
 
-/// Result of L1 storage proof collection, containing both the proofs and required L1 ancestor headers.
+/// Result of L1 storage proof collection, containing both the proofs and required L1 headers.
 pub struct L1StorageProofCollection {
     /// Storage proofs for each detected L1SLOAD call (one per unique (address, key, block_number))
     pub proofs: Vec<L1StorageProof>,
-    /// L1 ancestor headers needed to verify proofs for blocks older than anchor.
-    /// Ordered from oldest (lowest block number) to newest (anchor_block - 1).
-    /// Empty if all proofs are for the anchor block itself.
-    pub l1_ancestor_headers: Vec<reth_primitives::Header>,
-    /// L1 successor headers needed to verify proofs for blocks newer than anchor.
-    /// Ordered from oldest to newest and starts with the anchor header when non-empty.
-    pub l1_successor_headers: Vec<reth_primitives::Header>,
+    /// L1 headers covering [min_requested_block, l1_origin), ordered oldest→newest.
+    /// The L1 origin header itself is not included (it's `input.taiko.l1_header`).
+    pub l1_headers: Vec<reth_primitives::Header>,
 }
 
 /// Fetch L1 Merkle proofs for L1SLOAD calls discovered during EVM execution.
@@ -756,7 +752,7 @@ pub struct L1StorageProofCollection {
 pub async fn fetch_l1_proofs_for_rpc_served_calls(
     l1_provider: &RpcBlockDataProvider,
     calls: &std::collections::HashSet<(Address, B256, B256)>,
-    anchor_block_id: u64,
+    l1_origin_block_number: u64,
 ) -> RaikoResult<L1StorageProofCollection> {
     let mut proofs = Vec::new();
 
@@ -830,26 +826,19 @@ pub async fn fetch_l1_proofs_for_rpc_served_calls(
         }
     }
 
-    // Fetch predecessor/successor headers for L1SLOAD verification.
+    // Fetch headers from the earliest requested block up to (but not including) L1 origin.
+    // The L1 origin header itself is the root of trust (input.taiko.l1_header).
     let min_requested_block = calls_by_block
         .keys()
         .copied()
         .min()
-        .unwrap_or(anchor_block_id);
-    let max_requested_block = calls_by_block
-        .keys()
-        .copied()
-        .max()
-        .unwrap_or(anchor_block_id);
-    let l1_ancestor_headers =
-        fetch_l1_headers_in_range(l1_provider, min_requested_block, anchor_block_id).await?;
-    let l1_successor_headers =
-        fetch_l1_headers_in_range(l1_provider, anchor_block_id, max_requested_block + 1).await?;
+        .unwrap_or(l1_origin_block_number);
+    let l1_headers =
+        fetch_l1_headers_in_range(l1_provider, min_requested_block, l1_origin_block_number).await?;
 
     Ok(L1StorageProofCollection {
         proofs,
-        l1_ancestor_headers,
-        l1_successor_headers,
+        l1_headers,
     })
 }
 

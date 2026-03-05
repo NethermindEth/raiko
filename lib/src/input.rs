@@ -77,14 +77,12 @@ pub struct GuestInput {
     /// L1 storage proofs for L1SLOAD precompile calls
     #[serde(default)]
     pub l1_storage_proofs: Vec<L1StorageProof>,
-    /// L1 ancestor headers (oldest→newest, up to anchor-1) for backward L1SLOAD verification.
+    /// L1 headers (oldest→newest) for L1SLOAD state root verification.
+    /// Covers blocks from the earliest L1SLOAD target up to (but not including) L1 origin.
+    /// The L1 origin header itself is `taiko.l1_header` (the root of trust).
     #[serde_as(as = "Vec<BincodeCompactHeader>")]
     #[serde(default)]
-    pub l1_ancestor_headers: Vec<Header>,
-    /// L1 successor headers (anchor→newest) for forward L1SLOAD verification.
-    #[serde_as(as = "Vec<BincodeCompactHeader>")]
-    #[serde(default)]
-    pub l1_successor_headers: Vec<Header>,
+    pub l1_headers: Vec<Header>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
@@ -552,8 +550,7 @@ mod test {
             ancestor_headers: vec![],
             taiko: TaikoGuestInput::default(),
             l1_storage_proofs: vec![],
-            l1_ancestor_headers: vec![],
-            l1_successor_headers: vec![],
+            l1_headers: vec![],
         };
         let input_ser = serde_json::to_string(&input).unwrap();
         let input_de: GuestInput = serde_json::from_str(&input_ser).unwrap();
@@ -572,8 +569,7 @@ mod test {
             ancestor_headers: vec![],
             taiko: TaikoGuestInput::default(),
             l1_storage_proofs: vec![],
-            l1_ancestor_headers: vec![],
-            l1_successor_headers: vec![],
+            l1_headers: vec![],
         };
         let input_ser = serde_json::to_value(&input).unwrap();
         let input_de: GuestInput = serde_json::from_value(input_ser).unwrap();

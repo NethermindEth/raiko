@@ -62,30 +62,17 @@ fn prepare_l1sload_for_execution(input: &GuestInput) -> RaikoResult<MutexGuard<'
                 "Failed to determine active fork: {e}"
             )))
         })?;
-    let (anchor_block_number, anchor_state_root) = get_anchor_tx_info_by_fork(fork, anchor_tx)
+    let (anchor_block_number, _) = get_anchor_tx_info_by_fork(fork, anchor_tx)
         .map_err(|e| {
             RaikoError::Guest(raiko_lib::prover::ProverError::GuestError(format!(
                 "Failed to decode anchor tx info: {e}"
             )))
         })?;
-    let l1_origin_block_number = input.taiko.l1_header.number;
-    info!(
-        "Verifying and populating L1SLOAD proofs: {} proofs, \
-         anchor block={}, l1origin block={}, anchor state root={:?}, predecessor headers={}, successor headers={}",
-        input.l1_storage_proofs.len(),
-        anchor_block_number,
-        l1_origin_block_number,
-        anchor_state_root,
-        input.l1_ancestor_headers.len(),
-        input.l1_successor_headers.len()
-    );
     verify_and_populate_l1sload_proofs(
         &input.l1_storage_proofs,
-        anchor_state_root,
         anchor_block_number,
-        l1_origin_block_number,
-        &input.l1_ancestor_headers,
-        &input.l1_successor_headers,
+        &input.taiko.l1_header,
+        &input.l1_headers,
     )
     .map_err(|e| {
         RaikoError::Guest(raiko_lib::prover::ProverError::GuestError(format!(

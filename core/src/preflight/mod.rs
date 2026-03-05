@@ -236,12 +236,11 @@ pub async fn preflight<BDP: BlockDataProvider>(
         let collection = fetch_l1_proofs_for_rpc_served_calls(
             &l1_provider,
             &rpc_served_calls,
-            anchor_block_id,
+            l1_origin_block_id,
         )
         .await?;
         input.l1_storage_proofs = collection.proofs;
-        input.l1_ancestor_headers = collection.l1_ancestor_headers;
-        input.l1_successor_headers = collection.l1_successor_headers;
+        input.l1_headers = collection.l1_headers;
     }
 
     let db = if let Some(db) = builder.db.as_mut() {
@@ -576,12 +575,11 @@ pub async fn batch_preflight<BDP: BlockDataProvider>(
                     let collection = fetch_l1_proofs_for_rpc_served_calls(
                         &l1_provider,
                         &rpc_served_calls,
-                        anchor_block_id,
+                        l1_origin_block_id,
                     )
                     .await?;
                     input.l1_storage_proofs = collection.proofs;
-                    input.l1_ancestor_headers = collection.l1_ancestor_headers;
-                    input.l1_successor_headers = collection.l1_successor_headers;
+                    input.l1_headers = collection.l1_headers;
                 }
 
                 let db = if let Some(db) = builder.db.as_mut() {
