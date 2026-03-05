@@ -4,8 +4,6 @@ services:
     build:
       context: ..
       dockerfile: Dockerfile.zk
-      args:
-        - CARGO_BUILD_JOBS=${CARGO_BUILD_JOBS:-8}
     image: nethermind.jfrog.io/core-oci-local-staging/raiko-zk:latest
     container_name: raiko-zk
     network_mode: host
@@ -26,6 +24,7 @@ services:
       - ../host/config:/raiko/config
       - /tmp:/tmp
       - ${HOME}/.sp1:${HOME}/.sp1
+      - ${HOME}/.risc0:${HOME}/.risc0
     depends_on:
       - redis-zk
   redis-zk:
