@@ -158,16 +158,16 @@ fn build_verified_state_root_map(
 
     // The L1 origin's state root is trusted (verified via anchor linkage against on-chain proposal).
     let l1_origin_number = l1_origin_header.number;
-    let l1_origin_hash = l1_origin_header.hash_slow();
     state_root_map.insert(l1_origin_number, l1_origin_header.state_root);
 
     if l1_headers.is_empty() {
         return Ok(state_root_map);
     }
 
-    // Headers are ordered oldest→newest. Walk in reverse (newest→oldest),
-    // verifying that each header's hash matches the expected hash from the next block.
-    let mut expected_hash = l1_origin_hash;
+    // Headers are ordered oldest→newest and do NOT include the L1 origin itself.
+    // Walk in reverse (newest→oldest), starting from the origin's parent_hash since
+    // the highest header in l1_headers is block (l1_origin - 1).
+    let mut expected_hash = l1_origin_header.parent_hash;
     for header in l1_headers.iter().rev() {
         let header_hash = header.hash_slow();
         if header_hash != expected_hash {
