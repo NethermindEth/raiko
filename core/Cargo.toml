@@ -83,6 +83,7 @@ rstest = { workspace = true }
 ethers-core = { workspace = true }
 env_logger = { workspace = true }
 serial_test = { workspace = true }
+tracing-subscriber = { workspace = true }
 
 [[bench]]
 name = "proving"
