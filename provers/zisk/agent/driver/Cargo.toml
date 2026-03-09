@@ -36,3 +36,4 @@ zisk-common = { git = "https://github.com/0xPolygonHermez/zisk.git", rev = "e4ac
 proofman = { git = "https://github.com/0xPolygonHermez/pil2-proofman.git", rev = "74b7c04f96386fc312d09f43530084bd04fd3d5d" }
 proofman-common = { git = "https://github.com/0xPolygonHermez/pil2-proofman.git", rev = "74b7c04f96386fc312d09f43530084bd04fd3d5d" }
 fields = { git = "https://github.com/0xPolygonHermez/pil2-proofman.git", rev = "74b7c04f96386fc312d09f43530084bd04fd3d5d" }
+rom-setup = { git = "https://github.com/0xPolygonHermez/zisk.git", rev = "e4ac8bfe1cafe87cc95503530fcf297dbf1aea55" }

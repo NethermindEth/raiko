@@ -12,9 +12,10 @@ use raiko_lib::{
     proof_type::ProofType as RaikoProofType,
     prover::{IdStore, IdWrite, Prover, ProverConfig, ProverError, ProverResult},
 };
-use serde_json::Value;
+use serde_json::{json, Value};
 use std::io::Write as IoWrite;
 use std::path::PathBuf;
+use tokio::sync::OnceCell;
 use tracing::info;
 
 use fields::Goldilocks;
@@ -26,6 +27,31 @@ use zisk_sdk::ProverClientBuilder;
 const ZISK_BATCH_ELF: &[u8] = include_bytes!("../../guest/elf/zisk-batch");
 const ZISK_AGG_ELF: &[u8] = include_bytes!("../../guest/elf/zisk-aggregation");
 const ZISK_SHASTA_AGG_ELF: &[u8] = include_bytes!("../../guest/elf/zisk-shasta-aggregation");
+
+static BATCH_VKEY: OnceCell<String> = OnceCell::const_new();
+static AGG_VKEY: OnceCell<String> = OnceCell::const_new();
+static SHASTA_AGG_VKEY: OnceCell<String> = OnceCell::const_new();
+
+/// Compute the rom vkey hex string for an ELF.
+/// Writes ELF to a temp file, calls `rom_setup::rom_vkey`, and converts the
+/// resulting `Vec<Goldilocks>` to a hex string (each element as 8 LE bytes).
+async fn compute_vkey_hex(elf_bytes: &'static [u8], elf_name: &'static str) -> String {
+    tokio::task::spawn_blocking(move || {
+        let tmp = write_elf_to_tempfile(elf_bytes, elf_name)
+            .expect("Failed to write ELF to temp file for vkey");
+        let config = ZiskLocalConfig::from_env();
+        let root = rom_setup::rom_vkey(tmp.path(), &None, &config.proving_key)
+            .expect("Failed to compute rom_vkey");
+        // Goldilocks is a newtype around u64. Reinterpret as u64 slice to
+        // avoid trait version conflicts between direct and transitive `fields`.
+        let root_u64: &[u64] =
+            unsafe { std::slice::from_raw_parts(root.as_ptr() as *const u64, root.len()) };
+        let vkey_bytes: &[u8] = bytemuck::cast_slice(root_u64);
+        format!("0x{}", hex::encode(vkey_bytes))
+    })
+    .await
+    .expect("spawn_blocking for vkey failed")
+}
 
 // ---------------------------------------------------------------------------
 // Local proving config
@@ -112,24 +138,28 @@ fn wrap_snark(stark_proof: &[u64], config: &ZiskLocalConfig) -> ProverResult<Sna
     Ok(snark_proof)
 }
 
-fn stark_proof_to_raiko_proof(proof_u64: &[u64], output_hash: B256) -> Proof {
+fn stark_proof_to_raiko_proof(proof_u64: &[u64], output_hash: B256, vkey: Option<String>) -> Proof {
     let proof_bytes: &[u8] = bytemuck::cast_slice(proof_u64);
     Proof {
         proof: Some(format!("0x{}", hex::encode(proof_bytes))),
         quote: None,
         input: Some(output_hash),
-        uuid: None,
+        uuid: vkey,
         kzg_proof: None,
         extra_data: None,
     }
 }
 
-fn snark_proof_to_raiko_proof(snark: &SnarkProof, output_hash: B256) -> Proof {
+fn snark_proof_to_raiko_proof(
+    snark: &SnarkProof,
+    output_hash: B256,
+    vkey: Option<String>,
+) -> Proof {
     Proof {
         proof: Some(format!("0x{}", hex::encode(&snark.proof_bytes))),
         quote: Some(hex::encode(&snark.public_bytes)),
         input: Some(output_hash),
-        uuid: None,
+        uuid: vkey,
         kzg_proof: None,
         extra_data: None,
     }
@@ -174,6 +204,11 @@ impl ZiskAgentProver {
             ProverError::GuestError(format!("Failed to serialize GuestBatchInput: {e}"))
         })?;
 
+        let batch_vkey = BATCH_VKEY
+            .get_or_init(|| compute_vkey_hex(ZISK_BATCH_ELF, "zisk-batch"))
+            .await
+            .clone();
+
         let output_hash = output.hash;
         let proof = tokio::task::spawn_blocking(move || {
             let config = ZiskLocalConfig::from_env();
@@ -182,7 +217,11 @@ impl ZiskAgentProver {
                 .proof
                 .as_ref()
                 .ok_or_else(|| ProverError::GuestError("STARK proof is None".into()))?;
-            Ok::<Proof, ProverError>(stark_proof_to_raiko_proof(proof_u64, output_hash))
+            Ok::<Proof, ProverError>(stark_proof_to_raiko_proof(
+                proof_u64,
+                output_hash,
+                Some(batch_vkey),
+            ))
         })
         .await
         .map_err(|e| ProverError::GuestError(format!("spawn_blocking failed: {e}")))??;
@@ -219,6 +258,11 @@ impl ZiskAgentProver {
             ProverError::GuestError(format!("Failed to serialize aggregation input: {e}"))
         })?;
 
+        let agg_vkey = AGG_VKEY
+            .get_or_init(|| compute_vkey_hex(ZISK_AGG_ELF, "zisk-agg"))
+            .await
+            .clone();
+
         let output_hash = output.hash;
         let proof = tokio::task::spawn_blocking(move || {
             let config = ZiskLocalConfig::from_env();
@@ -228,7 +272,11 @@ impl ZiskAgentProver {
                 .as_ref()
                 .ok_or_else(|| ProverError::GuestError("STARK proof is None".into()))?;
             let snark = wrap_snark(proof_u64, &config)?;
-            Ok::<Proof, ProverError>(snark_proof_to_raiko_proof(&snark, output_hash))
+            Ok::<Proof, ProverError>(snark_proof_to_raiko_proof(
+                &snark,
+                output_hash,
+                Some(agg_vkey),
+            ))
         })
         .await
         .map_err(|e| ProverError::GuestError(format!("spawn_blocking failed: {e}")))??;
@@ -299,6 +347,11 @@ impl ZiskAgentProver {
             ProverError::GuestError(format!("Failed to serialize shasta input: {e}"))
         })?;
 
+        let shasta_vkey = SHASTA_AGG_VKEY
+            .get_or_init(|| compute_vkey_hex(ZISK_SHASTA_AGG_ELF, "zisk-shasta-agg"))
+            .await
+            .clone();
+
         let output_hash = output.hash;
         let proof = tokio::task::spawn_blocking(move || {
             let config = ZiskLocalConfig::from_env();
@@ -313,7 +366,11 @@ impl ZiskAgentProver {
                 .as_ref()
                 .ok_or_else(|| ProverError::GuestError("STARK proof is None".into()))?;
             let snark = wrap_snark(proof_u64, &config)?;
-            Ok::<Proof, ProverError>(snark_proof_to_raiko_proof(&snark, output_hash))
+            Ok::<Proof, ProverError>(snark_proof_to_raiko_proof(
+                &snark,
+                output_hash,
+                Some(shasta_vkey),
+            ))
         })
         .await
         .map_err(|e| ProverError::GuestError(format!("spawn_blocking failed: {e}")))??;
@@ -333,7 +390,22 @@ impl ZiskAgentProver {
 
 impl Prover for ZiskAgentProver {
     async fn get_guest_data() -> ProverResult<serde_json::Value> {
-        todo!("Zisk agent does not support get_guest_data")
+        let batch = BATCH_VKEY
+            .get_or_init(|| compute_vkey_hex(ZISK_BATCH_ELF, "zisk-batch"))
+            .await;
+        let agg = AGG_VKEY
+            .get_or_init(|| compute_vkey_hex(ZISK_AGG_ELF, "zisk-agg"))
+            .await;
+        let shasta = SHASTA_AGG_VKEY
+            .get_or_init(|| compute_vkey_hex(ZISK_SHASTA_AGG_ELF, "zisk-shasta-agg"))
+            .await;
+        Ok(json!({
+            "zisk": {
+                "batch_vkey": batch,
+                "aggregation_vkey": agg,
+                "shasta_aggregation_vkey": shasta,
+            }
+        }))
     }
 
     async fn run(

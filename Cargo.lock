@@ -16903,6 +16903,7 @@ dependencies = [
  "proofman-common 0.16.0 (git+https://github.com/0xPolygonHermez/pil2-proofman.git?rev=74b7c04f96386fc312d09f43530084bd04fd3d5d)",
  "raiko-lib",
  "reqwest 0.11.27",
+ "rom-setup",
  "serde",
  "serde_json",
  "serde_with",
