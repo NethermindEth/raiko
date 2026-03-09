@@ -7,12 +7,17 @@ use raiko_lib::proof_type::ProofType;
 use std::env;
 use std::time::Instant;
 
-fn load_fixture<T: serde::de::DeserializeOwned>(env_var: &str, default_path: &str) -> T {
-    let path = env::var(env_var).unwrap_or_else(|_| default_path.to_string());
-    let data = std::fs::read_to_string(&path)
-        .unwrap_or_else(|e| panic!("Failed to read fixture file {path}: {e}"));
-    serde_json::from_str(&data)
-        .unwrap_or_else(|e| panic!("Failed to deserialize fixture file {path}: {e}"))
+const BATCH_INPUT_FIXTURE: &str = include_str!("fixtures/batch_input.json");
+const AGG_INPUT_FIXTURE: &str = include_str!("fixtures/shasta_agg_input.json");
+
+fn batch_input() -> GuestBatchInput {
+    serde_json::from_str(BATCH_INPUT_FIXTURE)
+        .expect("Failed to deserialize batch_input.json fixture")
+}
+
+fn agg_input() -> ShastaAggregationGuestInput {
+    serde_json::from_str(AGG_INPUT_FIXTURE)
+        .expect("Failed to deserialize shasta_agg_input.json fixture")
 }
 
 fn proof_type() -> ProofType {
@@ -35,6 +40,7 @@ fn prover_config(proof_type: ProofType) -> serde_json::Value {
         "proof_type": proof_type.to_string(),
         "blob_proof_type": "proof_of_equivalence",
         "prover_args": {},
+        "gpu_number": 0,
     });
 
     match proof_type {
@@ -60,10 +66,7 @@ fn build_runtime() -> tokio::runtime::Runtime {
 
 fn bench_batch_run(rt: &tokio::runtime::Runtime) {
     let pt = proof_type();
-    let input: GuestBatchInput = load_fixture(
-        "BENCH_BATCH_INPUT",
-        "core/benches/fixtures/batch_input.json",
-    );
+    let input = batch_input();
     let config = prover_config(pt);
     let output = GuestBatchOutput {
         blocks: vec![],
@@ -73,9 +76,8 @@ fn bench_batch_run(rt: &tokio::runtime::Runtime) {
     println!("=== bench_batch_run (proof_type: {pt}) ===");
     let start = Instant::now();
 
-    let proof = rt.block_on(async {
-        run_batch_prover(pt, input, &output, &config, None, None).await
-    });
+    let proof =
+        rt.block_on(async { run_batch_prover(pt, input, &output, &config, None, None).await });
 
     let elapsed = start.elapsed();
     match proof {
@@ -89,10 +91,7 @@ fn bench_batch_run(rt: &tokio::runtime::Runtime) {
 
 fn bench_shasta_aggregate(rt: &tokio::runtime::Runtime) {
     let pt = proof_type();
-    let input: ShastaAggregationGuestInput = load_fixture(
-        "BENCH_AGG_INPUT",
-        "core/benches/fixtures/shasta_agg_input.json",
-    );
+    let input = agg_input();
     let config = prover_config(pt);
     let output = AggregationGuestOutput { hash: B256::ZERO };
 
@@ -132,8 +131,8 @@ fn main() {
         eprintln!("  No argument runs both benchmarks.");
         eprintln!();
         eprintln!("Environment variables:");
-        eprintln!("  PROOF_TYPE          - Prover to benchmark (sp1, zisk, risc0, ...). Default: sp1");
-        eprintln!("  BENCH_BATCH_INPUT   - Path to GuestBatchInput JSON fixture");
-        eprintln!("  BENCH_AGG_INPUT     - Path to ShastaAggregationGuestInput JSON fixture");
+        eprintln!(
+            "  PROOF_TYPE          - Prover to benchmark (sp1, zisk, risc0, ...). Default: sp1"
+        );
     }
 }
