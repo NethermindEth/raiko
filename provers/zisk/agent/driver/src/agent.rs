@@ -9,7 +9,7 @@ use raiko_lib::{
 };
 use raiko_lib::{
     libhash::hash_shasta_subproof_input,
-    primitives::{keccak::keccak, Address, B256},
+    primitives::{Address, B256},
     proof_type::ProofType as RaikoProofType,
     prover::{IdStore, IdWrite, Prover, ProverConfig, ProverError, ProverResult},
 };
@@ -19,7 +19,7 @@ use tracing::info;
 
 use fields::{Goldilocks, PrimeField64};
 use proofman::{SnarkProof, SnarkWrapper};
-use proofman_common::VerboseMode;
+use proofman_common::{ParamsGPU, VerboseMode};
 use zisk_common::io::ZiskStdin;
 use zisk_sdk::ProverClientBuilder;
 
@@ -99,7 +99,10 @@ fn ensure_rom_setup(elf: &std::path::Path, config: &ZiskLocalConfig) -> ProverRe
         return Ok(());
     }
 
-    info!("Running rom_full_setup for {} (this may take a few minutes)", stem);
+    info!(
+        "Running rom_full_setup for {} (this may take a few minutes)",
+        stem
+    );
     rom_setup::rom_full_setup(elf, &config.proving_key, &config.zisk_path, &None, false)
         .map_err(|e| ProverError::GuestError(format!("rom_full_setup failed: {e}")))?;
 
@@ -125,15 +128,26 @@ fn prove_stark(
         input_path
     );
 
+    // Build prover matching `cargo-zisk prove -a -y` (the known-working invocation)
+    let gpu_params = ParamsGPU::new(false);
+
     let prover = ProverClientBuilder::new()
-        .emu()
+        .asm()
         .prove()
-        .elf_path(elf)
-        .proving_key_path(config.proving_key.clone())
         .aggregation(true)
-        .save_proofs(true)
+        .compressed(false)
+        .rma(false)
+        .proving_key_path(config.proving_key.clone())
+        .elf_path(elf)
+        .verbose(0)
+        .shared_tables(false)
+        .unlock_mapped_memory(false)
+        .save_proofs(false)
         .output_dir(config.output_dir.clone())
         .verify_proofs(true)
+        .minimal_memory(false)
+        .gpu(gpu_params)
+        .print_command_info()
         .build()
         .map_err(|e| ProverError::GuestError(format!("Failed to build zisk prover: {e}")))?;
 
@@ -184,12 +198,18 @@ fn snark_proof_to_raiko_proof(
     }
 }
 
-fn compute_batch_image_id() -> [u32; 8] {
-    let elf_bytes =
-        std::fs::read(elf_path("zisk-batch")).expect("Failed to read zisk-batch ELF for image_id");
-    let hash = keccak(&elf_bytes);
+fn vkey_to_image_id(vkey_hex: &str) -> [u32; 8] {
+    let bytes =
+        hex::decode(vkey_hex.strip_prefix("0x").unwrap_or(vkey_hex)).expect("invalid vkey hex");
+
+    assert!(
+        bytes.len() == 32,
+        "Expected 32 bytes for vkey, got {}",
+        bytes.len()
+    );
     let mut image_id = [0u32; 8];
-    for (i, chunk) in hash.chunks(4).enumerate().take(8) {
+
+    for (i, chunk) in bytes.chunks(4).enumerate().take(8) {
         image_id[i] = u32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]);
     }
     image_id
@@ -270,7 +290,7 @@ impl ZiskAgentProver {
             .collect::<ProverResult<Vec<_>>>()?;
 
         let zisk_input = ZkAggregationGuestInput {
-            image_id: compute_batch_image_id(),
+            image_id: vkey_to_image_id(&BATCH_VKEY),
             block_inputs,
         };
 
@@ -354,7 +374,7 @@ impl ZiskAgentProver {
         }
 
         let shasta_input = ShastaZiskAggregationGuestInput {
-            image_id: compute_batch_image_id(),
+            image_id: vkey_to_image_id(&BATCH_VKEY),
             block_inputs,
             proof_carry_data_vec,
             prover_address: Address::ZERO,

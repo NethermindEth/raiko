@@ -29,11 +29,11 @@ bytemuck = "1"
 raiko-lib = { path = "../../../../lib", features = ["std"] }
 
 # Zisk SDK and related dependencies
-# NOTE: these revs must match. zisk rev must be from feature/pre-develop-0.16.0-stable,
-# and proofman rev must match what that zisk commit uses in its Cargo.lock.
-zisk-sdk = { git = "https://github.com/0xPolygonHermez/zisk.git", rev = "e4ac8bfe1cafe87cc95503530fcf297dbf1aea55" }
-zisk-common = { git = "https://github.com/0xPolygonHermez/zisk.git", rev = "e4ac8bfe1cafe87cc95503530fcf297dbf1aea55" }
+# NOTE: zisk deps use pre-develop-0.16.0-stream branch,
+# and proofman branch must match what that zisk branch uses (pre-develop-0.16.0).
+zisk-sdk = { git = "https://github.com/0xPolygonHermez/zisk.git", branch = "pre-develop-0.16.0-stream" }
+zisk-common = { git = "https://github.com/0xPolygonHermez/zisk.git", branch = "pre-develop-0.16.0-stream" }
 proofman = { git = "https://github.com/0xPolygonHermez/pil2-proofman.git", branch = "pre-develop-0.16.0" }
 proofman-common = { git = "https://github.com/0xPolygonHermez/pil2-proofman.git", branch = "pre-develop-0.16.0" }
 fields = { git = "https://github.com/0xPolygonHermez/pil2-proofman.git", branch = "pre-develop-0.16.0" }
-rom-setup = { git = "https://github.com/0xPolygonHermez/zisk.git", rev = "e4ac8bfe1cafe87cc95503530fcf297dbf1aea55" }
+rom-setup = { git = "https://github.com/0xPolygonHermez/zisk.git", branch = "pre-develop-0.16.0-stream" }

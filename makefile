@@ -37,6 +37,10 @@ update: ## Run cargo update
 	cd ./provers/risc0/guest && cargo update
 	cd ./provers/zisk/agent/guest && cargo update
 
+
+bench: ## Run all proving benchmarks (set PROOF_TYPE=sp1|zisk|risc0)
+	PROOF_TYPE=$(TARGET) cargo bench --bench proving -p raiko-core -F $(TARGET) -- $(PROOF_TYPE)
+
 clean: ## Run cargo clean
 	@cargo clean
 	@cd ./provers/sp1/guest && cargo clean
