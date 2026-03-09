@@ -33,7 +33,7 @@ raiko-lib = { path = "../../../../lib", features = ["std"] }
 # and proofman rev must match what that zisk commit uses in its Cargo.lock.
 zisk-sdk = { git = "https://github.com/0xPolygonHermez/zisk.git", rev = "e4ac8bfe1cafe87cc95503530fcf297dbf1aea55" }
 zisk-common = { git = "https://github.com/0xPolygonHermez/zisk.git", rev = "e4ac8bfe1cafe87cc95503530fcf297dbf1aea55" }
-proofman = { git = "https://github.com/0xPolygonHermez/pil2-proofman.git", rev = "74b7c04f96386fc312d09f43530084bd04fd3d5d" }
-proofman-common = { git = "https://github.com/0xPolygonHermez/pil2-proofman.git", rev = "74b7c04f96386fc312d09f43530084bd04fd3d5d" }
-fields = { git = "https://github.com/0xPolygonHermez/pil2-proofman.git", rev = "74b7c04f96386fc312d09f43530084bd04fd3d5d" }
+proofman = { git = "https://github.com/0xPolygonHermez/pil2-proofman.git", branch = "pre-develop-0.16.0" }
+proofman-common = { git = "https://github.com/0xPolygonHermez/pil2-proofman.git", branch = "pre-develop-0.16.0" }
+fields = { git = "https://github.com/0xPolygonHermez/pil2-proofman.git", branch = "pre-develop-0.16.0" }
 rom-setup = { git = "https://github.com/0xPolygonHermez/zisk.git", rev = "e4ac8bfe1cafe87cc95503530fcf297dbf1aea55" }

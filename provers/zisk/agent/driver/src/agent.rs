@@ -1,3 +1,4 @@
+use once_cell::sync::Lazy;
 use raiko_lib::{
     input::{
         AggregationGuestInput, AggregationGuestOutput, GuestBatchInput, GuestBatchOutput,
@@ -13,11 +14,10 @@ use raiko_lib::{
     prover::{IdStore, IdWrite, Prover, ProverConfig, ProverError, ProverResult},
 };
 use serde_json::{json, Value};
-use once_cell::sync::Lazy;
 use std::path::PathBuf;
 use tracing::info;
 
-use fields::Goldilocks;
+use fields::{Goldilocks, PrimeField64};
 use proofman::{SnarkProof, SnarkWrapper};
 use proofman_common::VerboseMode;
 use zisk_common::io::ZiskStdin;
@@ -32,20 +32,22 @@ fn elf_path(elf_name: &str) -> PathBuf {
 fn compute_vkey_hex(elf_name: &str) -> String {
     let config = ZiskLocalConfig::from_env();
     let path = elf_path(elf_name);
-    let root = rom_setup::rom_vkey(&path, &None, &config.proving_key)
-        .expect("Failed to compute rom_vkey");
-    // Goldilocks is a newtype around u64. Reinterpret as u64 slice to
-    // avoid trait version conflicts between direct and transitive `fields`.
-    let root_u64: &[u64] =
-        unsafe { std::slice::from_raw_parts(root.as_ptr() as *const u64, root.len()) };
-    let vkey_bytes: &[u8] = bytemuck::cast_slice(root_u64);
+
+    // Run rom_full_setup if cache files don't exist yet
+    ensure_rom_setup(&path, &config).expect("Failed to run rom_full_setup");
+
+    let root =
+        rom_setup::rom_vkey(&path, &None, &config.proving_key).expect("Failed to compute rom_vkey");
+    let vkey_bytes: Vec<u8> = root
+        .iter()
+        .flat_map(|x| x.as_canonical_u64().to_le_bytes())
+        .collect();
     format!("0x{}", hex::encode(vkey_bytes))
 }
 
 static BATCH_VKEY: Lazy<String> = Lazy::new(|| compute_vkey_hex("zisk-batch"));
 static AGG_VKEY: Lazy<String> = Lazy::new(|| compute_vkey_hex("zisk-aggregation"));
-static SHASTA_AGG_VKEY: Lazy<String> =
-    Lazy::new(|| compute_vkey_hex("zisk-shasta-aggregation"));
+static SHASTA_AGG_VKEY: Lazy<String> = Lazy::new(|| compute_vkey_hex("zisk-shasta-aggregation"));
 
 // ---------------------------------------------------------------------------
 // Local proving config
@@ -55,6 +57,7 @@ struct ZiskLocalConfig {
     proving_key: PathBuf,
     proving_key_snark: PathBuf,
     output_dir: PathBuf,
+    zisk_path: PathBuf,
 }
 
 impl ZiskLocalConfig {
@@ -70,6 +73,9 @@ impl ZiskLocalConfig {
             output_dir: std::env::var("ZISK_OUTPUT_DIR")
                 .map(PathBuf::from)
                 .unwrap_or_else(|_| PathBuf::from("/tmp/zisk-proofs")),
+            zisk_path: std::env::var("ZISK_PATH")
+                .map(PathBuf::from)
+                .unwrap_or_else(|_| PathBuf::from(format!("{home}/.zisk/zisk"))),
         }
     }
 }
@@ -77,6 +83,28 @@ impl ZiskLocalConfig {
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
+
+fn ensure_rom_setup(elf: &std::path::Path, config: &ZiskLocalConfig) -> ProverResult<()> {
+    // Check if assembly cache files already exist
+    let stem = elf.file_stem().unwrap().to_str().unwrap();
+    let hash = rom_setup::get_elf_data_hash(elf)
+        .map_err(|e| ProverError::GuestError(format!("Failed to compute ELF hash: {e}")))?;
+
+    let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".to_string());
+    let cache_dir = PathBuf::from(format!("{home}/.zisk/cache"));
+    let mt_path = cache_dir.join(format!("{stem}-{hash}-mt.bin"));
+
+    if mt_path.exists() {
+        info!("ROM setup cache exists at {:?}, skipping", mt_path);
+        return Ok(());
+    }
+
+    info!("Running rom_full_setup for {} (this may take a few minutes)", stem);
+    rom_setup::rom_full_setup(elf, &config.proving_key, &config.zisk_path, &None, false)
+        .map_err(|e| ProverError::GuestError(format!("rom_full_setup failed: {e}")))?;
+
+    Ok(())
+}
 
 fn prove_stark(
     elf_name: &str,
@@ -90,7 +118,12 @@ fn prove_stark(
     std::fs::create_dir_all(&config.output_dir).ok();
     let input_path = config.output_dir.join(format!("{elf_name}-input.bin"));
     std::fs::write(&input_path, &serialized_input).ok();
-    info!("Saved {} input ({} bytes) to {:?}", elf_name, serialized_input.len(), input_path);
+    info!(
+        "Saved {} input ({} bytes) to {:?}",
+        elf_name,
+        serialized_input.len(),
+        input_path
+    );
 
     let prover = ProverClientBuilder::new()
         .emu()
@@ -152,8 +185,8 @@ fn snark_proof_to_raiko_proof(
 }
 
 fn compute_batch_image_id() -> [u32; 8] {
-    let elf_bytes = std::fs::read(elf_path("zisk-batch"))
-        .expect("Failed to read zisk-batch ELF for image_id");
+    let elf_bytes =
+        std::fs::read(elf_path("zisk-batch")).expect("Failed to read zisk-batch ELF for image_id");
     let hash = keccak(&elf_bytes);
     let mut image_id = [0u32; 8];
     for (i, chunk) in hash.chunks(4).enumerate().take(8) {
@@ -186,13 +219,13 @@ impl ZiskAgentProver {
         _config: &Value,
         _id_store: Option<&mut dyn IdWrite>,
     ) -> ProverResult<Proof> {
+        // Force rom_full_setup (via Lazy) before anything else
+        let batch_vkey = BATCH_VKEY.clone();
         info!("Zisk local batch proof starting");
 
         let serialized_input = bincode::serialize(&input).map_err(|e| {
             ProverError::GuestError(format!("Failed to serialize GuestBatchInput: {e}"))
         })?;
-
-        let batch_vkey = BATCH_VKEY.clone();
 
         let output_hash = output.hash;
         let proof = tokio::task::spawn_blocking(move || {
@@ -221,6 +254,8 @@ impl ZiskAgentProver {
         _config: &Value,
         _id_store: Option<&mut dyn IdWrite>,
     ) -> ProverResult<Proof> {
+        // Force rom_full_setup (via Lazy) before anything else
+        let agg_vkey = AGG_VKEY.clone();
         info!("Zisk local aggregation proof starting");
 
         let block_inputs: Vec<B256> = input
@@ -242,8 +277,6 @@ impl ZiskAgentProver {
         let serialized_input = bincode::serialize(&zisk_input).map_err(|e| {
             ProverError::GuestError(format!("Failed to serialize aggregation input: {e}"))
         })?;
-
-        let agg_vkey = AGG_VKEY.clone();
 
         let output_hash = output.hash;
         let proof = tokio::task::spawn_blocking(move || {
@@ -273,6 +306,8 @@ impl ZiskAgentProver {
         _config: &Value,
         _id_store: Option<&mut dyn IdWrite>,
     ) -> ProverResult<Proof> {
+        // Force rom_full_setup (via Lazy) before anything else
+        let shasta_vkey = SHASTA_AGG_VKEY.clone();
         info!("Zisk local shasta aggregation proof starting");
 
         let block_inputs: Vec<B256> = input
@@ -328,8 +363,6 @@ impl ZiskAgentProver {
         let serialized_input = bincode::serialize(&shasta_input).map_err(|e| {
             ProverError::GuestError(format!("Failed to serialize shasta input: {e}"))
         })?;
-
-        let shasta_vkey = SHASTA_AGG_VKEY.clone();
 
         let output_hash = output.hash;
         let proof = tokio::task::spawn_blocking(move || {
