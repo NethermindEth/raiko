@@ -12,7 +12,7 @@ use raiko_lib::{
 };
 
 pub fn main() {
-    let input_data = ziskos::read_input();
+    let input_data = ziskos::io::read_vec();
     assert!(!input_data.is_empty(), "shasta aggregation input is empty");
 
     let input: ShastaRisc0AggregationGuestInput = bincode::deserialize(&input_data)
@@ -43,9 +43,5 @@ pub fn main() {
         shasta_aggregation_hash_for_zk(sub_image_id, &input.proof_carry_data_vec)
             .expect("invalid shasta proof carry data");
 
-    let hash_bytes = agg_public_input_hash.0;
-    for (i, chunk) in hash_bytes.chunks(4).enumerate().take(8) {
-        let value = u32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]);
-        ziskos::set_output(i, value);
-    }
+    ziskos::io::write(&agg_public_input_hash.0);
 }
