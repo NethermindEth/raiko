@@ -179,8 +179,9 @@ impl Raiko {
     }
 
     fn execute_transactions(&self, input: &GuestInput) -> RaikoResult<()> {
-        let db = create_mem_db(&mut input.clone()).unwrap();
-        let mut builder = RethBlockBuilder::new(input, db);
+        let mut input_owned = input.clone();
+        let db = create_mem_db(&mut input_owned).unwrap();
+        let mut builder = RethBlockBuilder::new(input_owned, db);
         let pool_tx = generate_transactions(
             &input.chain_spec,
             &input.taiko.block_proposed,
@@ -264,8 +265,9 @@ impl Raiko {
         origin_pool_txs: Vec<TaikoTxEnvelope>,
         input: &GuestInput,
     ) -> RaikoResult<()> {
-        let db = create_mem_db(&mut input.clone()).unwrap();
-        let mut builder = RethBlockBuilder::new(input, db);
+        let mut input_owned = input.clone();
+        let db = create_mem_db(&mut input_owned).unwrap();
+        let mut builder = RethBlockBuilder::new(input_owned, db);
 
         let _l1sload_guard = prepare_l1sload_for_execution(input)?;
 
