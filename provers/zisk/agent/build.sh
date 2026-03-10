@@ -62,17 +62,37 @@ build_guest_programs() {
         exit 1
     fi
     
-    # Set CC to riscv64-unknown-elf-gcc for ZISK compilation and clear RISC-V related environment variables
-    export CC=riscv64-unknown-elf-gcc
+    # Clear RISC-V related environment variables
     unset TARGET_CC
-    
-    # Build guest programs using cargo-zisk (not regular cargo)
+
+    # Detect riscv sysroot for C includes
+    # risc0's bundled riscv32 gcc sysroot provides compatible C headers for riscv64
+    SYSROOT=""
+    RISC0_GCC="$HOME/.risc0/cpp/bin/riscv32-unknown-elf-gcc"
+    if [ -x "$RISC0_GCC" ]; then
+        SYSROOT="$($RISC0_GCC -print-sysroot)/include"
+        log "Using risc0 sysroot: $SYSROOT"
+    elif command -v riscv64-unknown-elf-gcc &> /dev/null; then
+        CANDIDATE="$(riscv64-unknown-elf-gcc -print-sysroot)/include"
+        if [ -d "$CANDIDATE" ]; then
+            SYSROOT="$CANDIDATE"
+            log "Using system riscv64 sysroot: $SYSROOT"
+        fi
+    fi
+
+    if [ -z "$SYSROOT" ] || [ ! -d "$SYSROOT" ]; then
+        warn "No riscv sysroot found. C dependencies may fail to compile."
+        warn "Install riscv64-unknown-elf-gcc or ensure ~/.risc0/cpp is present."
+    fi
+
+    # Build guest programs using cargo-zisk
     log "Building with cargo-zisk for riscv64ima-zisk-zkvm-elf target..."
-    
-    # Use cargo-zisk for RISC-V compilation, not regular cargo
-    # cargo-zisk handles the custom target automatically
     log "Running: cargo-zisk build --release"
-    CC_riscv64ima_zisk_zkvm_elf="riscv64-unknown-elf-gcc -march=rv64ima -mabi=lp64 -mstrict-align -falign-functions=2" RUSTFLAGS='--cfg getrandom_backend="custom"' cargo-zisk build --release 
+
+    CC_riscv64ima_zisk_zkvm_elf="riscv64-unknown-elf-gcc -march=rv64ima -mabi=lp64 -mstrict-align -falign-functions=2" \
+        CFLAGS_riscv64ima_zisk_zkvm_elf="${SYSROOT:+-isystem $SYSROOT}" \
+        RUSTFLAGS='--cfg getrandom_backend="custom"' \
+        cargo-zisk build --release
     
     # Create ELF directory in guest if it doesn't exist
     mkdir -p "$SCRIPT_DIR/guest/elf"

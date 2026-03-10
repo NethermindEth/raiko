@@ -29,11 +29,11 @@ bytemuck = "1"
 raiko-lib = { path = "../../../../lib", features = ["std"] }
 
 # Zisk SDK and related dependencies
-# zisk: pinned to pre-develop-0.16.0-stream @ 3aebf504
-# proofman: must use branch (not rev) to match zisk's internal deps and avoid duplicate crates
-zisk-sdk = { git = "https://github.com/0xPolygonHermez/zisk.git", rev = "3aebf504" }
-zisk-common = { git = "https://github.com/0xPolygonHermez/zisk.git", rev = "3aebf504" }
+# zisk: pinned to pre-develop-0.16.0 @ 6668726
+# proofman: use branch to match zisk's internal deps (avoids duplicate crate resolution)
+zisk-sdk = { git = "https://github.com/0xPolygonHermez/zisk.git", rev = "6668726" }
+zisk-common = { git = "https://github.com/0xPolygonHermez/zisk.git", rev = "6668726" }
 proofman = { git = "https://github.com/0xPolygonHermez/pil2-proofman.git", branch = "pre-develop-0.16.0" }
 proofman-common = { git = "https://github.com/0xPolygonHermez/pil2-proofman.git", branch = "pre-develop-0.16.0" }
 fields = { git = "https://github.com/0xPolygonHermez/pil2-proofman.git", branch = "pre-develop-0.16.0" }
-rom-setup = { git = "https://github.com/0xPolygonHermez/zisk.git", rev = "3aebf504" }
+rom-setup = { git = "https://github.com/0xPolygonHermez/zisk.git", rev = "6668726" }

@@ -17,8 +17,11 @@ use serde_json::{json, Value};
 use std::path::PathBuf;
 use tracing::info;
 
+use std::sync::Arc;
+
+use proofman_common::{MpiCtx, ParamsGPU, ProofCtx, ProofType, SetupCtx, SetupsVadcop};
 use zisk_common::ElfBinaryFromFile;
-use zisk_sdk::{ProverClientBuilder, ZiskProof, ZiskProveResult, ProofOpts};
+use zisk_sdk::{ProofOpts, ProverClientBuilder, ZiskProof, ZiskProveResult};
 
 const GUEST_ELF_DIR: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../guest/elf");
 
@@ -30,16 +33,63 @@ fn compute_vkey_hex(elf_name: &str) -> String {
     let config = ZiskLocalConfig::from_env();
     let path = elf_path(elf_name);
 
-    let elf_binary = ElfBinaryFromFile::new(&path, false)
-        .expect("Failed to read ELF file");
+    let elf_binary = ElfBinaryFromFile::new(&path, false).expect("Failed to read ELF file");
 
-    let verkey = rom_setup::rom_merkle_setup_verkey(
-        &elf_binary,
-        &None,
-        &config.proving_key,
+    // First try reading from cache (fast path)
+    if let Ok(verkey) = rom_setup::rom_merkle_setup_verkey(&elf_binary, &None, &config.proving_key)
+    {
+        return format!("0x{}", hex::encode(verkey));
+    }
+
+    // Cache miss: run ROM merkle setup to generate the verkey
+    // (matches cargo-zisk rom-setup flow: create ProofCtx, then call rom_merkle_setup)
+    info!(
+        "ROM merkle setup not cached for {}, running setup...",
+        elf_name
+    );
+
+    let mpi_ctx = Arc::new(MpiCtx::new());
+    let mut pctx = ProofCtx::<fields::Goldilocks>::create_ctx(
+        config.proving_key.clone(),
+        false,
+        proofman_common::VerboseMode::Info,
+        mpi_ctx,
     )
-    .expect("Failed to compute rom_merkle_setup_verkey");
+    .expect("Failed to create ProofCtx for ROM setup");
 
+    let mut params_gpu = ParamsGPU::new(false);
+    params_gpu.with_max_number_streams(1);
+
+    let sctx = Arc::new(SetupCtx::<fields::Goldilocks>::new(
+        &pctx.global_info,
+        &ProofType::Basic,
+        false,
+        &params_gpu,
+        &[],
+    ));
+    let setups_vadcop = Arc::new(SetupsVadcop::new(
+        &pctx.global_info,
+        false,
+        false,
+        &params_gpu,
+        &[],
+    ));
+    pctx.set_device_buffers(&sctx, &setups_vadcop, false, &params_gpu)
+        .expect("Failed to set device buffers for ROM setup");
+    let pctx = Arc::new(pctx);
+
+    let (_rom_bin_path, verkey) =
+        rom_setup::rom_merkle_setup::<fields::Goldilocks>(&pctx, &elf_binary, &None)
+            .expect("Failed to run rom_merkle_setup");
+
+    // NOTE: We intentionally do NOT call gen_assembly() here.
+    // Assembly files must be pre-generated via `cargo-zisk rom-setup`.
+    // The upstream resolve_emulator_asm() has a bug where it uses
+    // CARGO_MANIFEST_DIR (the cargo git checkout) as the workspace root
+    // instead of ~/.zisk/, causing it to look for emulator-asm and
+    // libziskclib.a in the wrong location when rom-setup is a git dep.
+
+    info!("ROM setup complete for {}", elf_name);
     format!("0x{}", hex::encode(verkey))
 }
 
@@ -101,6 +151,10 @@ fn prove_stark(
         .map_err(|e| ProverError::GuestError(format!("Failed to read ELF file: {e}")))?;
 
     // Build prover matching `cargo-zisk prove -a -y`
+    // no_auto_setup(true): assembly files must be pre-generated via
+    // `cargo-zisk rom-setup` — avoids upstream resolve_emulator_asm() bug
+    // where CARGO_MANIFEST_DIR resolves to the cargo git checkout instead
+    // of ~/.zisk/ when rom-setup is used as a git dependency.
     let prover = ProverClientBuilder::new()
         .asm()
         .prove()
@@ -108,8 +162,9 @@ fn prove_stark(
         .proving_key_path(config.proving_key.clone())
         .proving_key_snark_path(config.proving_key_snark.clone())
         .verbose(0)
-        .shared_tables(false)
+        .shared_tables(true)
         .unlock_mapped_memory(false)
+        .no_auto_setup(true)
         .print_command_info()
         .build::<fields::Goldilocks>()
         .map_err(|e| ProverError::GuestError(format!("Failed to build zisk prover: {e}")))?;
@@ -156,6 +211,7 @@ fn prove_stark_with_snark(
         .map_err(|e| ProverError::GuestError(format!("Failed to read ELF file: {e}")))?;
 
     // Build prover with SNARK wrapping enabled
+    // no_auto_setup(true): see comment in prove_stark()
     let prover = ProverClientBuilder::new()
         .asm()
         .prove()
@@ -164,8 +220,9 @@ fn prove_stark_with_snark(
         .proving_key_path(config.proving_key.clone())
         .proving_key_snark_path(config.proving_key_snark.clone())
         .verbose(0)
-        .shared_tables(false)
+        .shared_tables(true)
         .unlock_mapped_memory(false)
+        .no_auto_setup(true)
         .print_command_info()
         .build::<fields::Goldilocks>()
         .map_err(|e| ProverError::GuestError(format!("Failed to build zisk prover: {e}")))?;
@@ -201,7 +258,11 @@ fn zisk_proof_to_bytes(proof: &ZiskProof) -> ProverResult<Vec<u8>> {
     }
 }
 
-fn stark_proof_to_raiko_proof(result: &ZiskProveResult, output_hash: B256, vkey: Option<String>) -> ProverResult<Proof> {
+fn stark_proof_to_raiko_proof(
+    result: &ZiskProveResult,
+    output_hash: B256,
+    vkey: Option<String>,
+) -> ProverResult<Proof> {
     let proof_bytes = zisk_proof_to_bytes(result.get_proof())?;
     Ok(Proof {
         proof: Some(format!("0x{}", hex::encode(&proof_bytes))),
@@ -213,7 +274,11 @@ fn stark_proof_to_raiko_proof(result: &ZiskProveResult, output_hash: B256, vkey:
     })
 }
 
-fn snark_proof_to_raiko_proof(result: &ZiskProveResult, output_hash: B256, vkey: Option<String>) -> ProverResult<Proof> {
+fn snark_proof_to_raiko_proof(
+    result: &ZiskProveResult,
+    output_hash: B256,
+    vkey: Option<String>,
+) -> ProverResult<Proof> {
     let proof_bytes = zisk_proof_to_bytes(result.get_proof())?;
     // For SNARK proofs, publics are encoded separately
     let program_vk = result.get_program_vk();
@@ -397,7 +462,8 @@ impl ZiskAgentProver {
         let output_hash = output.hash;
         let proof = tokio::task::spawn_blocking(move || {
             let config = ZiskLocalConfig::from_env();
-            let result = prove_stark_with_snark("zisk-shasta-aggregation", serialized_input, &config)?;
+            let result =
+                prove_stark_with_snark("zisk-shasta-aggregation", serialized_input, &config)?;
             snark_proof_to_raiko_proof(&result, output_hash, Some(shasta_vkey))
         })
         .await

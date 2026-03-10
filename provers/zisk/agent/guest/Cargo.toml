@@ -24,7 +24,7 @@ path = "src/shasta_aggregation.rs"
 
 [dependencies]
 # Core Zisk runtime
-ziskos = { git = "https://github.com/0xPolygonHermez/zisk.git" }
+ziskos = { git = "https://github.com/0xPolygonHermez/zisk.git", rev = "6668726" }
 
 # Raiko library - all reth/revm/alloy deps come transitively through this
 raiko-lib = { path = "../../../../lib", default-features = false, features = [
