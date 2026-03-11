@@ -25,6 +25,7 @@ async-trait = "0.1"
 thiserror = { workspace = true }
 once_cell = "1"
 bytemuck = "1"
+libc = "0.2"
 
 # Raiko lib dependency (path relative to driver directory)
 raiko-lib = { path = "../../../../lib", features = ["std"] }

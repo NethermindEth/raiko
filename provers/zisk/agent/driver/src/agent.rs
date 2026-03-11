@@ -1,4 +1,5 @@
-use once_cell::sync::OnceCell;
+use once_cell::sync::Lazy;
+
 use raiko_lib::{
     input::{
         AggregationGuestInput, AggregationGuestOutput, GuestBatchInput, GuestBatchOutput,
@@ -62,97 +63,107 @@ impl ZiskLocalConfig {
 //
 // Building a ZiskProver starts ASM microservices (~19s) and initializes
 // proofman (~12s). Since prove() and setup() take &self, provers are
-// reusable. We cache them in statics so the first proof pays the init
+// reusable. We cache one in a static so the first proof pays the init
 // cost and all subsequent proofs skip it entirely (~31s saved per proof).
+//
+// NOTE: MPI can only be initialized once per process (ProofMan::new calls
+// MpiCtx::new). We must use a **single prover** for everything. Building
+// with .snark() gives us a superset: it can run both STARK-only proofs
+// (.run()) and SNARK proofs (.plonk().run()).
 
-static STARK_PROVER: OnceCell<ZiskProver<Asm>> = OnceCell::new();
-static SNARK_PROVER: OnceCell<ZiskProver<Asm>> = OnceCell::new();
+static PROVER: Lazy<ZiskProver<Asm>> = Lazy::new(|| {
+    info!("Building prover (first call — will be cached for reuse)");
 
-// ASM microservices use TCP ports starting from a base port (default 23115).
-// Each setup() allocates 3 consecutive ports (MO, MT, RH). When two provers
-// coexist, they must use different base ports to avoid conflicts.
-const STARK_BASE_PORT: u16 = 23115; // default
-const SNARK_BASE_PORT: u16 = 23200; // offset to avoid overlap
+    // Register atexit handler to stop ASM microservices on process exit.
+    // Statics are never dropped in Rust, so without this the child processes
+    // (mo, mt, rh) would be orphaned.
+    unsafe { libc::atexit(shutdown_asm_on_exit) };
 
-// Per-ELF proving key + verification key caches.
-// Batch uses the STARK prover; aggregation ELFs use the SNARK prover.
-static BATCH_PK: OnceCell<(ZiskProgramPK, ZiskProgramVK)> = OnceCell::new();
-static AGG_PK: OnceCell<(ZiskProgramPK, ZiskProgramVK)> = OnceCell::new();
-static SHASTA_AGG_PK: OnceCell<(ZiskProgramPK, ZiskProgramVK)> = OnceCell::new();
+    let config = ZiskLocalConfig::from_env();
+    ProverClientBuilder::new()
+        .asm()
+        .prove()
+        .aggregation(true)
+        .snark()
+        .proving_key_path(config.proving_key)
+        .proving_key_snark_path(config.proving_key_snark)
+        .verbose(0)
+        .shared_tables(true)
+        .unlock_mapped_memory(false)
+        .print_command_info()
+        .build::<fields::Goldilocks>()
+        .expect("Failed to build prover")
+});
 
-fn cached_stark_prover(config: &ZiskLocalConfig) -> ProverResult<&'static ZiskProver<Asm>> {
-    STARK_PROVER.get_or_try_init(|| {
-        info!("Building STARK prover (first call — will be cached for reuse)");
-        ProverClientBuilder::new()
-            .asm()
-            .prove()
-            .aggregation(true)
-            .proving_key_path(config.proving_key.clone())
-            .proving_key_snark_path(config.proving_key_snark.clone())
-            .verbose(0)
-            .shared_tables(true)
-            .unlock_mapped_memory(false)
-            .base_port(STARK_BASE_PORT)
-            .print_command_info()
-            .build::<fields::Goldilocks>()
-            .map_err(|e| ProverError::GuestError(format!("Failed to build STARK prover: {e}")))
-    })
+fn setup_elf(elf_name: &str) -> (ZiskProgramPK, ZiskProgramVK) {
+    info!(
+        "Setting up {} (first call — includes ROM setup + ASM services)",
+        elf_name
+    );
+    let elf = elf_path(elf_name);
+    let elf_binary = ElfBinaryFromFile::new(&elf, false).expect("Failed to read ELF");
+    PROVER
+        .setup(&elf_binary)
+        .unwrap_or_else(|e| panic!("Failed to setup {elf_name}: {e}"))
 }
 
-fn cached_snark_prover(config: &ZiskLocalConfig) -> ProverResult<&'static ZiskProver<Asm>> {
-    SNARK_PROVER.get_or_try_init(|| {
-        info!("Building SNARK prover (first call — will be cached for reuse)");
-        ProverClientBuilder::new()
-            .asm()
-            .prove()
-            .aggregation(true)
-            .snark()
-            .proving_key_path(config.proving_key.clone())
-            .proving_key_snark_path(config.proving_key_snark.clone())
-            .verbose(0)
-            .shared_tables(true)
-            .unlock_mapped_memory(false)
-            .base_port(SNARK_BASE_PORT)
-            .print_command_info()
-            .build::<fields::Goldilocks>()
-            .map_err(|e| ProverError::GuestError(format!("Failed to build SNARK prover: {e}")))
-    })
-}
+// Per-ELF proving key (PK) + verification key (VK) caches.
+// Each Lazy triggers setup() on first access, starting ASM microservices
+// for that ELF. In production, get_guest_data() warms all 3 at startup.
+static BATCH_PK: Lazy<(ZiskProgramPK, ZiskProgramVK)> = Lazy::new(|| setup_elf("zisk-batch"));
+static AGG_PK: Lazy<(ZiskProgramPK, ZiskProgramVK)> = Lazy::new(|| setup_elf("zisk-aggregation"));
+static SHASTA_AGG_PK: Lazy<(ZiskProgramPK, ZiskProgramVK)> =
+    Lazy::new(|| setup_elf("zisk-shasta-aggregation"));
 
-fn cached_pk(
-    prover: &ZiskProver<Asm>,
-    elf_name: &str,
-) -> ProverResult<&'static (ZiskProgramPK, ZiskProgramVK)> {
-    let cache: &OnceCell<(ZiskProgramPK, ZiskProgramVK)> = match elf_name {
+fn cached_pk(elf_name: &str) -> &'static (ZiskProgramPK, ZiskProgramVK) {
+    match elf_name {
         "zisk-batch" => &BATCH_PK,
         "zisk-aggregation" => &AGG_PK,
         "zisk-shasta-aggregation" => &SHASTA_AGG_PK,
-        _ => return Err(ProverError::GuestError(format!("Unknown ELF: {elf_name}"))),
-    };
-    cache.get_or_try_init(|| {
-        info!(
-            "Setting up PK for {} (first call — will be cached, includes ROM setup if needed)",
-            elf_name
-        );
-        let elf = elf_path(elf_name);
-        let elf_binary = ElfBinaryFromFile::new(&elf, false)
-            .map_err(|e| ProverError::GuestError(format!("Failed to read ELF: {e}")))?;
-        prover
-            .setup(&elf_binary)
-            .map_err(|e| ProverError::GuestError(format!("Failed to setup {elf_name}: {e}")))
-    })
+        _ => panic!("Unknown ELF: {elf_name}"),
+    }
 }
 
 /// Get the vkey hex for an ELF, derived from the cached PK/VK.
-/// On first access this builds the prover and runs setup (incl. ROM setup).
-fn cached_vkey_hex(elf_name: &str) -> ProverResult<String> {
-    let config = ZiskLocalConfig::from_env();
-    let prover = match elf_name {
-        "zisk-batch" => cached_stark_prover(&config)?,
-        _ => cached_snark_prover(&config)?,
-    };
-    let (_pk, vk) = cached_pk(prover, elf_name)?;
-    Ok(format!("0x{}", hex::encode(&vk.vk)))
+/// In production, get_guest_data() warms all 3 ELFs at startup,
+/// so subsequent calls are just pointer dereferences.
+fn cached_vkey_hex(elf_name: &str) -> String {
+    let (_pk, vk) = cached_pk(elf_name);
+    format!("0x{}", hex::encode(&vk.vk))
+}
+
+// ---------------------------------------------------------------------------
+// Shutdown
+// ---------------------------------------------------------------------------
+
+extern "C" fn shutdown_asm_on_exit() {
+    shutdown_zisk();
+}
+
+/// Stop ASM microservices for all initialized ELF proving keys.
+/// Called automatically via atexit, but can also be called explicitly
+/// for graceful server shutdown.
+pub fn shutdown_zisk() {
+    info!("Stopping Zisk ASM microservices");
+    for (name, pk_lazy) in [
+        (
+            "zisk-batch",
+            &BATCH_PK as &Lazy<(ZiskProgramPK, ZiskProgramVK)>,
+        ),
+        ("zisk-aggregation", &AGG_PK),
+        ("zisk-shasta-aggregation", &SHASTA_AGG_PK),
+    ] {
+        // Lazy::get returns None if the static was never initialized,
+        // avoiding an expensive setup_elf call at exit time.
+        if let Some((pk, _vk)) = Lazy::get(pk_lazy) {
+            if let Some(asm) = &pk.asm_services {
+                info!("Stopping ASM services for {name}");
+                if let Err(e) = asm.stop_asm_services() {
+                    tracing::error!("Failed to stop ASM services for {name}: {e}");
+                }
+            }
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -171,23 +182,19 @@ fn save_input(elf_name: &str, serialized_input: &[u8], config: &ZiskLocalConfig)
     );
 }
 
-fn prove_stark(
-    elf_name: &str,
-    serialized_input: Vec<u8>,
-    config: &ZiskLocalConfig,
-) -> ProverResult<ZiskProveResult> {
+fn prove_stark(elf_name: &str, serialized_input: Vec<u8>) -> ProverResult<ZiskProveResult> {
+    let config = ZiskLocalConfig::from_env();
     info!("Using ELF at {:?}", elf_path(elf_name));
-    save_input(elf_name, &serialized_input, config);
+    save_input(elf_name, &serialized_input, &config);
 
-    let prover = cached_stark_prover(config)?;
-    let (pk, _vk) = cached_pk(prover, elf_name)?;
+    let (pk, _vk) = cached_pk(elf_name);
 
     let stdin = zisk_common::io::ZiskStdin::from_vec(serialized_input);
     let proof_opts = ProofOpts::default()
-        .output_dir(config.output_dir.clone())
+        .output_dir(config.output_dir)
         .verify_proofs();
 
-    let result = prover
+    let result = PROVER
         .prove(pk, stdin)
         .with_proof_options(proof_opts)
         .run()
@@ -199,20 +206,19 @@ fn prove_stark(
 fn prove_stark_with_snark(
     elf_name: &str,
     serialized_input: Vec<u8>,
-    config: &ZiskLocalConfig,
 ) -> ProverResult<ZiskProveResult> {
+    let config = ZiskLocalConfig::from_env();
     info!("Using ELF at {:?}", elf_path(elf_name));
-    save_input(elf_name, &serialized_input, config);
+    save_input(elf_name, &serialized_input, &config);
 
-    let prover = cached_snark_prover(config)?;
-    let (pk, _vk) = cached_pk(prover, elf_name)?;
+    let (pk, _vk) = cached_pk(elf_name);
 
     let stdin = zisk_common::io::ZiskStdin::from_vec(serialized_input);
     let proof_opts = ProofOpts::default()
-        .output_dir(config.output_dir.clone())
+        .output_dir(config.output_dir)
         .verify_proofs();
 
-    let result = prover
+    let result = PROVER
         .prove(pk, stdin)
         .plonk()
         .with_proof_options(proof_opts)
@@ -315,9 +321,8 @@ impl ZiskAgentProver {
 
         let output_hash = output.hash;
         let proof = tokio::task::spawn_blocking(move || {
-            let batch_vkey = cached_vkey_hex("zisk-batch")?;
-            let config = ZiskLocalConfig::from_env();
-            let result = prove_stark("zisk-batch", serialized_input, &config)?;
+            let batch_vkey = cached_vkey_hex("zisk-batch");
+            let result = prove_stark("zisk-batch", serialized_input)?;
             stark_proof_to_raiko_proof(&result, output_hash, Some(batch_vkey))
         })
         .await
@@ -346,7 +351,7 @@ impl ZiskAgentProver {
             })
             .collect::<ProverResult<Vec<_>>>()?;
 
-        let batch_vkey = cached_vkey_hex("zisk-batch")?;
+        let batch_vkey = cached_vkey_hex("zisk-batch");
         let zisk_input = ZkAggregationGuestInput {
             image_id: vkey_to_image_id(&batch_vkey),
             block_inputs,
@@ -357,9 +362,8 @@ impl ZiskAgentProver {
 
         let output_hash = output.hash;
         let proof = tokio::task::spawn_blocking(move || {
-            let agg_vkey = cached_vkey_hex("zisk-aggregation")?;
-            let config = ZiskLocalConfig::from_env();
-            let result = prove_stark_with_snark("zisk-aggregation", serialized_input, &config)?;
+            let agg_vkey = cached_vkey_hex("zisk-aggregation");
+            let result = prove_stark_with_snark("zisk-aggregation", serialized_input)?;
             snark_proof_to_raiko_proof(&result, output_hash, Some(agg_vkey))
         })
         .await
@@ -420,7 +424,7 @@ impl ZiskAgentProver {
             }
         }
 
-        let batch_vkey = cached_vkey_hex("zisk-batch")?;
+        let batch_vkey = cached_vkey_hex("zisk-batch");
         let shasta_input = ShastaZiskAggregationGuestInput {
             image_id: vkey_to_image_id(&batch_vkey),
             block_inputs,
@@ -433,10 +437,8 @@ impl ZiskAgentProver {
 
         let output_hash = output.hash;
         let proof = tokio::task::spawn_blocking(move || {
-            let shasta_vkey = cached_vkey_hex("zisk-shasta-aggregation")?;
-            let config = ZiskLocalConfig::from_env();
-            let result =
-                prove_stark_with_snark("zisk-shasta-aggregation", serialized_input, &config)?;
+            let shasta_vkey = cached_vkey_hex("zisk-shasta-aggregation");
+            let result = prove_stark_with_snark("zisk-shasta-aggregation", serialized_input)?;
             snark_proof_to_raiko_proof(&result, output_hash, Some(shasta_vkey))
         })
         .await
@@ -460,9 +462,9 @@ impl Prover for ZiskAgentProver {
         // This initializes provers + runs ROM setup on first call.
         // All subsequent calls return cached results instantly.
         let data = tokio::task::spawn_blocking(|| -> ProverResult<serde_json::Value> {
-            let batch_vkey = cached_vkey_hex("zisk-batch")?;
-            let agg_vkey = cached_vkey_hex("zisk-aggregation")?;
-            let shasta_agg_vkey = cached_vkey_hex("zisk-shasta-aggregation")?;
+            let batch_vkey = cached_vkey_hex("zisk-batch");
+            let agg_vkey = cached_vkey_hex("zisk-aggregation");
+            let shasta_agg_vkey = cached_vkey_hex("zisk-shasta-aggregation");
             Ok(json!({
                 "zisk": {
                     "batch_vkey": batch_vkey,
