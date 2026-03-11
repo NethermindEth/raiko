@@ -724,7 +724,6 @@ async fn new_raiko_for_realtime_request(
     // prepare_taiko_chain_batch_input_realtime during guest-input generation.
     let realtime_event_data = RealTimeEventData {
         proposal: RealTimeProposal {
-            parentProposalHash: *entity.parent_proposal_hash(),
             maxAnchorBlockNumber: Uint::from(*entity.max_anchor_block_number()),
             maxAnchorBlockHash: B256::ZERO,
             basefeeSharingPctg: *entity.basefee_sharing_pctg(),
@@ -732,6 +731,7 @@ async fn new_raiko_for_realtime_request(
             signalSlotsHash: B256::ZERO,
         },
         signal_slots: entity.signal_slots().clone(),
+        last_finalized_block_hash: *entity.last_finalized_block_hash(),
     };
 
     let proof_request = ProofRequest {

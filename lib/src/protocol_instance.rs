@@ -303,10 +303,11 @@ impl BlockMetaDataFork {
     }
 }
 
-/// RealTime transition data: proposal hash + checkpoint (no aggregation).
+/// RealTime transition data: proposal hash + last finalized block hash + checkpoint (no aggregation).
 #[derive(Debug, Clone)]
 pub struct RealTimeTransitionData {
     pub proposal_hash: B256,
+    pub last_finalized_block_hash: B256,
     pub checkpoint: Checkpoint,
 }
 
@@ -804,8 +805,14 @@ impl ProtocolInstance {
                 )
                 .into();
 
+                // last_finalized_block_hash = parent block hash of the first L2 block
+                // This binds the proof to the correct starting state.
+                let last_finalized_block_hash =
+                    batch_input.inputs[0].parent_header.hash_slow();
+
                 TransitionFork::RealTime(RealTimeTransitionData {
                     proposal_hash,
+                    last_finalized_block_hash,
                     checkpoint,
                 })
             }
@@ -915,11 +922,12 @@ impl ProtocolInstance {
                 })
             }
             TransitionFork::RealTime(rt) => {
-                // commitmentHash = keccak256(abi.encode(proposalHash, blockNumber, blockHash, stateRoot))
+                // commitmentHash = keccak256(abi.encode(proposalHash, lastFinalizedBlockHash, blockNumber, blockHash, stateRoot))
                 // This is the value passed to verifyProof(0, commitmentHash, proof).
                 keccak(
                     (
                         rt.proposal_hash,
+                        rt.last_finalized_block_hash,
                         rt.checkpoint.blockNumber,
                         rt.checkpoint.blockHash,
                         rt.checkpoint.stateRoot,

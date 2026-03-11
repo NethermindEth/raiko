@@ -90,7 +90,7 @@ async fn report_handler(State(actor): State<Actor>) -> HostResult<Json<Value>> {
                 l2_block_numbers: key.l2_block_numbers().clone(),
                 l1_network: key.l1_network().clone(),
                 l2_network: key.l2_network().clone(),
-                parent_proposal_hash: *key.parent_proposal_hash(),
+                last_finalized_block_hash: *key.last_finalized_block_hash(),
             })
         }
         RequestKey::RealTimeProof(key) => {
@@ -98,7 +98,7 @@ async fn report_handler(State(actor): State<Actor>) -> HostResult<Json<Value>> {
                 l2_block_numbers: key.guest_input_key().l2_block_numbers().clone(),
                 l1_network: key.guest_input_key().l1_network().clone(),
                 l2_network: key.guest_input_key().l2_network().clone(),
-                parent_proposal_hash: *key.guest_input_key().parent_proposal_hash(),
+                last_finalized_block_hash: *key.guest_input_key().last_finalized_block_hash(),
                 proof_system: *key.proof_type(),
                 prover: key.actual_prover_address().clone(),
             })

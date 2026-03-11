@@ -30,9 +30,8 @@ sol! {
     #[derive(Debug, Default, Deserialize, Serialize)]
     /// @notice Represents a RealTime proposal (transient, never stored on-chain).
     /// Maps to IRealTimeInbox.Proposal.
+    /// No parent linkage — state continuity is enforced via Commitment.lastFinalizedBlockHash.
     struct RealTimeProposal {
-        /// @notice Hash of the parent proposal (zero for genesis).
-        bytes32 parentProposalHash;
         /// @notice The highest L1 block the L2 derivation references.
         uint48 maxAnchorBlockNumber;
         /// @notice The hash of the max anchor block.
@@ -51,6 +50,8 @@ sol! {
     struct RealTimeCommitment {
         /// @notice The hash of the proposal being proven.
         bytes32 proposalHash;
+        /// @notice Block hash of last finalized L2 block (proof starting state).
+        bytes32 lastFinalizedBlockHash;
         /// @notice The checkpoint after executing the proposal.
         Checkpoint checkpoint;
     }
@@ -59,11 +60,11 @@ sol! {
     /// @notice Emitted after atomic propose+prove on RealTimeInbox.
     event ProposedAndProved(
         bytes32 indexed proposalHash,
-        bytes32 parentProposalHash,
+        bytes32 lastFinalizedBlockHash,
         uint48 maxAnchorBlockNumber,
         uint8 basefeeSharingPctg,
         DerivationSource[] sources,
-        bytes32 signalSlotsHash,
+        bytes32[] signalSlots,
         Checkpoint checkpoint
     );
 }
@@ -74,4 +75,7 @@ pub struct RealTimeEventData {
     pub proposal: RealTimeProposal,
     /// Raw signal slots, needed for hash verification.
     pub signal_slots: Vec<B256>,
+    /// Block hash of last finalized L2 block (proof starting state).
+    /// Comes from on-chain `lastFinalizedBlockHash`, not from the proposal.
+    pub last_finalized_block_hash: B256,
 }

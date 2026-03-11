@@ -858,8 +858,8 @@ pub struct RealTimeProofRequest {
     /// L1 signal slots to relay
     #[serde(default)]
     pub signal_slots: Vec<B256>,
-    /// Hash of the parent proposal (from getLastProposalHash())
-    pub parent_proposal_hash: B256,
+    /// Block hash of last finalized L2 block (from getLastFinalizedBlockHash())
+    pub last_finalized_block_hash: B256,
     /// Percentage of basefee paid to coinbase
     pub basefee_sharing_pctg: u8,
     /// Derivation sources for blob data
@@ -888,7 +888,8 @@ pub struct RealTimeProofRequestOpt {
     pub max_anchor_block_number: u64,
     #[serde(default)]
     pub signal_slots: Vec<B256>,
-    pub parent_proposal_hash: B256,
+    /// Block hash of last finalized L2 block (from getLastFinalizedBlockHash())
+    pub last_finalized_block_hash: B256,
     pub basefee_sharing_pctg: u8,
     #[serde(default)]
     pub sources: Vec<DerivationSource>,
@@ -933,7 +934,7 @@ impl TryFrom<RealTimeProofRequestOpt> for RealTimeProofRequest {
                 .into(),
             max_anchor_block_number: value.max_anchor_block_number,
             signal_slots: value.signal_slots,
-            parent_proposal_hash: value.parent_proposal_hash,
+            last_finalized_block_hash: value.last_finalized_block_hash,
             basefee_sharing_pctg: value.basefee_sharing_pctg,
             sources: value.sources,
             checkpoint: value.checkpoint,

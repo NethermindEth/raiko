@@ -376,8 +376,10 @@ impl BlockProposedFork {
     pub fn parent_proposal_hash(&self) -> B256 {
         match self {
             BlockProposedFork::Shasta(event_data) => event_data.proposal.parentProposalHash,
-            BlockProposedFork::RealTime(event_data) => {
-                event_data.proposal.parentProposalHash
+            BlockProposedFork::RealTime(_) => {
+                // RealTime proposals have no parent linkage; state continuity
+                // is enforced via Commitment.lastFinalizedBlockHash instead.
+                B256::ZERO
             }
             _ => B256::ZERO,
         }

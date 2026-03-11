@@ -183,7 +183,7 @@ pub struct RealTimeGuestInputTaskDescriptor {
     pub l2_block_numbers: Vec<u64>,
     pub l1_network: String,
     pub l2_network: String,
-    pub parent_proposal_hash: B256,
+    pub last_finalized_block_hash: B256,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -192,7 +192,7 @@ pub struct RealTimeProofTaskDescriptor {
     pub l2_block_numbers: Vec<u64>,
     pub l1_network: String,
     pub l2_network: String,
-    pub parent_proposal_hash: B256,
+    pub last_finalized_block_hash: B256,
     pub proof_system: ProofType,
     pub prover: String,
 }

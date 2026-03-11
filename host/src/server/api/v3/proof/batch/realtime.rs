@@ -19,7 +19,7 @@ fn create_realtime_requests(
         request.l2_block_numbers.clone(),
         request.l1_network.clone(),
         request.network.clone(),
-        request.parent_proposal_hash,
+        request.last_finalized_block_hash,
     ));
 
     let actual_prover_address = request.prover.to_string();
@@ -29,7 +29,7 @@ fn create_realtime_requests(
                 request.l2_block_numbers.clone(),
                 request.l1_network.clone(),
                 request.network.clone(),
-                request.parent_proposal_hash,
+                request.last_finalized_block_hash,
             ),
             request.proof_type,
             actual_prover_address,
@@ -44,7 +44,7 @@ fn create_realtime_requests(
         request.blob_proof_type.clone(),
         request.max_anchor_block_number,
         request.signal_slots.clone(),
-        request.parent_proposal_hash,
+        request.last_finalized_block_hash,
         request.basefee_sharing_pctg,
         request.checkpoint.clone(),
         request.sources.clone(),

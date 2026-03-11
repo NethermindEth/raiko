@@ -427,8 +427,8 @@ pub struct RealTimeInputRequestKey {
     l1_network: String,
     /// The L2 network of the request
     l2_network: String,
-    /// The parent proposal hash (identifies the chain position)
-    parent_proposal_hash: B256,
+    /// Block hash of last finalized L2 block (identifies the chain position)
+    last_finalized_block_hash: B256,
 }
 
 impl RealTimeInputRequestKey {
@@ -436,13 +436,13 @@ impl RealTimeInputRequestKey {
         l2_block_numbers: Vec<u64>,
         l1_network: String,
         l2_network: String,
-        parent_proposal_hash: B256,
+        last_finalized_block_hash: B256,
     ) -> Self {
         Self {
             l2_block_numbers,
             l1_network,
             l2_network,
-            parent_proposal_hash,
+            last_finalized_block_hash,
         }
     }
 }
@@ -951,8 +951,8 @@ pub struct RealTimeInputRequestEntity {
     max_anchor_block_number: u64,
     /// L1 signal slots to relay
     signal_slots: Vec<B256>,
-    /// Hash of the parent proposal
-    parent_proposal_hash: B256,
+    /// Block hash of last finalized L2 block
+    last_finalized_block_hash: B256,
     /// Percentage of basefee paid to coinbase
     basefee_sharing_pctg: u8,
     /// Derivation sources for blob data
@@ -970,7 +970,7 @@ impl RealTimeInputRequestEntity {
         blob_proof_type: BlobProofType,
         max_anchor_block_number: u64,
         signal_slots: Vec<B256>,
-        parent_proposal_hash: B256,
+        last_finalized_block_hash: B256,
         basefee_sharing_pctg: u8,
         checkpoint: Option<ShastaProposalCheckpoint>,
         sources: Vec<DerivationSource>,
@@ -983,7 +983,7 @@ impl RealTimeInputRequestEntity {
             blob_proof_type,
             max_anchor_block_number,
             signal_slots,
-            parent_proposal_hash,
+            last_finalized_block_hash,
             basefee_sharing_pctg,
             checkpoint,
             sources,
