@@ -52,7 +52,7 @@ enable = [
     "serde",
     "serde_json",
     "raiko-lib",
-    "sp1-sdk/cuda",
+    "sp1-sdk",
     "sp1-prover",
     "sp1-primitives",
     "anyhow",
@@ -67,6 +67,7 @@ enable = [
     "tokio",
     "tracing",
 ]
+cuda = ["sp1-sdk/cuda"]
 foundry-verify = []
 enable-verifier = []
 network = ["sp1-sdk/network"]

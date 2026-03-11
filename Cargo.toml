@@ -99,7 +99,7 @@ risc0-binfmt = { version = "=3.0.4" }
 risc0-zkos-v1compat = { version = "=2.2.2" }
 
 # SP1
-sp1-sdk = { version = "6.0.0", features = ["cuda"] }
+sp1-sdk = { version = "6.0.0" }
 sp1-prover = { version = "6.0.0" }
 sp1-zkvm = { version = "6.0.0" }
 sp1-helper = { version = "6.0.0" }
