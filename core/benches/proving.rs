@@ -123,17 +123,16 @@ fn main() {
     let args: Vec<String> = env::args().collect();
     let rt = build_runtime();
 
-    let run_all = args.len() == 1;
     let bench_name = args.get(1).map(|s| s.as_str());
 
-    if run_all || bench_name == Some("batch") {
+    if bench_name == Some("all") || bench_name == Some("batch") {
         bench_batch_run(&rt);
     }
-    if run_all || bench_name == Some("aggregate") {
+    if bench_name == Some("all") || bench_name == Some("aggregate") {
         bench_shasta_aggregate(&rt);
     }
 
-    if !run_all && bench_name != Some("batch") && bench_name != Some("aggregate") {
+    if bench_name != Some("all") && bench_name != Some("batch") && bench_name != Some("aggregate") {
         eprintln!("Usage: proving [batch|aggregate]");
         eprintln!("  No argument runs both benchmarks.");
         eprintln!();

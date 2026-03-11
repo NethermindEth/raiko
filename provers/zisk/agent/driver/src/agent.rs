@@ -140,28 +140,38 @@ extern "C" fn shutdown_asm_on_exit() {
     shutdown_zisk();
 }
 
-/// Stop ASM microservices for all initialized ELF proving keys.
+/// Stop ASM microservices by killing processes on the known ports.
 /// Called automatically via atexit, but can also be called explicitly
 /// for graceful server shutdown.
+///
+/// We don't use zisk's `stop_asm_services()` because it calls
+/// `tracing::info!` internally, which panics on TLS access during atexit.
+/// Instead we kill the processes directly via `fuser`.
+///
+/// Port assignment in zisk SDK depends on the order of setup() calls,
+/// not a fixed mapping. With up to 3 setups × 3 services (mo/mt/rh),
+/// we scan the full range BASE_PORT..BASE_PORT+9 and kill anything listening.
 pub fn shutdown_zisk() {
-    info!("Stopping Zisk ASM microservices");
-    for (name, pk_lazy) in [
-        (
-            "zisk-batch",
-            &BATCH_PK as &Lazy<(ZiskProgramPK, ZiskProgramVK)>,
-        ),
-        ("zisk-aggregation", &AGG_PK),
-        ("zisk-shasta-aggregation", &SHASTA_AGG_PK),
-    ] {
-        // Lazy::get returns None if the static was never initialized,
-        // avoiding an expensive setup_elf call at exit time.
-        if let Some((pk, _vk)) = Lazy::get(pk_lazy) {
-            if let Some(asm) = &pk.asm_services {
-                info!("Stopping ASM services for {name}");
-                if let Err(e) = asm.stop_asm_services() {
-                    tracing::error!("Failed to stop ASM services for {name}: {e}");
-                }
-            }
+    eprintln!("[zisk] Stopping ASM microservices");
+    // ASM service ports from zisk SDK's AsmServices:
+    //   base_port = 23115 (ASM_SERVICE_BASE_PORT)
+    //   Each setup() allocates 3 consecutive ports (mo +0, mt +1, rh +2)
+    //   Max 3 setups (batch, aggregation, shasta) = 9 ports total
+    const BASE_PORT: u16 = 23115;
+    const MAX_SETUPS: u16 = 3;
+    const SERVICES_PER_SETUP: u16 = 3; // mo, mt, rh
+    const SERVICE_NAMES: [&str; 3] = ["mo", "mt", "rh"];
+
+    for i in 0..(MAX_SETUPS * SERVICES_PER_SETUP) {
+        let port = BASE_PORT + i;
+        if std::net::TcpStream::connect(format!("127.0.0.1:{port}")).is_ok() {
+            let svc_name = SERVICE_NAMES[(i % SERVICES_PER_SETUP) as usize];
+            let _ = std::process::Command::new("fuser")
+                .args(["-k", &format!("{port}/tcp")])
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null())
+                .status();
+            eprintln!("[zisk] Killed {svc_name} service on port {port}");
         }
     }
 }
