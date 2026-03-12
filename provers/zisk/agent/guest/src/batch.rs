@@ -2,6 +2,7 @@
 ziskos::entrypoint!(main);
 
 mod precompile_shims;
+mod ruint_shims;
 
 use raiko_lib::{
     builder::calculate_batch_blocks_final_header, input::GuestBatchInput, proof_type::ProofType,

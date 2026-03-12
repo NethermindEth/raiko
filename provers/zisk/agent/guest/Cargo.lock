@@ -50,7 +50,7 @@ dependencies = [
 [[package]]
 name = "alethia-reth-block"
 version = "0.6.0"
-source = "git+https://github.com/NethermindEth/alethia-reth.git?branch=main#5154271d90ce0ecc172987dd2fc51c24bb553108"
+source = "git+https://github.com/NethermindEth/alethia-reth.git?branch=main#1599bbf099702592b8f4e09757f2d26bd041d373"
 dependencies = [
  "alethia-reth-chainspec",
  "alethia-reth-consensus",
@@ -82,7 +82,7 @@ dependencies = [
 [[package]]
 name = "alethia-reth-chainspec"
 version = "0.6.0"
-source = "git+https://github.com/NethermindEth/alethia-reth.git?branch=main#5154271d90ce0ecc172987dd2fc51c24bb553108"
+source = "git+https://github.com/NethermindEth/alethia-reth.git?branch=main#1599bbf099702592b8f4e09757f2d26bd041d373"
 dependencies = [
  "alloy-chains",
  "alloy-consensus",
@@ -105,7 +105,7 @@ dependencies = [
 [[package]]
 name = "alethia-reth-consensus"
 version = "0.6.0"
-source = "git+https://github.com/NethermindEth/alethia-reth.git?branch=main#5154271d90ce0ecc172987dd2fc51c24bb553108"
+source = "git+https://github.com/NethermindEth/alethia-reth.git?branch=main#1599bbf099702592b8f4e09757f2d26bd041d373"
 dependencies = [
  "alethia-reth-chainspec",
  "alethia-reth-evm",
@@ -132,7 +132,7 @@ dependencies = [
 [[package]]
 name = "alethia-reth-evm"
 version = "0.6.0"
-source = "git+https://github.com/NethermindEth/alethia-reth.git?branch=main#5154271d90ce0ecc172987dd2fc51c24bb553108"
+source = "git+https://github.com/NethermindEth/alethia-reth.git?branch=main#1599bbf099702592b8f4e09757f2d26bd041d373"
 dependencies = [
  "alloy-evm",
  "alloy-primitives",
@@ -148,7 +148,7 @@ dependencies = [
 [[package]]
 name = "alethia-reth-primitives"
 version = "0.6.0"
-source = "git+https://github.com/NethermindEth/alethia-reth.git?branch=main#5154271d90ce0ecc172987dd2fc51c24bb553108"
+source = "git+https://github.com/NethermindEth/alethia-reth.git?branch=main#1599bbf099702592b8f4e09757f2d26bd041d373"
 dependencies = [
  "alethia-reth-chainspec",
  "alethia-reth-consensus",
@@ -182,9 +182,9 @@ checksum = "683d7910e743518b0e34f1186f92494becacb047c7b6bf616c96772180fef923"
 
 [[package]]
 name = "alloy-chains"
-version = "0.2.30"
+version = "0.2.31"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "90f374d3c6d729268bbe2d0e0ff992bb97898b2df756691a62ee1d5f0506bc39"
+checksum = "6d9d22005bf31b018f31ef9ecadb5d2c39cf4f6acc8db0456f72c815f3d7f757"
 dependencies = [
  "alloy-primitives",
  "alloy-rlp",
@@ -717,13 +717,12 @@ dependencies = [
 
 [[package]]
 name = "alloy-trie"
-version = "0.9.4"
+version = "0.9.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4d7fd448ab0a017de542de1dcca7a58e7019fe0e7a34ed3f9543ebddf6aceffa"
+checksum = "3f14b5d9b2c2173980202c6ff470d96e7c5e202c65a9f67884ad565226df7fbb"
 dependencies = [
  "alloy-primitives",
  "alloy-rlp",
- "arrayvec",
  "derive_more",
  "nybbles",
  "serde",
@@ -1096,9 +1095,6 @@ name = "arrayvec"
 version = "0.7.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7c02d123df017efcdfbd739ef81735b36c5ba83ec3c59c80a9d7ecc718f92e50"
-dependencies = [
- "serde",
-]
 
 [[package]]
 name = "asn1-rs"
@@ -1257,7 +1253,7 @@ dependencies = [
  "bitflags",
  "cexpr",
  "clang-sys",
- "itertools 0.10.5",
+ "itertools 0.12.1",
  "lazy_static",
  "lazycell",
  "proc-macro2",
@@ -1800,7 +1796,7 @@ dependencies = [
 [[package]]
 name = "curves"
 version = "0.16.0"
-source = "git+https://github.com/0xPolygonHermez/pil2-proofman.git?branch=pre-develop-0.16.0#98d42f020b419b71f3995a5f6f314abd4d32992c"
+source = "git+https://github.com/0xPolygonHermez/pil2-proofman.git?branch=pre-develop-0.16.0#620e7c89f39ee2b608bd0f5d43765dc89728ff67"
 dependencies = [
  "fields",
  "num-bigint 0.4.6",
@@ -2268,7 +2264,7 @@ dependencies = [
 [[package]]
 name = "fields"
 version = "0.16.0"
-source = "git+https://github.com/0xPolygonHermez/pil2-proofman.git?branch=pre-develop-0.16.0#98d42f020b419b71f3995a5f6f314abd4d32992c"
+source = "git+https://github.com/0xPolygonHermez/pil2-proofman.git?branch=pre-develop-0.16.0#620e7c89f39ee2b608bd0f5d43765dc89728ff67"
 dependencies = [
  "cfg-if",
  "num-bigint 0.4.6",
@@ -2830,6 +2826,15 @@ dependencies = [
 
 [[package]]
 name = "itertools"
+version = "0.12.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ba291022dbbd398a455acf126c1e341954079855bc60dfdda641363bd6922569"
+dependencies = [
+ "either",
+]
+
+[[package]]
+name = "itertools"
 version = "0.13.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "413ee7dfc52ee1a4949ceeb7dbc8a33f2d6c088194d9f922fb8318faf1f01186"
@@ -2897,7 +2902,6 @@ dependencies = [
 [[package]]
 name = "k256"
 version = "0.13.4"
-source = "git+https://github.com/0xPolygonHermez/zisk-patch-elliptic-curves.git?tag=patch-k256-0.13.4-zisk-0.15.0#5b84980888f6c840c7d38d575d79ae32df17085d"
 dependencies = [
  "cfg-if",
  "ecdsa",
@@ -2968,9 +2972,9 @@ source = "git+https://github.com/0xPolygonHermez/zisk.git?rev=6668726#66687264d2
 
 [[package]]
 name = "libc"
-version = "0.2.182"
+version = "0.2.183"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6800badb6cb2082ffd7b6a67e6125bb39f18782f793520caee8cb8846be06112"
+checksum = "b5b646652bf6661599e1da8901b3b9522896f01e736bad5f723fe7a3a27f899d"
 
 [[package]]
 name = "libffi"
@@ -3418,9 +3422,9 @@ dependencies = [
 
 [[package]]
 name = "once_cell"
-version = "1.21.3"
+version = "1.21.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "42f5e15c9953c5e4ccceeb2e7382a716482c34515315f7b03532b8b4e8393d2d"
+checksum = "9f7c3e4beb33f85d45ae3e3a1792185706c8e16d043238c593331cc7cd313b50"
 dependencies = [
  "critical-section",
  "portable-atomic",
@@ -3703,7 +3707,7 @@ dependencies = [
 [[package]]
 name = "pil-std-lib"
 version = "0.16.0"
-source = "git+https://github.com/0xPolygonHermez/pil2-proofman.git?branch=pre-develop-0.16.0#98d42f020b419b71f3995a5f6f314abd4d32992c"
+source = "git+https://github.com/0xPolygonHermez/pil2-proofman.git?branch=pre-develop-0.16.0#620e7c89f39ee2b608bd0f5d43765dc89728ff67"
 dependencies = [
  "colored",
  "fields",
@@ -3923,7 +3927,7 @@ dependencies = [
 [[package]]
 name = "proofman"
 version = "0.16.0"
-source = "git+https://github.com/0xPolygonHermez/pil2-proofman.git?branch=pre-develop-0.16.0#98d42f020b419b71f3995a5f6f314abd4d32992c"
+source = "git+https://github.com/0xPolygonHermez/pil2-proofman.git?branch=pre-develop-0.16.0#620e7c89f39ee2b608bd0f5d43765dc89728ff67"
 dependencies = [
  "bincode",
  "blake3",
@@ -3958,7 +3962,7 @@ dependencies = [
 [[package]]
 name = "proofman-common"
 version = "0.16.0"
-source = "git+https://github.com/0xPolygonHermez/pil2-proofman.git?branch=pre-develop-0.16.0#98d42f020b419b71f3995a5f6f314abd4d32992c"
+source = "git+https://github.com/0xPolygonHermez/pil2-proofman.git?branch=pre-develop-0.16.0#620e7c89f39ee2b608bd0f5d43765dc89728ff67"
 dependencies = [
  "bincode",
  "borsh",
@@ -3989,7 +3993,7 @@ dependencies = [
 [[package]]
 name = "proofman-hints"
 version = "0.16.0"
-source = "git+https://github.com/0xPolygonHermez/pil2-proofman.git?branch=pre-develop-0.16.0#98d42f020b419b71f3995a5f6f314abd4d32992c"
+source = "git+https://github.com/0xPolygonHermez/pil2-proofman.git?branch=pre-develop-0.16.0#620e7c89f39ee2b608bd0f5d43765dc89728ff67"
 dependencies = [
  "fields",
  "itoa",
@@ -4002,7 +4006,7 @@ dependencies = [
 [[package]]
 name = "proofman-macros"
 version = "0.16.0"
-source = "git+https://github.com/0xPolygonHermez/pil2-proofman.git?branch=pre-develop-0.16.0#98d42f020b419b71f3995a5f6f314abd4d32992c"
+source = "git+https://github.com/0xPolygonHermez/pil2-proofman.git?branch=pre-develop-0.16.0#620e7c89f39ee2b608bd0f5d43765dc89728ff67"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -4012,7 +4016,7 @@ dependencies = [
 [[package]]
 name = "proofman-starks-lib-c"
 version = "0.16.0"
-source = "git+https://github.com/0xPolygonHermez/pil2-proofman.git?branch=pre-develop-0.16.0#98d42f020b419b71f3995a5f6f314abd4d32992c"
+source = "git+https://github.com/0xPolygonHermez/pil2-proofman.git?branch=pre-develop-0.16.0#620e7c89f39ee2b608bd0f5d43765dc89728ff67"
 dependencies = [
  "crossbeam-channel",
  "tracing",
@@ -4021,7 +4025,7 @@ dependencies = [
 [[package]]
 name = "proofman-util"
 version = "0.16.0"
-source = "git+https://github.com/0xPolygonHermez/pil2-proofman.git?branch=pre-develop-0.16.0#98d42f020b419b71f3995a5f6f314abd4d32992c"
+source = "git+https://github.com/0xPolygonHermez/pil2-proofman.git?branch=pre-develop-0.16.0#620e7c89f39ee2b608bd0f5d43765dc89728ff67"
 dependencies = [
  "bincode",
  "bytemuck",
@@ -4033,7 +4037,7 @@ dependencies = [
 [[package]]
 name = "proofman-verifier"
 version = "0.16.0"
-source = "git+https://github.com/0xPolygonHermez/pil2-proofman.git?branch=pre-develop-0.16.0#98d42f020b419b71f3995a5f6f314abd4d32992c"
+source = "git+https://github.com/0xPolygonHermez/pil2-proofman.git?branch=pre-develop-0.16.0#620e7c89f39ee2b608bd0f5d43765dc89728ff67"
 dependencies = [
  "bytemuck",
  "fields",
@@ -5329,9 +5333,8 @@ dependencies = [
 
 [[package]]
 name = "ruint"
-version = "1.17.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c141e807189ad38a07276942c6623032d3753c8859c146104ac2e4d68865945a"
+version = "1.17.0"
+source = "git+https://github.com/0xPolygonHermez/zisk-patch-ruint.git?tag=patch-1.17.0-zisk-0.15.0#8df6ff4ea97c12df27cda57f564521eb11d9afb0"
 dependencies = [
  "alloy-rlp",
  "ark-ff 0.3.0",
@@ -5358,8 +5361,7 @@ dependencies = [
 [[package]]
 name = "ruint-macro"
 version = "1.2.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "48fd7bd8a6377e15ad9d42a8ec25371b94ddc67abe7c8b9127bec79bebaaae18"
+source = "git+https://github.com/0xPolygonHermez/zisk-patch-ruint.git?tag=patch-1.17.0-zisk-0.15.0#8df6ff4ea97c12df27cda57f564521eb11d9afb0"
 
 [[package]]
 name = "rust-kzg-zkcrypto"
@@ -6043,9 +6045,9 @@ checksum = "55937e1799185b12863d447f42597ed69d9928686b8d88a1df17376a097d8369"
 
 [[package]]
 name = "tempfile"
-version = "3.26.0"
+version = "3.27.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "82a72c767771b47409d2345987fda8628641887d5466101319899796367354a0"
+checksum = "32497e9a4c7b38532efcdebeef879707aa9f794296a4f0244f6f69e9bc8574bd"
 dependencies = [
  "fastrand",
  "getrandom 0.4.2",
@@ -6499,9 +6501,9 @@ dependencies = [
 
 [[package]]
 name = "uuid"
-version = "1.21.0"
+version = "1.22.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b672338555252d43fd2240c714dc444b8c6fb0a5c5335e65a07bba7742735ddb"
+checksum = "a68d3c8f01c0cfa54a75291d83601161799e4a89a39e0929f4b0354d88757a37"
 dependencies = [
  "js-sys",
  "wasm-bindgen",
@@ -7077,9 +7079,9 @@ checksum = "d6bbff5f0aada427a1e5a6da5f1f98158182f26556f345ac9e04d36d0ebed650"
 
 [[package]]
 name = "winnow"
-version = "0.7.14"
+version = "0.7.15"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5a5364e9d77fcdeeaa6062ced926ee3381faa2ee02d3eb83a5c27a8825540829"
+checksum = "df79d97927682d2fd8adb29682d1140b343be4ac0f08fd68b7765d9c059d3945"
 dependencies = [
  "memchr",
 ]
@@ -7175,7 +7177,7 @@ dependencies = [
 [[package]]
 name = "witness"
 version = "0.16.0"
-source = "git+https://github.com/0xPolygonHermez/pil2-proofman.git?branch=pre-develop-0.16.0#98d42f020b419b71f3995a5f6f314abd4d32992c"
+source = "git+https://github.com/0xPolygonHermez/pil2-proofman.git?branch=pre-develop-0.16.0#620e7c89f39ee2b608bd0f5d43765dc89728ff67"
 dependencies = [
  "colored",
  "fields",
@@ -7259,18 +7261,18 @@ dependencies = [
 
 [[package]]
 name = "zerocopy"
-version = "0.8.40"
+version = "0.8.42"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a789c6e490b576db9f7e6b6d661bcc9799f7c0ac8352f56ea20193b2681532e5"
+checksum = "f2578b716f8a7a858b7f02d5bd870c14bf4ddbbcf3a4c05414ba6503640505e3"
 dependencies = [
  "zerocopy-derive",
 ]
 
 [[package]]
 name = "zerocopy-derive"
-version = "0.8.40"
+version = "0.8.42"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f65c489a7071a749c849713807783f70672b28094011623e200cb86dcb835953"
+checksum = "7e6cc098ea4d3bd6246687de65af3f920c430e236bee1e3bf2e441463f08a02f"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -7409,6 +7411,7 @@ dependencies = [
  "blst",
  "c-kzg",
  "raiko-lib",
+ "ruint",
  "serde",
  "ziskos",
 ]
@@ -7498,8 +7501,3 @@ dependencies = [
  "cc",
  "pkg-config",
 ]
-
-[[patch.unused]]
-name = "substrate-bn"
-version = "0.6.0"
-source = "git+https://github.com/0xPolygonHermez/zisk-patch-bn.git?tag=patch-0.6.0-zisk-0.15.0#7d408643bf033c427826124436fc1b3141ef7425"

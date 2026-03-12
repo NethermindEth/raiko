@@ -1,12 +1,7 @@
 [workspace]
 resolver = "2"
-exclude = [
-    "guest",
-    "builder",
-]
-members = [
-    "driver",
-]
+exclude = ["guest", "builder", "k256_test"]
+members = ["driver"]
 
 # Common dependencies for workspace members
 [workspace.dependencies]

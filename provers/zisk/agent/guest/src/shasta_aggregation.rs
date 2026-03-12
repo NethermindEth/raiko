@@ -3,14 +3,13 @@
 ziskos::entrypoint!(main);
 
 mod precompile_shims;
+mod ruint_shims;
 
 use raiko_lib::{
     input::ShastaRisc0AggregationGuestInput,
     libhash::hash_shasta_subproof_input,
     primitives::B256,
-    protocol_instance::{
-        shasta_aggregation_hash_for_zk, words_to_bytes_le,
-    },
+    protocol_instance::{shasta_aggregation_hash_for_zk, words_to_bytes_le},
 };
 
 pub fn main() {

@@ -4,6 +4,7 @@
 ziskos::entrypoint!(main);
 
 mod precompile_shims;
+mod ruint_shims;
 
 use raiko_lib::{
     input::ZkAggregationGuestInput,
