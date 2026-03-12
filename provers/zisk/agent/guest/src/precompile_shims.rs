@@ -1,10 +1,11 @@
 //! Shims bridging zisk-0.15.0 patched crates → ziskos 0.16.0 syscall API.
 //!
 //! All operations use **only** `syscall_arith256_mod` (d = a·b + c mod m).
-//! EC point addition and doubling are implemented via explicit affine
-//! secp256k1 formulas using field arithmetic, avoiding the dedicated
-//! `syscall_secp256k1_add` / `syscall_secp256k1_dbl` opcodes which may
-//! crash the RH (ROM Histogram) C++ service.
+//! EC operations use **Jacobian coordinates** internally so that point
+//! addition / doubling never require modular inversions (~15-17 arith_mod
+//! calls each).  A single inversion is performed at the end to convert
+//! back to affine, reducing total syscalls per ecrecover from ~150 K
+//! (affine approach) to ~7 K.
 //!
 //! NO fcalls, NO secp256k1_add/dbl syscalls.
 
@@ -254,47 +255,128 @@ fn ec_add_affine(p1x: &[u64; 4], p1y: &[u64; 4], p2x: &[u64; 4], p2y: &[u64; 4])
     [x3[0], x3[1], x3[2], x3[3], y3[0], y3[1], y3[2], y3[3]]
 }
 
-/// EC point doubling in affine coordinates (non-identity).
-/// secp256k1: a = 0, so λ = 3x² / (2y).
-fn ec_dbl_affine(px: &[u64; 4], py: &[u64; 4]) -> [u64; 8] {
-    let x_sq = fp_sqr(px);
-    let three_x_sq = arith_mod(&x_sq, &[3, 0, 0, 0], &ZERO_256, &P);
-    let two_y = arith_mod(py, &[2, 0, 0, 0], &ZERO_256, &P);
-    let two_y_inv = fp_inv(&two_y);
-    let lambda = fp_mul(&three_x_sq, &two_y_inv);
-    let l2 = fp_sqr(&lambda);
-    let two_x = arith_mod(px, &[2, 0, 0, 0], &ZERO_256, &P);
-    let x3 = fp_sub(&l2, &two_x);
-    let diff = fp_sub(px, &x3);
-    let y3 = fp_sub(&fp_mul(&lambda, &diff), py);
-    [x3[0], x3[1], x3[2], x3[3], y3[0], y3[1], y3[2], y3[3]]
-}
-
-/// Add two non-identity EC points (affine).  Returns `true` when the result
-/// is the point at infinity (i.e. `P + (−P)`).
-fn add_non_infinity_points_affine(p1: &mut [u64; 8], p2x: &[u64; 4], p2y: &[u64; 4]) -> bool {
-    let p1x = [p1[0], p1[1], p1[2], p1[3]];
-    let p1y = [p1[4], p1[5], p1[6], p1[7]];
-    if !eq_256(&p1x, p2x) {
-        let r = ec_add_affine(&p1x, &p1y, p2x, p2y);
-        p1.copy_from_slice(&r);
-        false
-    } else if eq_256(&p1y, p2y) {
-        let r = ec_dbl_affine(&p1x, &p1y);
-        p1.copy_from_slice(&r);
-        false
-    } else {
-        // P + (−P) = 𝒪
-        true
-    }
-}
-
 /// Scalar subtraction in the scalar field: (x − y) mod n.
 fn fn_sub_internal(x: &[u64; 4], y: &[u64; 4]) -> [u64; 4] {
     arith_mod(y, &N_MINUS_ONE, x, &N)
 }
 
+// =================== Jacobian coordinate helpers ====================
+//
+// Jacobian:  (X, Y, Z)  with affine x = X/Z², y = Y/Z³.
+// Identity is Z = 0.
+// Avoids modular inversions during add/double (~15-17 arith_mod each).
+// A single inversion is performed at the end to convert back to affine.
+
+/// Affine [x(4), y(4)] → Jacobian [X(4), Y(4), Z(4)].
+#[inline]
+fn affine_to_jacobian(p: &[u64; 8]) -> [u64; 12] {
+    [p[0], p[1], p[2], p[3], p[4], p[5], p[6], p[7], 1, 0, 0, 0]
+}
+
+/// Check if a Jacobian point is identity (Z = 0).
+#[inline]
+fn jacobian_is_identity(p: &[u64; 12]) -> bool {
+    (p[8] | p[9] | p[10] | p[11]) == 0
+}
+
+/// Jacobian → affine:  x = X·Z⁻²,  y = Y·Z⁻³.
+fn jacobian_to_affine(p: &[u64; 12]) -> [u64; 8] {
+    let x = [p[0], p[1], p[2], p[3]];
+    let y = [p[4], p[5], p[6], p[7]];
+    let z = [p[8], p[9], p[10], p[11]];
+    let z_inv = fp_inv(&z);
+    let z_inv2 = fp_sqr(&z_inv);
+    let z_inv3 = fp_mul(&z_inv2, &z_inv);
+    let ax = fp_mul(&x, &z_inv2);
+    let ay = fp_mul(&y, &z_inv3);
+    [ax[0], ax[1], ax[2], ax[3], ay[0], ay[1], ay[2], ay[3]]
+}
+
+/// EC point doubling in Jacobian coordinates for secp256k1 (a = 0).
+///
+/// M = 3·X₁²,  S = 4·X₁·Y₁²
+/// X₃ = M² − 2·S
+/// Y₃ = M·(S − X₃) − 8·Y₁⁴
+/// Z₃ = 2·Y₁·Z₁
+///
+/// Cost: ~15 arith_mod (no inversion).
+fn ec_dbl_jacobian(p: &[u64; 12]) -> [u64; 12] {
+    let x1 = [p[0], p[1], p[2], p[3]];
+    let y1 = [p[4], p[5], p[6], p[7]];
+    let z1 = [p[8], p[9], p[10], p[11]];
+
+    let x1_sq = fp_sqr(&x1);
+    let m = arith_mod(&x1_sq, &[3, 0, 0, 0], &ZERO_256, &P);
+    let y1_sq = fp_sqr(&y1);
+    let xy2 = fp_mul(&x1, &y1_sq);
+    let s = arith_mod(&xy2, &[4, 0, 0, 0], &ZERO_256, &P);
+    let m_sq = fp_sqr(&m);
+    let two_s = arith_mod(&s, &[2, 0, 0, 0], &ZERO_256, &P);
+    let x3 = fp_sub(&m_sq, &two_s);
+    let s_x3 = fp_sub(&s, &x3);
+    let y1_4 = fp_sqr(&y1_sq);
+    let eight_y1_4 = arith_mod(&y1_4, &[8, 0, 0, 0], &ZERO_256, &P);
+    let y3 = fp_sub(&fp_mul(&m, &s_x3), &eight_y1_4);
+    let yz = fp_mul(&y1, &z1);
+    let z3 = arith_mod(&yz, &[2, 0, 0, 0], &ZERO_256, &P);
+
+    [
+        x3[0], x3[1], x3[2], x3[3], y3[0], y3[1], y3[2], y3[3], z3[0], z3[1], z3[2], z3[3],
+    ]
+}
+
+/// Mixed Jacobian–affine addition:  Jac(X₁,Y₁,Z₁) + Aff(x₂,y₂) → Jac.
+///
+/// H = x₂·Z₁² − X₁,  R = y₂·Z₁³ − Y₁
+/// X₃ = R² − H³ − 2·X₁·H²
+/// Y₃ = R·(X₁·H² − X₃) − Y₁·H³
+/// Z₃ = Z₁·H
+///
+/// Falls back to doubling when H = 0 ∧ R = 0 (same point).
+/// Returns identity ([0;12]) when H = 0 ∧ R ≠ 0 (negation).
+///
+/// Cost: ~17 arith_mod (no inversion).
+fn ec_add_mixed(jac: &[u64; 12], ax: &[u64; 4], ay: &[u64; 4]) -> [u64; 12] {
+    let x1 = [jac[0], jac[1], jac[2], jac[3]];
+    let y1 = [jac[4], jac[5], jac[6], jac[7]];
+    let z1 = [jac[8], jac[9], jac[10], jac[11]];
+
+    let z1_sq = fp_sqr(&z1);
+    let z1_cu = fp_mul(&z1_sq, &z1);
+    let u2 = fp_mul(ax, &z1_sq);
+    let s2 = fp_mul(ay, &z1_cu);
+    let h = fp_sub(&u2, &x1);
+    let r = fp_sub(&s2, &y1);
+
+    if is_zero_256(&h) {
+        return if is_zero_256(&r) {
+            ec_dbl_jacobian(jac) // same point → double
+        } else {
+            [0u64; 12] // negation → identity
+        };
+    }
+
+    let h_sq = fp_sqr(&h);
+    let h_cu = fp_mul(&h_sq, &h);
+    let x1h2 = fp_mul(&x1, &h_sq);
+    let r_sq = fp_sqr(&r);
+    // H³ + 2·X₁·H²  via MAC:  (X₁·H² × 2 + H³) mod P
+    let rhs = arith_mod(&x1h2, &[2, 0, 0, 0], &h_cu, &P);
+    let x3 = fp_sub(&r_sq, &rhs);
+    let diff = fp_sub(&x1h2, &x3);
+    let r_diff = fp_mul(&r, &diff);
+    let y1h3 = fp_mul(&y1, &h_cu);
+    let y3 = fp_sub(&r_diff, &y1h3);
+    let z3 = fp_mul(&z1, &h);
+
+    [
+        x3[0], x3[1], x3[2], x3[3], y3[0], y3[1], y3[2], y3[3], z3[0], z3[1], z3[2], z3[3],
+    ]
+}
+
 /// Scalar multiplication: k · P.  Returns `None` when the result is identity.
+///
+/// Uses Jacobian coordinates internally — single inversion at the end.
 fn scalar_mul_internal(k: &[u64; 4], p: &[u64; 8]) -> Option<[u64; 8]> {
     if is_zero_256(k) {
         return None;
@@ -307,11 +389,12 @@ fn scalar_mul_internal(k: &[u64; 4], p: &[u64; 8]) -> Option<[u64; 8]> {
         return Some(*p);
     }
 
-    // Start with res = P (the MSB is always 1)
-    let mut res = *p;
     let px = [p[0], p[1], p[2], p[3]];
     let py = [p[4], p[5], p[6], p[7]];
 
+    // Accumulator starts at P in Jacobian (MSB is always 1)
+    let mut jac = affine_to_jacobian(p);
+    let mut is_id = false;
     let msb_pos = max_limb * 64 + max_bit;
 
     for bit_idx in (0..msb_pos).rev() {
@@ -319,26 +402,34 @@ fn scalar_mul_internal(k: &[u64; 4], p: &[u64; 8]) -> Option<[u64; 8]> {
         let bit = bit_idx % 64;
 
         // Double
-        let rx = [res[0], res[1], res[2], res[3]];
-        let ry = [res[4], res[5], res[6], res[7]];
-        res = ec_dbl_affine(&rx, &ry);
+        if !is_id {
+            jac = ec_dbl_jacobian(&jac);
+            is_id = jacobian_is_identity(&jac);
+        }
 
+        // Conditionally add P
         if (k[limb] >> bit) & 1 == 1 {
-            if add_non_infinity_points_affine(&mut res, &px, &py) {
-                return None;
+            if is_id {
+                jac = affine_to_jacobian(p);
+                is_id = false;
+            } else {
+                jac = ec_add_mixed(&jac, &px, &py);
+                is_id = jacobian_is_identity(&jac);
             }
         }
     }
 
-    Some(res)
+    if is_id {
+        None
+    } else {
+        Some(jacobian_to_affine(&jac))
+    }
 }
 
-/// Double scalar multiplication  k1·G + k2·P.  Returns `None` when the result
-/// is the point at infinity.
+/// Double scalar multiplication  k1·G + k2·P  (Shamir's trick).
 ///
-/// Adapted from ziskos `secp256k1_double_scalar_mul_with_g` but uses a
-/// pure-Rust MSB computation instead of the `fcall_msb_pos_256` hint.
-/// All EC operations use explicit affine formulas via `arith_mod` only.
+/// Lookup table {G, P, G+P} is kept in affine; accumulator runs in
+/// Jacobian.  Only **one** modular inversion at the end.
 fn double_scalar_mul_internal(k1: &[u64; 4], k2: &[u64; 4], p: &[u64; 8]) -> Option<[u64; 8]> {
     if is_zero_256(k1) && is_zero_256(k2) {
         return None;
@@ -356,51 +447,58 @@ fn double_scalar_mul_internal(k1: &[u64; 4], k2: &[u64; 4], p: &[u64; 8]) -> Opt
     let px = [p[0], p[1], p[2], p[3]];
     let py = [p[4], p[5], p[6], p[7]];
 
-    // Precompute G + P
-    let mut gp = [
-        G_X[0], G_X[1], G_X[2], G_X[3], G_Y[0], G_Y[1], G_Y[2], G_Y[3],
-    ];
-    let gp_is_identity = add_non_infinity_points_affine(&mut gp, &px, &py);
-
-    // G + P = 𝒪  ⟹  P = −G  ⟹  result is (k1 − k2)·G
-    if gp_is_identity {
-        let diff = fn_sub_internal(k1, k2);
-        let g = [
-            G_X[0], G_X[1], G_X[2], G_X[3], G_Y[0], G_Y[1], G_Y[2], G_Y[3],
-        ];
-        return scalar_mul_internal(&diff, &g);
+    // Handle degenerate cases where P shares the same x-coordinate as G.
+    if eq_256(&G_X, &px) {
+        if eq_256(&G_Y, &py) {
+            // P == G → (k1+k2)·G
+            let sum = arith_mod(k1, &ONE, k2, &N);
+            let g = [
+                G_X[0], G_X[1], G_X[2], G_X[3], G_Y[0], G_Y[1], G_Y[2], G_Y[3],
+            ];
+            return scalar_mul_internal(&sum, &g);
+        } else {
+            // P == −G → (k1−k2)·G
+            let diff = fn_sub_internal(k1, k2);
+            let g = [
+                G_X[0], G_X[1], G_X[2], G_X[3], G_Y[0], G_Y[1], G_Y[2], G_Y[3],
+            ];
+            return scalar_mul_internal(&diff, &g);
+        }
     }
 
-    // Both scalars == 1 → result is G + P
+    // Precompute G + P in affine (one inversion, amortised over ~256 loop iterations).
+    let gp_aff = ec_add_affine(&G_X, &G_Y, &px, &py);
+    let gp_x = [gp_aff[0], gp_aff[1], gp_aff[2], gp_aff[3]];
+    let gp_y = [gp_aff[4], gp_aff[5], gp_aff[6], gp_aff[7]];
+
+    // Both scalars == 1 → G + P
     if eq_256(k1, &ONE) && eq_256(k2, &ONE) {
-        return Some(gp);
+        return Some(gp_aff);
     }
 
+    // ---------- Shamir's trick: Jacobian accumulator, affine table ----------
     let (max_limb, max_bit) = msb_position_max(k1, k2);
+    let k1_msb = (k1[max_limb] >> max_bit) & 1;
+    let k2_msb = (k2[max_limb] >> max_bit) & 1;
 
-    let k1_bit = (k1[max_limb] >> max_bit) & 1;
-    let k2_bit = (k2[max_limb] >> max_bit) & 1;
-
-    let p_arr = *p;
-    let g_arr = [
+    let g_aff = [
         G_X[0], G_X[1], G_X[2], G_X[3], G_Y[0], G_Y[1], G_Y[2], G_Y[3],
     ];
 
-    let mut res = [0u64; 8];
-    let mut res_is_identity = true;
-
-    match (k1_bit, k2_bit) {
+    let mut jac = [0u64; 12];
+    let mut is_id = true;
+    match (k1_msb, k2_msb) {
         (0, 1) => {
-            res = p_arr;
-            res_is_identity = false;
+            jac = affine_to_jacobian(p);
+            is_id = false;
         }
         (1, 0) => {
-            res = g_arr;
-            res_is_identity = false;
+            jac = affine_to_jacobian(&g_aff);
+            is_id = false;
         }
         (1, 1) => {
-            res = gp;
-            res_is_identity = false;
+            jac = affine_to_jacobian(&gp_aff);
+            is_id = false;
         }
         _ => {}
     }
@@ -412,61 +510,50 @@ fn double_scalar_mul_internal(k1: &[u64; 4], k2: &[u64; 4], p: &[u64; 8]) -> Opt
         let k1_b = (k1[limb] >> bit) & 1;
         let k2_b = (k2[limb] >> bit) & 1;
 
+        // Double the accumulator
+        if !is_id {
+            jac = ec_dbl_jacobian(&jac);
+            is_id = jacobian_is_identity(&jac);
+        }
+
+        // Add table entry for this bit-pair
         match (k1_b, k2_b) {
-            (0, 0) => {
-                if !res_is_identity {
-                    let rx = [res[0], res[1], res[2], res[3]];
-                    let ry = [res[4], res[5], res[6], res[7]];
-                    res = ec_dbl_affine(&rx, &ry);
-                }
-            }
+            (0, 0) => { /* nothing */ }
             (0, 1) => {
-                if res_is_identity {
-                    res = p_arr;
-                    res_is_identity = false;
+                if is_id {
+                    jac = affine_to_jacobian(p);
+                    is_id = false;
                 } else {
-                    let rx = [res[0], res[1], res[2], res[3]];
-                    let ry = [res[4], res[5], res[6], res[7]];
-                    res = ec_dbl_affine(&rx, &ry);
-                    res_is_identity = add_non_infinity_points_affine(&mut res, &px, &py);
+                    jac = ec_add_mixed(&jac, &px, &py);
+                    is_id = jacobian_is_identity(&jac);
                 }
             }
             (1, 0) => {
-                if res_is_identity {
-                    res = g_arr;
-                    res_is_identity = false;
+                if is_id {
+                    jac = affine_to_jacobian(&g_aff);
+                    is_id = false;
                 } else {
-                    let rx = [res[0], res[1], res[2], res[3]];
-                    let ry = [res[4], res[5], res[6], res[7]];
-                    res = ec_dbl_affine(&rx, &ry);
-                    res_is_identity = add_non_infinity_points_affine(&mut res, &G_X, &G_Y);
+                    jac = ec_add_mixed(&jac, &G_X, &G_Y);
+                    is_id = jacobian_is_identity(&jac);
                 }
             }
             (1, 1) => {
-                if res_is_identity {
-                    if !gp_is_identity {
-                        res = gp;
-                        res_is_identity = false;
-                    }
+                if is_id {
+                    jac = affine_to_jacobian(&gp_aff);
+                    is_id = false;
                 } else {
-                    let rx = [res[0], res[1], res[2], res[3]];
-                    let ry = [res[4], res[5], res[6], res[7]];
-                    res = ec_dbl_affine(&rx, &ry);
-                    if !gp_is_identity {
-                        let gpx = [gp[0], gp[1], gp[2], gp[3]];
-                        let gpy = [gp[4], gp[5], gp[6], gp[7]];
-                        res_is_identity = add_non_infinity_points_affine(&mut res, &gpx, &gpy);
-                    }
+                    jac = ec_add_mixed(&jac, &gp_x, &gp_y);
+                    is_id = jacobian_is_identity(&jac);
                 }
             }
             _ => unreachable!(),
         }
     }
 
-    if res_is_identity {
+    if is_id {
         None
     } else {
-        Some(res)
+        Some(jacobian_to_affine(&jac))
     }
 }
 
