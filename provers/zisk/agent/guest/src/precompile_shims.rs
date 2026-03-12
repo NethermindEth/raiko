@@ -272,11 +272,7 @@ fn ec_dbl_affine(px: &[u64; 4], py: &[u64; 4]) -> [u64; 8] {
 
 /// Add two non-identity EC points (affine).  Returns `true` when the result
 /// is the point at infinity (i.e. `P + (−P)`).
-fn add_non_infinity_points_affine(
-    p1: &mut [u64; 8],
-    p2x: &[u64; 4],
-    p2y: &[u64; 4],
-) -> bool {
+fn add_non_infinity_points_affine(p1: &mut [u64; 8], p2x: &[u64; 4], p2y: &[u64; 4]) -> bool {
     let p1x = [p1[0], p1[1], p1[2], p1[3]];
     let p1y = [p1[4], p1[5], p1[6], p1[7]];
     if !eq_256(&p1x, p2x) {
@@ -361,7 +357,9 @@ fn double_scalar_mul_internal(k1: &[u64; 4], k2: &[u64; 4], p: &[u64; 8]) -> Opt
     let py = [p[4], p[5], p[6], p[7]];
 
     // Precompute G + P
-    let mut gp = [G_X[0], G_X[1], G_X[2], G_X[3], G_Y[0], G_Y[1], G_Y[2], G_Y[3]];
+    let mut gp = [
+        G_X[0], G_X[1], G_X[2], G_X[3], G_Y[0], G_Y[1], G_Y[2], G_Y[3],
+    ];
     let gp_is_identity = add_non_infinity_points_affine(&mut gp, &px, &py);
 
     // G + P = 𝒪  ⟹  P = −G  ⟹  result is (k1 − k2)·G
@@ -384,7 +382,9 @@ fn double_scalar_mul_internal(k1: &[u64; 4], k2: &[u64; 4], p: &[u64; 8]) -> Opt
     let k2_bit = (k2[max_limb] >> max_bit) & 1;
 
     let p_arr = *p;
-    let g_arr = [G_X[0], G_X[1], G_X[2], G_X[3], G_Y[0], G_Y[1], G_Y[2], G_Y[3]];
+    let g_arr = [
+        G_X[0], G_X[1], G_X[2], G_X[3], G_Y[0], G_Y[1], G_Y[2], G_Y[3],
+    ];
 
     let mut res = [0u64; 8];
     let mut res_is_identity = true;
@@ -455,8 +455,7 @@ fn double_scalar_mul_internal(k1: &[u64; 4], k2: &[u64; 4], p: &[u64; 8]) -> Opt
                     if !gp_is_identity {
                         let gpx = [gp[0], gp[1], gp[2], gp[3]];
                         let gpy = [gp[4], gp[5], gp[6], gp[7]];
-                        res_is_identity =
-                            add_non_infinity_points_affine(&mut res, &gpx, &gpy);
+                        res_is_identity = add_non_infinity_points_affine(&mut res, &gpx, &gpy);
                     }
                 }
             }
