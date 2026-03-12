@@ -1,50 +1,101 @@
-//! Shims bridging zisk-0.15.0 patched crates -> ziskos 0.16.0 syscall/fcall API.
+//! Shims bridging zisk-0.15.0 patched crates → ziskos 0.16.0 syscall API.
 //!
-//! The patched crates (zisk-patch-hashes, zisk-patch-elliptic-curves, etc.) at
-//! tag zisk-0.15.0 expect `#[no_mangle] extern "C"` symbols that were provided
-//! by ziskos 0.15.0. In ziskos 0.16.0 (rev 6668726) the internal API changed:
-//!   - SHA-256: `sha256f_compress_c` -> `syscall_sha256_f` (different calling convention)
-//!   - secp256k1 field/scalar ops: now use `syscall_arith256_mod` (modular a*b+c)
-//!   - secp256k1 fn_inv: now uses fcall mechanism
-//!   - secp256k1 curve ops: now use higher-level zisklib functions
+//! All operations use **only** `syscall_arith256_mod` (d = a·b + c mod m).
+//! EC point addition and doubling are implemented via explicit affine
+//! secp256k1 formulas using field arithmetic, avoiding the dedicated
+//! `syscall_secp256k1_add` / `syscall_secp256k1_dbl` opcodes which may
+//! crash the RH (ROM Histogram) C++ service.
 //!
-//! This module provides the missing symbols by delegating to the new API.
+//! NO fcalls, NO secp256k1_add/dbl syscalls.
 
 use ziskos::syscalls::{
     syscall_arith256_mod, syscall_sha256_f, SyscallArith256ModParams, SyscallSha256Params,
 };
-use ziskos::zisklib::{
-    fcall_secp256k1_fn_inv, fcall_secp256k1_fp_inv, secp256k1_double_scalar_mul_with_g,
-    secp256k1_ecdsa_verify, secp256k1_lift_x, ZERO_256,
-};
 
-// secp256k1 constants (private in ziskos, so we must define them locally).
-// Source: ziskos/entrypoint/src/zisklib/lib/secp256k1/constants.rs at rev 6668726.
+// ========================= Constants =========================
 
-/// secp256k1 base field modulus: p = 2^256 - 2^32 - 977
+/// secp256k1 base-field prime p (little-endian u64 limbs).
 const P: [u64; 4] = [
-    0xFFFFFFFEFFFFFC2F,
-    0xFFFFFFFFFFFFFFFF,
-    0xFFFFFFFFFFFFFFFF,
-    0xFFFFFFFFFFFFFFFF,
+    0xFFFFFFFE_FFFFFC2F,
+    0xFFFFFFFF_FFFFFFFF,
+    0xFFFFFFFF_FFFFFFFF,
+    0xFFFFFFFF_FFFFFFFF,
 ];
-const P_MINUS_ONE: [u64; 4] = [P[0] - 1, P[1], P[2], P[3]];
 
-/// secp256k1 scalar field order
-const N: [u64; 4] = [
-    0xBFD25E8CD0364141,
-    0xBAAEDCE6AF48A03B,
-    0xFFFFFFFFFFFFFFFE,
-    0xFFFFFFFFFFFFFFFF,
+/// p − 1
+const P_MINUS_ONE: [u64; 4] = [
+    0xFFFFFFFE_FFFFFC2E,
+    0xFFFFFFFF_FFFFFFFF,
+    0xFFFFFFFF_FFFFFFFF,
+    0xFFFFFFFF_FFFFFFFF,
 ];
-const N_MINUS_ONE: [u64; 4] = [N[0] - 1, N[1], N[2], N[3]];
+
+/// p − 2  (Fermat inverse exponent for the base field).
+const P_MINUS_TWO: [u64; 4] = [
+    0xFFFFFFFE_FFFFFC2D,
+    0xFFFFFFFF_FFFFFFFF,
+    0xFFFFFFFF_FFFFFFFF,
+    0xFFFFFFFF_FFFFFFFF,
+];
+
+/// (p + 1) / 4  (square-root exponent; p ≡ 3 mod 4).
+const P_PLUS_ONE_DIV_4: [u64; 4] = [
+    0xFFFFFFFF_BFFFFF0C,
+    0xFFFFFFFF_FFFFFFFF,
+    0xFFFFFFFF_FFFFFFFF,
+    0x3FFFFFFF_FFFFFFFF,
+];
+
+/// secp256k1 scalar-field order n.
+const N: [u64; 4] = [
+    0xBFD25E8C_D0364141,
+    0xBAAEDCE6_AF48A03B,
+    0xFFFFFFFF_FFFFFFFE,
+    0xFFFFFFFF_FFFFFFFF,
+];
+
+/// n − 1
+const N_MINUS_ONE: [u64; 4] = [
+    0xBFD25E8C_D0364140,
+    0xBAAEDCE6_AF48A03B,
+    0xFFFFFFFF_FFFFFFFE,
+    0xFFFFFFFF_FFFFFFFF,
+];
+
+/// n − 2  (Fermat inverse exponent for the scalar field).
+const N_MINUS_TWO: [u64; 4] = [
+    0xBFD25E8C_D036413F,
+    0xBAAEDCE6_AF48A03B,
+    0xFFFFFFFF_FFFFFFFE,
+    0xFFFFFFFF_FFFFFFFF,
+];
 
 const ONE: [u64; 4] = [1, 0, 0, 0];
+const ZERO_256: [u64; 4] = [0; 4];
 
-// ========================= SHA-256 =========================
+/// Curve equation constant b: y² = x³ + 7
+const E_B: [u64; 4] = [7, 0, 0, 0];
+
+/// Generator x-coordinate (little-endian u64).
+const G_X: [u64; 4] = [
+    0x59F2815B_16F81798,
+    0x029BFCDB_2DCE28D9,
+    0x55A06295_CE870B07,
+    0x79BE667E_F9DCBBAC,
+];
+
+/// Generator y-coordinate (little-endian u64).
+const G_Y: [u64; 4] = [
+    0x9C47D08F_FB10D4B8,
+    0xFD17B448_A6855419,
+    0x5DA4FBFC_0E1108A8,
+    0x483ADA77_26A3C465,
+];
+
+// ========================= SHA-256 shim =========================
 
 /// Signature expected by zisk-patch-hashes 0.15.0:
-///   `sha256f_compress_c(state_ptr: *mut u32, blocks_ptr: *const u8, num_blocks: usize)`
+///   `sha256f_compress_c(state: *mut u32, blocks: *const u8, num_blocks: usize)`
 ///
 /// Delegates to ziskos 0.16.0 `syscall_sha256_f` one block at a time.
 #[no_mangle]
@@ -56,222 +107,590 @@ pub unsafe extern "C" fn sha256f_compress_c(
     let state = &mut *(state_ptr as *mut [u64; 4]);
     for i in 0..num_blocks {
         let block = &*(blocks_ptr.add(i * 64) as *const [u64; 8]);
-        let mut params = SyscallSha256Params { state, input: block };
+        let mut params = SyscallSha256Params {
+            state,
+            input: block,
+        };
         syscall_sha256_f(&mut params);
+    }
+}
+
+// ========================= Internal helpers =========================
+
+/// d = (a · b + c) mod m  via a single `arith256_mod` syscall.
+#[inline]
+fn arith_mod(a: &[u64; 4], b: &[u64; 4], c: &[u64; 4], m: &[u64; 4]) -> [u64; 4] {
+    let mut d = [0u64; 4];
+    let mut params = SyscallArith256ModParams {
+        a,
+        b,
+        c,
+        module: m,
+        d: &mut d,
+    };
+    syscall_arith256_mod(&mut params);
+    d
+}
+
+/// Modular exponentiation via binary square-and-multiply (LSB-first).
+///
+/// Returns `base^exp mod modulus`.
+fn mod_pow(base: &[u64; 4], exp: &[u64; 4], modulus: &[u64; 4]) -> [u64; 4] {
+    let mut result = ONE;
+    let mut b = *base;
+    for i in 0..4 {
+        for bit in 0..64 {
+            if (exp[i] >> bit) & 1 == 1 {
+                result = arith_mod(&result, &b, &ZERO_256, modulus);
+            }
+            b = arith_mod(&b, &b, &ZERO_256, modulus);
+        }
+    }
+    result
+}
+
+/// Field multiplicative inverse: a^(p−2) mod p.
+#[inline]
+fn fp_inv(a: &[u64; 4]) -> [u64; 4] {
+    mod_pow(a, &P_MINUS_TWO, &P)
+}
+
+/// Scalar multiplicative inverse: a^(n−2) mod n.
+#[inline]
+fn fn_inv_internal(a: &[u64; 4]) -> [u64; 4] {
+    mod_pow(a, &N_MINUS_TWO, &N)
+}
+
+/// Modular square root: a^((p+1)/4) mod p.
+#[inline]
+fn fp_sqrt(a: &[u64; 4]) -> [u64; 4] {
+    mod_pow(a, &P_PLUS_ONE_DIV_4, &P)
+}
+
+#[inline]
+fn is_zero_256(x: &[u64; 4]) -> bool {
+    (x[0] | x[1] | x[2] | x[3]) == 0
+}
+
+#[inline]
+fn eq_256(a: &[u64; 4], b: &[u64; 4]) -> bool {
+    a[0] == b[0] && a[1] == b[1] && a[2] == b[2] && a[3] == b[3]
+}
+
+/// Returns `(limb_index, bit_index)` of the most significant set bit.
+/// Panics on zero.
+fn msb_position(x: &[u64; 4]) -> (usize, usize) {
+    for i in (0..4).rev() {
+        if x[i] != 0 {
+            return (i, 63 - x[i].leading_zeros() as usize);
+        }
+    }
+    panic!("msb_position: zero input");
+}
+
+/// Maximum MSB position across two non-zero-together values.
+fn msb_position_max(a: &[u64; 4], b: &[u64; 4]) -> (usize, usize) {
+    let (al, ab) = if is_zero_256(a) {
+        (0usize, 0usize)
+    } else {
+        msb_position(a)
+    };
+    let (bl, bb) = if is_zero_256(b) {
+        (0usize, 0usize)
+    } else {
+        msb_position(b)
+    };
+    if al > bl || (al == bl && ab >= bb) {
+        (al, ab)
+    } else {
+        (bl, bb)
+    }
+}
+
+/// Convert 32 big-endian bytes → 4 little-endian u64 limbs.
+fn bytes_be_to_u64_le(bytes: &[u8]) -> [u64; 4] {
+    let mut r = [0u64; 4];
+    for i in 0..4 {
+        for j in 0..8 {
+            r[3 - i] |= (bytes[i * 8 + j] as u64) << (8 * (7 - j));
+        }
+    }
+    r
+}
+
+/// Field subtraction: (a - b) mod p.
+#[inline]
+fn fp_sub(a: &[u64; 4], b: &[u64; 4]) -> [u64; 4] {
+    arith_mod(b, &P_MINUS_ONE, a, &P)
+}
+
+/// Field multiplication: (a * b) mod p.
+#[inline]
+fn fp_mul(a: &[u64; 4], b: &[u64; 4]) -> [u64; 4] {
+    arith_mod(a, b, &ZERO_256, &P)
+}
+
+/// Field squaring: a² mod p.
+#[inline]
+fn fp_sqr(a: &[u64; 4]) -> [u64; 4] {
+    arith_mod(a, a, &ZERO_256, &P)
+}
+
+/// EC point addition in affine coordinates (P1 ≠ P2, both non-identity).
+/// secp256k1: y² = x³ + 7, a = 0.
+///
+/// λ = (y2 - y1) / (x2 - x1)
+/// x3 = λ² - x1 - x2
+/// y3 = λ(x1 - x3) - y1
+fn ec_add_affine(p1x: &[u64; 4], p1y: &[u64; 4], p2x: &[u64; 4], p2y: &[u64; 4]) -> [u64; 8] {
+    let dx = fp_sub(p2x, p1x);
+    let dy = fp_sub(p2y, p1y);
+    let dx_inv = fp_inv(&dx);
+    let lambda = fp_mul(&dy, &dx_inv);
+    let l2 = fp_sqr(&lambda);
+    let x3 = fp_sub(&fp_sub(&l2, p1x), p2x);
+    let diff = fp_sub(p1x, &x3);
+    let y3 = fp_sub(&fp_mul(&lambda, &diff), p1y);
+    [x3[0], x3[1], x3[2], x3[3], y3[0], y3[1], y3[2], y3[3]]
+}
+
+/// EC point doubling in affine coordinates (non-identity).
+/// secp256k1: a = 0, so λ = 3x² / (2y).
+fn ec_dbl_affine(px: &[u64; 4], py: &[u64; 4]) -> [u64; 8] {
+    let x_sq = fp_sqr(px);
+    let three_x_sq = arith_mod(&x_sq, &[3, 0, 0, 0], &ZERO_256, &P);
+    let two_y = arith_mod(py, &[2, 0, 0, 0], &ZERO_256, &P);
+    let two_y_inv = fp_inv(&two_y);
+    let lambda = fp_mul(&three_x_sq, &two_y_inv);
+    let l2 = fp_sqr(&lambda);
+    let two_x = arith_mod(px, &[2, 0, 0, 0], &ZERO_256, &P);
+    let x3 = fp_sub(&l2, &two_x);
+    let diff = fp_sub(px, &x3);
+    let y3 = fp_sub(&fp_mul(&lambda, &diff), py);
+    [x3[0], x3[1], x3[2], x3[3], y3[0], y3[1], y3[2], y3[3]]
+}
+
+/// Add two non-identity EC points (affine).  Returns `true` when the result
+/// is the point at infinity (i.e. `P + (−P)`).
+fn add_non_infinity_points_affine(
+    p1: &mut [u64; 8],
+    p2x: &[u64; 4],
+    p2y: &[u64; 4],
+) -> bool {
+    let p1x = [p1[0], p1[1], p1[2], p1[3]];
+    let p1y = [p1[4], p1[5], p1[6], p1[7]];
+    if !eq_256(&p1x, p2x) {
+        let r = ec_add_affine(&p1x, &p1y, p2x, p2y);
+        p1.copy_from_slice(&r);
+        false
+    } else if eq_256(&p1y, p2y) {
+        let r = ec_dbl_affine(&p1x, &p1y);
+        p1.copy_from_slice(&r);
+        false
+    } else {
+        // P + (−P) = 𝒪
+        true
+    }
+}
+
+/// Scalar subtraction in the scalar field: (x − y) mod n.
+fn fn_sub_internal(x: &[u64; 4], y: &[u64; 4]) -> [u64; 4] {
+    arith_mod(y, &N_MINUS_ONE, x, &N)
+}
+
+/// Scalar multiplication: k · P.  Returns `None` when the result is identity.
+fn scalar_mul_internal(k: &[u64; 4], p: &[u64; 8]) -> Option<[u64; 8]> {
+    if is_zero_256(k) {
+        return None;
+    }
+
+    let (max_limb, max_bit) = msb_position(k);
+
+    // k == 1 → just return P
+    if max_limb == 0 && max_bit == 0 {
+        return Some(*p);
+    }
+
+    // Start with res = P (the MSB is always 1)
+    let mut res = *p;
+    let px = [p[0], p[1], p[2], p[3]];
+    let py = [p[4], p[5], p[6], p[7]];
+
+    let msb_pos = max_limb * 64 + max_bit;
+
+    for bit_idx in (0..msb_pos).rev() {
+        let limb = bit_idx / 64;
+        let bit = bit_idx % 64;
+
+        // Double
+        let rx = [res[0], res[1], res[2], res[3]];
+        let ry = [res[4], res[5], res[6], res[7]];
+        res = ec_dbl_affine(&rx, &ry);
+
+        if (k[limb] >> bit) & 1 == 1 {
+            if add_non_infinity_points_affine(&mut res, &px, &py) {
+                return None;
+            }
+        }
+    }
+
+    Some(res)
+}
+
+/// Double scalar multiplication  k1·G + k2·P.  Returns `None` when the result
+/// is the point at infinity.
+///
+/// Adapted from ziskos `secp256k1_double_scalar_mul_with_g` but uses a
+/// pure-Rust MSB computation instead of the `fcall_msb_pos_256` hint.
+/// All EC operations use explicit affine formulas via `arith_mod` only.
+fn double_scalar_mul_internal(k1: &[u64; 4], k2: &[u64; 4], p: &[u64; 8]) -> Option<[u64; 8]> {
+    if is_zero_256(k1) && is_zero_256(k2) {
+        return None;
+    }
+    if is_zero_256(k1) {
+        return scalar_mul_internal(k2, p);
+    }
+    if is_zero_256(k2) {
+        let g = [
+            G_X[0], G_X[1], G_X[2], G_X[3], G_Y[0], G_Y[1], G_Y[2], G_Y[3],
+        ];
+        return scalar_mul_internal(k1, &g);
+    }
+
+    let px = [p[0], p[1], p[2], p[3]];
+    let py = [p[4], p[5], p[6], p[7]];
+
+    // Precompute G + P
+    let mut gp = [G_X[0], G_X[1], G_X[2], G_X[3], G_Y[0], G_Y[1], G_Y[2], G_Y[3]];
+    let gp_is_identity = add_non_infinity_points_affine(&mut gp, &px, &py);
+
+    // G + P = 𝒪  ⟹  P = −G  ⟹  result is (k1 − k2)·G
+    if gp_is_identity {
+        let diff = fn_sub_internal(k1, k2);
+        let g = [
+            G_X[0], G_X[1], G_X[2], G_X[3], G_Y[0], G_Y[1], G_Y[2], G_Y[3],
+        ];
+        return scalar_mul_internal(&diff, &g);
+    }
+
+    // Both scalars == 1 → result is G + P
+    if eq_256(k1, &ONE) && eq_256(k2, &ONE) {
+        return Some(gp);
+    }
+
+    let (max_limb, max_bit) = msb_position_max(k1, k2);
+
+    let k1_bit = (k1[max_limb] >> max_bit) & 1;
+    let k2_bit = (k2[max_limb] >> max_bit) & 1;
+
+    let p_arr = *p;
+    let g_arr = [G_X[0], G_X[1], G_X[2], G_X[3], G_Y[0], G_Y[1], G_Y[2], G_Y[3]];
+
+    let mut res = [0u64; 8];
+    let mut res_is_identity = true;
+
+    match (k1_bit, k2_bit) {
+        (0, 1) => {
+            res = p_arr;
+            res_is_identity = false;
+        }
+        (1, 0) => {
+            res = g_arr;
+            res_is_identity = false;
+        }
+        (1, 1) => {
+            res = gp;
+            res_is_identity = false;
+        }
+        _ => {}
+    }
+
+    let msb_pos = max_limb * 64 + max_bit;
+    for bit_idx in (0..msb_pos).rev() {
+        let limb = bit_idx / 64;
+        let bit = bit_idx % 64;
+        let k1_b = (k1[limb] >> bit) & 1;
+        let k2_b = (k2[limb] >> bit) & 1;
+
+        match (k1_b, k2_b) {
+            (0, 0) => {
+                if !res_is_identity {
+                    let rx = [res[0], res[1], res[2], res[3]];
+                    let ry = [res[4], res[5], res[6], res[7]];
+                    res = ec_dbl_affine(&rx, &ry);
+                }
+            }
+            (0, 1) => {
+                if res_is_identity {
+                    res = p_arr;
+                    res_is_identity = false;
+                } else {
+                    let rx = [res[0], res[1], res[2], res[3]];
+                    let ry = [res[4], res[5], res[6], res[7]];
+                    res = ec_dbl_affine(&rx, &ry);
+                    res_is_identity = add_non_infinity_points_affine(&mut res, &px, &py);
+                }
+            }
+            (1, 0) => {
+                if res_is_identity {
+                    res = g_arr;
+                    res_is_identity = false;
+                } else {
+                    let rx = [res[0], res[1], res[2], res[3]];
+                    let ry = [res[4], res[5], res[6], res[7]];
+                    res = ec_dbl_affine(&rx, &ry);
+                    res_is_identity = add_non_infinity_points_affine(&mut res, &G_X, &G_Y);
+                }
+            }
+            (1, 1) => {
+                if res_is_identity {
+                    if !gp_is_identity {
+                        res = gp;
+                        res_is_identity = false;
+                    }
+                } else {
+                    let rx = [res[0], res[1], res[2], res[3]];
+                    let ry = [res[4], res[5], res[6], res[7]];
+                    res = ec_dbl_affine(&rx, &ry);
+                    if !gp_is_identity {
+                        let gpx = [gp[0], gp[1], gp[2], gp[3]];
+                        let gpy = [gp[4], gp[5], gp[6], gp[7]];
+                        res_is_identity =
+                            add_non_infinity_points_affine(&mut res, &gpx, &gpy);
+                    }
+                }
+            }
+            _ => unreachable!(),
+        }
+    }
+
+    if res_is_identity {
+        None
+    } else {
+        Some(res)
+    }
+}
+
+/// Standard ECDSA verification.
+fn ecdsa_verify_internal(pk: &[u64; 8], z: &[u64; 4], r: &[u64; 4], s: &[u64; 4]) -> bool {
+    if is_zero_256(r) || is_zero_256(s) {
+        return false;
+    }
+
+    let s_inv = fn_inv_internal(s);
+    let u1 = arith_mod(z, &s_inv, &ZERO_256, &N);
+    let u2 = arith_mod(r, &s_inv, &ZERO_256, &N);
+
+    match double_scalar_mul_internal(&u1, &u2, pk) {
+        None => false,
+        Some(r_point) => {
+            let rx = [r_point[0], r_point[1], r_point[2], r_point[3]];
+            let rx_mod_n = arith_mod(&rx, &ONE, &ZERO_256, &N);
+            eq_256(&rx_mod_n, r)
+        }
     }
 }
 
 // ========================= secp256k1 field ops (mod P) =========================
 
-/// d = (x * 1 + 0) mod P
+/// d = (x · 1 + 0) mod P — field reduction.
 #[no_mangle]
 pub unsafe extern "C" fn secp256k1_fp_reduce_c(x_ptr: *const u64, out_ptr: *mut u64) {
     let x = &*(x_ptr as *const [u64; 4]);
     let out = &mut *(out_ptr as *mut [u64; 4]);
-    let mut params = SyscallArith256ModParams {
-        a: x, b: &ONE, c: &ZERO_256, module: &P, d: out,
-    };
-    syscall_arith256_mod(&mut params);
+    *out = arith_mod(x, &ONE, &ZERO_256, &P);
 }
 
-/// d = (x * 1 + y) mod P
+/// d = (x · 1 + y) mod P — field addition.
 #[no_mangle]
 pub unsafe extern "C" fn secp256k1_fp_add_c(
-    x_ptr: *const u64, y_ptr: *const u64, out_ptr: *mut u64,
+    x_ptr: *const u64,
+    y_ptr: *const u64,
+    out_ptr: *mut u64,
 ) {
     let x = &*(x_ptr as *const [u64; 4]);
     let y = &*(y_ptr as *const [u64; 4]);
     let out = &mut *(out_ptr as *mut [u64; 4]);
-    let mut params = SyscallArith256ModParams {
-        a: x, b: &ONE, c: y, module: &P, d: out,
-    };
-    syscall_arith256_mod(&mut params);
+    *out = arith_mod(x, &ONE, y, &P);
 }
 
-/// d = (x * (P-1) + 0) mod P  =  -x mod P
+/// d = x · (P−1) mod P  =  −x mod P — field negation.
 #[no_mangle]
 pub unsafe extern "C" fn secp256k1_fp_negate_c(x_ptr: *const u64, out_ptr: *mut u64) {
     let x = &*(x_ptr as *const [u64; 4]);
     let out = &mut *(out_ptr as *mut [u64; 4]);
-    let mut params = SyscallArith256ModParams {
-        a: x, b: &P_MINUS_ONE, c: &ZERO_256, module: &P, d: out,
-    };
-    syscall_arith256_mod(&mut params);
+    *out = arith_mod(x, &P_MINUS_ONE, &ZERO_256, &P);
 }
 
-/// d = (x * y + 0) mod P
+/// d = (x · y + 0) mod P — field multiplication.
 #[no_mangle]
 pub unsafe extern "C" fn secp256k1_fp_mul_c(
-    x_ptr: *const u64, y_ptr: *const u64, out_ptr: *mut u64,
+    x_ptr: *const u64,
+    y_ptr: *const u64,
+    out_ptr: *mut u64,
 ) {
     let x = &*(x_ptr as *const [u64; 4]);
     let y = &*(y_ptr as *const [u64; 4]);
     let out = &mut *(out_ptr as *mut [u64; 4]);
-    let mut params = SyscallArith256ModParams {
-        a: x, b: y, c: &ZERO_256, module: &P, d: out,
-    };
-    syscall_arith256_mod(&mut params);
+    *out = arith_mod(x, y, &ZERO_256, &P);
 }
 
-/// d = (x * [scalar, 0, 0, 0] + 0) mod P
+/// d = (x · scalar + 0) mod P — field scalar multiplication.
 #[no_mangle]
 pub unsafe extern "C" fn secp256k1_fp_mul_scalar_c(
-    x_ptr: *const u64, scalar: u64, out_ptr: *mut u64,
+    x_ptr: *const u64,
+    scalar: u64,
+    out_ptr: *mut u64,
 ) {
     let x = &*(x_ptr as *const [u64; 4]);
     let out = &mut *(out_ptr as *mut [u64; 4]);
     let s = [scalar, 0, 0, 0];
-    let mut params = SyscallArith256ModParams {
-        a: x, b: &s, c: &ZERO_256, module: &P, d: out,
-    };
-    syscall_arith256_mod(&mut params);
+    *out = arith_mod(x, &s, &ZERO_256, &P);
 }
 
 // ========================= secp256k1 scalar ops (mod N) =========================
 
-/// d = (x * 1 + 0) mod N
+/// d = (x · 1 + 0) mod N — scalar reduction.
 #[no_mangle]
 pub unsafe extern "C" fn secp256k1_fn_reduce_c(x_ptr: *const u64, out_ptr: *mut u64) {
     let x = &*(x_ptr as *const [u64; 4]);
     let out = &mut *(out_ptr as *mut [u64; 4]);
-    let mut params = SyscallArith256ModParams {
-        a: x, b: &ONE, c: &ZERO_256, module: &N, d: out,
-    };
-    syscall_arith256_mod(&mut params);
+    *out = arith_mod(x, &ONE, &ZERO_256, &N);
 }
 
-/// d = (x * 1 + y) mod N
+/// d = (x · 1 + y) mod N — scalar addition.
 #[no_mangle]
 pub unsafe extern "C" fn secp256k1_fn_add_c(
-    x_ptr: *const u64, y_ptr: *const u64, out_ptr: *mut u64,
+    x_ptr: *const u64,
+    y_ptr: *const u64,
+    out_ptr: *mut u64,
 ) {
     let x = &*(x_ptr as *const [u64; 4]);
     let y = &*(y_ptr as *const [u64; 4]);
     let out = &mut *(out_ptr as *mut [u64; 4]);
-    let mut params = SyscallArith256ModParams {
-        a: x, b: &ONE, c: y, module: &N, d: out,
-    };
-    syscall_arith256_mod(&mut params);
+    *out = arith_mod(x, &ONE, y, &N);
 }
 
-/// d = (x * (N-1) + 0) mod N  =  -x mod N
+/// d = x · (N−1) mod N  =  −x mod N — scalar negation.
 #[no_mangle]
 pub unsafe extern "C" fn secp256k1_fn_neg_c(x_ptr: *const u64, out_ptr: *mut u64) {
     let x = &*(x_ptr as *const [u64; 4]);
     let out = &mut *(out_ptr as *mut [u64; 4]);
-    let mut params = SyscallArith256ModParams {
-        a: x, b: &N_MINUS_ONE, c: &ZERO_256, module: &N, d: out,
-    };
-    syscall_arith256_mod(&mut params);
+    *out = arith_mod(x, &N_MINUS_ONE, &ZERO_256, &N);
 }
 
-/// d = (y * (N-1) + x) mod N  =  x - y mod N
+/// d = y · (N−1) + x  mod N  =  x − y  mod N — scalar subtraction.
 #[no_mangle]
 pub unsafe extern "C" fn secp256k1_fn_sub_c(
-    x_ptr: *const u64, y_ptr: *const u64, out_ptr: *mut u64,
+    x_ptr: *const u64,
+    y_ptr: *const u64,
+    out_ptr: *mut u64,
 ) {
     let x = &*(x_ptr as *const [u64; 4]);
     let y = &*(y_ptr as *const [u64; 4]);
     let out = &mut *(out_ptr as *mut [u64; 4]);
-    let mut params = SyscallArith256ModParams {
-        a: y, b: &N_MINUS_ONE, c: x, module: &N, d: out,
-    };
-    syscall_arith256_mod(&mut params);
+    *out = arith_mod(y, &N_MINUS_ONE, x, &N);
 }
 
-/// d = (x * y + 0) mod N
+/// d = (x · y + 0) mod N — scalar multiplication.
 #[no_mangle]
 pub unsafe extern "C" fn secp256k1_fn_mul_c(
-    x_ptr: *const u64, y_ptr: *const u64, out_ptr: *mut u64,
+    x_ptr: *const u64,
+    y_ptr: *const u64,
+    out_ptr: *mut u64,
 ) {
     let x = &*(x_ptr as *const [u64; 4]);
     let y = &*(y_ptr as *const [u64; 4]);
     let out = &mut *(out_ptr as *mut [u64; 4]);
-    let mut params = SyscallArith256ModParams {
-        a: x, b: y, c: &ZERO_256, module: &N, d: out,
-    };
-    syscall_arith256_mod(&mut params);
+    *out = arith_mod(x, y, &ZERO_256, &N);
 }
 
-/// Scalar field multiplicative inverse via ziskos fcall.
+/// Scalar inverse via Fermat's little theorem: x^(n−2) mod n.
 #[no_mangle]
 pub unsafe extern "C" fn secp256k1_fn_inv_c(x_ptr: *const u64, out_ptr: *mut u64) {
     let x = &*(x_ptr as *const [u64; 4]);
     let out = &mut *(out_ptr as *mut [u64; 4]);
-    *out = fcall_secp256k1_fn_inv(x);
+    *out = fn_inv_internal(x);
 }
 
 // ========================= secp256k1 curve ops =========================
 
-/// Projective -> affine: (x, y, z) -> (x/z^2, y/z^3).
-/// Input: 12 u64 limbs [x(4), y(4), z(4)], Output: 8 u64 limbs [x(4), y(4)].
+/// Projective → affine conversion.
+///
+/// k256 uses **standard** (homogeneous) projective coordinates:
+///   affine = (X/Z, Y/Z)
+///
+/// Input:  12 u64 limbs  [X(4), Y(4), Z(4)]
+/// Output:  8 u64 limbs  [x(4), y(4)]
 #[no_mangle]
 pub unsafe extern "C" fn secp256k1_to_affine_c(p_ptr: *const u64, out_ptr: *mut u64) {
     let px = &*(p_ptr as *const [u64; 4]);
     let py = &*((p_ptr.add(4)) as *const [u64; 4]);
     let pz = &*((p_ptr.add(8)) as *const [u64; 4]);
 
-    let z_inv = fcall_secp256k1_fp_inv(pz);
+    let z_inv = fp_inv(pz);
 
-    // z_inv2 = z_inv^2 mod P
-    let mut z_inv2 = [0u64; 4];
-    let mut params = SyscallArith256ModParams {
-        a: &z_inv, b: &z_inv, c: &ZERO_256, module: &P, d: &mut z_inv2,
-    };
-    syscall_arith256_mod(&mut params);
-
-    // z_inv3 = z_inv2 * z_inv mod P
-    let mut z_inv3 = [0u64; 4];
-    let mut params = SyscallArith256ModParams {
-        a: &z_inv2, b: &z_inv, c: &ZERO_256, module: &P, d: &mut z_inv3,
-    };
-    syscall_arith256_mod(&mut params);
-
-    // out_x = px * z_inv2 mod P
     let out_x = &mut *(out_ptr as *mut [u64; 4]);
-    let mut params = SyscallArith256ModParams {
-        a: px, b: &z_inv2, c: &ZERO_256, module: &P, d: out_x,
-    };
-    syscall_arith256_mod(&mut params);
+    *out_x = arith_mod(px, &z_inv, &ZERO_256, &P);
 
-    // out_y = py * z_inv3 mod P
     let out_y = &mut *((out_ptr.add(4)) as *mut [u64; 4]);
-    let mut params = SyscallArith256ModParams {
-        a: py, b: &z_inv3, c: &ZERO_256, module: &P, d: out_y,
-    };
-    syscall_arith256_mod(&mut params);
+    *out_y = arith_mod(py, &z_inv, &ZERO_256, &P);
 }
 
-/// Decompress a secp256k1 point from its x-coordinate (32 big-endian bytes).
-/// Returns 1 on success, 0 on failure.
+/// Decompress a secp256k1 point from its x-coordinate (32 big-endian bytes)
+/// and a parity flag.  Returns 1 on success, 0 on failure.
 #[no_mangle]
 pub unsafe extern "C" fn secp256k1_decompress_c(
-    x_bytes_ptr: *const u8, y_is_odd: u8, out_ptr: *mut u64,
+    x_bytes_ptr: *const u8,
+    y_is_odd: u8,
+    out_ptr: *mut u64,
 ) -> u8 {
     let x_bytes = core::slice::from_raw_parts(x_bytes_ptr, 32);
     let x = bytes_be_to_u64_le(x_bytes);
 
-    match secp256k1_lift_x(&x, y_is_odd != 0) {
-        Ok(point) => {
-            let out = core::slice::from_raw_parts_mut(out_ptr, 8);
-            out.copy_from_slice(&point);
-            1
-        }
-        Err(_) => 0,
+    // y² = x³ + 7
+    let x_sq = arith_mod(&x, &x, &ZERO_256, &P);
+    let x_cb = arith_mod(&x_sq, &x, &ZERO_256, &P);
+    let y_sq = arith_mod(&x_cb, &ONE, &E_B, &P);
+
+    // Candidate y = y_sq^((p+1)/4) mod p
+    let y = fp_sqrt(&y_sq);
+
+    // Verify: y² must equal y_sq (otherwise not a quadratic residue)
+    let check = arith_mod(&y, &y, &ZERO_256, &P);
+    if !eq_256(&check, &y_sq) {
+        return 0;
     }
+
+    // Fix parity
+    let parity = (y[0] & 1) as u8;
+    let final_y = if parity != y_is_odd {
+        arith_mod(&y, &P_MINUS_ONE, &ZERO_256, &P)
+    } else {
+        y
+    };
+
+    let out = core::slice::from_raw_parts_mut(out_ptr, 8);
+    out[0..4].copy_from_slice(&x);
+    out[4..8].copy_from_slice(&final_y);
+    1
 }
 
-/// Double scalar multiplication: k1*G + k2*P.
-/// Returns true if the result is not the point at infinity.
+/// Double scalar multiplication:  k1·G + k2·P.
+///
+/// Returns `true` when the result is **not** the point at infinity.
 #[no_mangle]
 pub unsafe extern "C" fn secp256k1_double_scalar_mul_with_g_c(
-    k1_ptr: *const u64, k2_ptr: *const u64, p_ptr: *const u64, out_ptr: *mut u64,
+    k1_ptr: *const u64,
+    k2_ptr: *const u64,
+    p_ptr: *const u64,
+    out_ptr: *mut u64,
 ) -> bool {
     let k1 = &*(k1_ptr as *const [u64; 4]);
     let k2 = &*(k2_ptr as *const [u64; 4]);
     let p = &*(p_ptr as *const [u64; 8]);
 
-    match secp256k1_double_scalar_mul_with_g(k1, k2, p) {
+    match double_scalar_mul_internal(k1, k2, p) {
         Some(result) => {
             let out = &mut *(out_ptr as *mut [u64; 8]);
             *out = result;
@@ -281,27 +700,21 @@ pub unsafe extern "C" fn secp256k1_double_scalar_mul_with_g_c(
     }
 }
 
-/// ECDSA verification. Returns true if signature (r, s) over hash z is valid for pk.
+/// ECDSA verification.
+///
+/// Returns `true` when signature `(r, s)` over message hash `z` is valid for
+/// public key `pk`.
 #[no_mangle]
 pub unsafe extern "C" fn secp256k1_ecdsa_verify_c(
-    pk_ptr: *const u64, z_ptr: *const u64, r_ptr: *const u64, s_ptr: *const u64,
+    pk_ptr: *const u64,
+    z_ptr: *const u64,
+    r_ptr: *const u64,
+    s_ptr: *const u64,
 ) -> bool {
     let pk = &*(pk_ptr as *const [u64; 8]);
     let z = &*(z_ptr as *const [u64; 4]);
     let r = &*(r_ptr as *const [u64; 4]);
     let s = &*(s_ptr as *const [u64; 4]);
 
-    secp256k1_ecdsa_verify(pk, z, r, s)
-}
-
-// ========================= Helpers =========================
-
-fn bytes_be_to_u64_le(bytes: &[u8]) -> [u64; 4] {
-    let mut result = [0u64; 4];
-    for i in 0..4 {
-        for j in 0..8 {
-            result[3 - i] |= (bytes[i * 8 + j] as u64) << (8 * (7 - j));
-        }
-    }
-    result
+    ecdsa_verify_internal(pk, z, r, s)
 }
