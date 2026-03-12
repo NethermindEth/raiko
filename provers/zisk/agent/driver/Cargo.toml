@@ -36,3 +36,7 @@ raiko-lib = { path = "../../../../lib", features = ["std"] }
 zisk-sdk = { git = "https://github.com/0xPolygonHermez/zisk.git", rev = "6668726" }
 zisk-common = { git = "https://github.com/0xPolygonHermez/zisk.git", rev = "6668726" }
 fields = { git = "https://github.com/0xPolygonHermez/pil2-proofman.git", branch = "pre-develop-0.16.0" }
+
+[[bin]]
+name = "dump-proof"
+path = "src/bin/dump_proof.rs"
