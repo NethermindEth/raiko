@@ -677,7 +677,11 @@ pub unsafe extern "C" fn secp256k1_decompress_c(
 
 /// Double scalar multiplication:  k1·G + k2·P.
 ///
-/// Returns `true` when the result is **not** the point at infinity.
+/// Returns `true` when the result **is** the point at infinity (identity),
+/// `false` when the output buffer contains a valid affine point.
+///
+/// This matches the convention expected by the k256 `lincomb()` caller
+/// which names the return value `is_identity`.
 #[no_mangle]
 pub unsafe extern "C" fn secp256k1_double_scalar_mul_with_g_c(
     k1_ptr: *const u64,
@@ -693,9 +697,9 @@ pub unsafe extern "C" fn secp256k1_double_scalar_mul_with_g_c(
         Some(result) => {
             let out = &mut *(out_ptr as *mut [u64; 8]);
             *out = result;
-            true
+            false // NOT identity — output buffer is valid
         }
-        None => false,
+        None => true, // IS identity
     }
 }
 
