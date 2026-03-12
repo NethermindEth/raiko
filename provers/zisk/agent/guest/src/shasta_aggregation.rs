@@ -2,6 +2,8 @@
 #![no_main]
 ziskos::entrypoint!(main);
 
+mod precompile_shims;
+
 use raiko_lib::{
     input::ShastaRisc0AggregationGuestInput,
     libhash::hash_shasta_subproof_input,

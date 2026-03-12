@@ -3,6 +3,8 @@
 #![no_main]
 ziskos::entrypoint!(main);
 
+mod precompile_shims;
+
 use raiko_lib::{
     input::ZkAggregationGuestInput,
     primitives::B256,
