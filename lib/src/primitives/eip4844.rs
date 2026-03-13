@@ -1,13 +1,13 @@
 use alloy_consensus::Blob;
 use alloy_primitives::B256;
-use kzg::kzg_types::{ZFr, ZG1, ZG2};
+use kzg::kzg_types::{ZFr, ZG1};
 use kzg_traits::{
     eip_4844::{
         blob_to_kzg_commitment_rust, blob_to_polynomial, compute_kzg_proof_rust,
         evaluate_polynomial_in_evaluation_form, hash_to_bls_field, verify_kzg_proof_rust,
         BYTES_PER_FIELD_ELEMENT,
     },
-    Fr, G1, G2,
+    Fr, G1,
 };
 use once_cell::sync::Lazy;
 use sha2::{Digest as _, Sha256};
