@@ -180,26 +180,37 @@ pub fn shutdown_zisk() {
 // Helpers
 // ---------------------------------------------------------------------------
 
-fn save_input(elf_name: &str, serialized_input: &[u8], config: &ZiskLocalConfig) {
+/// Build a ZiskStdin with properly framed data.
+///
+/// v0.16.0 requires input data to be framed with 8-byte length prefixes
+/// and 8-byte alignment. `from_vec` passes raw bytes (no framing), so we
+/// must use `write_slice` which adds the proper framing.
+fn build_zisk_stdin(serialized_input: Vec<u8>) -> zisk_common::io::ZiskStdin {
+    let stdin = zisk_common::io::ZiskStdin::new();
+    stdin.write_slice(&serialized_input);
+    stdin
+}
+
+fn save_input(elf_name: &str, stdin: &zisk_common::io::ZiskStdin, config: &ZiskLocalConfig) {
     std::fs::create_dir_all(&config.output_dir).ok();
     let input_path = config.output_dir.join(format!("{elf_name}-input.bin"));
-    std::fs::write(&input_path, serialized_input).ok();
+    // Save the framed data so CLI --input can read it directly
+    stdin.save(&input_path).ok();
     info!(
-        "Saved {} input ({} bytes) to {:?}",
-        elf_name,
-        serialized_input.len(),
-        input_path
+        "Saved {} framed input to {:?}",
+        elf_name, input_path
     );
 }
 
 fn prove_stark(elf_name: &str, serialized_input: Vec<u8>) -> ProverResult<ZiskProveResult> {
     let config = ZiskLocalConfig::from_env();
     info!("Using ELF at {:?}", elf_path(elf_name));
-    save_input(elf_name, &serialized_input, &config);
 
     let (pk, _vk) = cached_pk(elf_name);
 
-    let stdin = zisk_common::io::ZiskStdin::from_vec(serialized_input);
+    let stdin = build_zisk_stdin(serialized_input);
+    save_input(elf_name, &stdin, &config);
+
     let proof_opts = ProofOpts::default()
         .output_dir(config.output_dir)
         .verify_proofs();
@@ -219,11 +230,12 @@ fn prove_stark_with_snark(
 ) -> ProverResult<ZiskProveResult> {
     let config = ZiskLocalConfig::from_env();
     info!("Using ELF at {:?}", elf_path(elf_name));
-    save_input(elf_name, &serialized_input, &config);
 
     let (pk, _vk) = cached_pk(elf_name);
 
-    let stdin = zisk_common::io::ZiskStdin::from_vec(serialized_input);
+    let stdin = build_zisk_stdin(serialized_input);
+    save_input(elf_name, &stdin, &config);
+
     let proof_opts = ProofOpts::default()
         .output_dir(config.output_dir)
         .verify_proofs();
