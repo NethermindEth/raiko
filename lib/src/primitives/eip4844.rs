@@ -1,13 +1,11 @@
 use alloy_consensus::Blob;
 use alloy_primitives::B256;
-use kzg::{
-    kzg_proofs::pairings_verify,
-    kzg_types::{ZFr, ZG1, ZG2},
-};
+use kzg::kzg_types::{ZFr, ZG1, ZG2};
 use kzg_traits::{
     eip_4844::{
         blob_to_kzg_commitment_rust, blob_to_polynomial, compute_kzg_proof_rust,
-        evaluate_polynomial_in_evaluation_form, hash_to_bls_field, BYTES_PER_FIELD_ELEMENT,
+        evaluate_polynomial_in_evaluation_form, hash_to_bls_field, verify_kzg_proof_rust,
+        BYTES_PER_FIELD_ELEMENT,
     },
     Fr, G1, G2,
 };
@@ -89,30 +87,13 @@ pub fn verify_kzg_proof_impl(
     y: KzgField,
     proof: KzgGroup,
 ) -> Result<bool, Eip4844Error> {
-    use bls12_381::*;
-    let commitment = G1Affine::from_compressed(&commitment).unwrap();
-    let proof = G1Affine::from_compressed(&proof).unwrap();
-    let proof = G1Projective::from(&proof);
-    let mut x_le = x;
-    x_le.reverse();
-    let mut y_le = y;
-    y_le.reverse();
-    let x = Scalar::from_bytes(&x_le).unwrap();
-    let y = Scalar::from_bytes(&y_le).unwrap();
+    let commitment = ZG1::from_bytes(&commitment).map_err(|e| Eip4844Error::ComputeKzgProof(e))?;
+    let x = ZFr::from_bytes(&x).map_err(|e| Eip4844Error::ComputeKzgProof(e))?;
+    let y = ZFr::from_bytes(&y).map_err(|e| Eip4844Error::ComputeKzgProof(e))?;
+    let proof = ZG1::from_bytes(&proof).map_err(|e| Eip4844Error::ComputeKzgProof(e))?;
 
-    let g2_x = G2Affine::generator() * x;
-    let setup_committed_x = G2Affine::from(KZG_SETTINGS.g2_values_monomial[1].proj);
-    let x_diff = setup_committed_x - g2_x;
-
-    let g1_y = G1Affine::generator() * y;
-    let p_minus_y = commitment - g1_y;
-
-    Ok(pairings_verify(
-        &ZG1::from_g1_projective(p_minus_y),
-        &ZG2::generator(),
-        &ZG1::from_g1_projective(proof),
-        &ZG2::from_g2_projective(x_diff),
-    ))
+    verify_kzg_proof_rust(&commitment, &x, &y, &proof, &*KZG_SETTINGS)
+        .map_err(|e| Eip4844Error::ComputeKzgProof(e))
 }
 
 pub fn calc_kzg_proof(blob: &[u8], versioned_hash: &B256) -> Result<ZG1, Eip4844Error> {
