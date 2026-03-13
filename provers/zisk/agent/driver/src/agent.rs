@@ -16,7 +16,7 @@ use raiko_lib::{
 };
 use serde_json::{json, Value};
 use std::path::PathBuf;
-use tracing::info;
+use tracing::{info, warn};
 
 use zisk_common::ElfBinaryFromFile;
 use zisk_sdk::{
@@ -196,10 +196,7 @@ fn save_input(elf_name: &str, stdin: &zisk_common::io::ZiskStdin, config: &ZiskL
     let input_path = config.output_dir.join(format!("{elf_name}-input.bin"));
     // Save the framed data so CLI --input can read it directly
     stdin.save(&input_path).ok();
-    info!(
-        "Saved {} framed input to {:?}",
-        elf_name, input_path
-    );
+    info!("Saved {} framed input to {:?}", elf_name, input_path);
 }
 
 fn prove_stark(elf_name: &str, serialized_input: Vec<u8>) -> ProverResult<ZiskProveResult> {
@@ -311,6 +308,29 @@ fn vkey_to_image_id(vkey_hex: &str) -> [u32; 8] {
     image_id
 }
 
+/// Get the zisk batch vkey string.
+///
+/// In production, batch proofs carry the vkey in their `uuid` field (set by
+/// `batch_run`). Using it avoids triggering `BATCH_PK` setup, which starts a
+/// separate set of ASM microservices and causes GPU contention with the
+/// aggregation prover.
+///
+/// Falls back to `cached_vkey_hex("zisk-batch")` (triggering setup) when:
+/// - `uuid` is absent, or
+/// - `uuid` is not a valid 32-byte hex string (e.g. SP1 JSON vkey in fixtures).
+fn zisk_batch_vkey_from_proofs(proofs: &[raiko_lib::prover::Proof]) -> String {
+    if let Some(uuid) = proofs.first().and_then(|p| p.uuid.as_deref()) {
+        let stripped = uuid.strip_prefix("0x").unwrap_or(uuid);
+        if let Ok(bytes) = hex::decode(stripped) {
+            if bytes.len() == 32 {
+                return uuid.to_string();
+            }
+        }
+    }
+    warn!("Batch proof missing valid vkey in uuid, falling back to cached vkey (triggers setup)");
+    cached_vkey_hex("zisk-batch")
+}
+
 // ---------------------------------------------------------------------------
 // Prover
 // ---------------------------------------------------------------------------
@@ -373,7 +393,7 @@ impl ZiskAgentProver {
             })
             .collect::<ProverResult<Vec<_>>>()?;
 
-        let batch_vkey = cached_vkey_hex("zisk-batch");
+        let batch_vkey = zisk_batch_vkey_from_proofs(&input.proofs);
         let zisk_input = ZkAggregationGuestInput {
             image_id: vkey_to_image_id(&batch_vkey),
             block_inputs,
@@ -446,7 +466,7 @@ impl ZiskAgentProver {
             }
         }
 
-        let batch_vkey = cached_vkey_hex("zisk-batch");
+        let batch_vkey = zisk_batch_vkey_from_proofs(&input.proofs);
         let shasta_input = ShastaZiskAggregationGuestInput {
             image_id: vkey_to_image_id(&batch_vkey),
             block_inputs,
