@@ -3,7 +3,8 @@ ziskos::entrypoint!(main);
 
 mod precompile_shims;
 mod ruint_shims;
-mod zisk_crypto;
+
+use std::sync::Arc;
 
 use raiko_lib::{
     builder::calculate_batch_blocks_final_header, input::GuestBatchInput, proof_type::ProofType,
@@ -11,9 +12,12 @@ use raiko_lib::{
 };
 
 pub fn main() {
-    // Route ecrecover through the ziskos high-level syscall instead of the
-    // k256 patch field-op path (reduces ROM size from ~500+ calls to 1).
-    raiko_lib::revm::precompile::install_crypto(zisk_crypto::ZiskCrypto);
+    // // Route ecrecover through the ziskos high-level syscall instead of the
+    // // k256 patch field-op path (reduces ROM size from ~500+ calls to 1).
+    // raiko_lib::revm::precompile::install_crypto(zisk_crypto::ZiskCrypto);
+    // let crypto = Arc::new(zisk_crypto::ZiskCrypto);
+    // raiko_lib::alloy_consensus::crypto::install_default_provider(crypto.clone())
+    //     .expect("crypto provider already set");
 
     // Initialize hints stream (native build only — emits precompile hint requests)
     #[cfg(zisk_hints)]
@@ -38,6 +42,7 @@ pub fn main() {
     // Get the instance hash and commit as public output
     let instance_hash = protocol_instance.instance_hash();
     ziskos::io::write(&instance_hash.0);
+
     // Close hints stream (flushes all pending hints)
     #[cfg(zisk_hints)]
     ziskos::hints::close_hints().expect("failed to close hints");

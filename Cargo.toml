@@ -1,9 +1,6 @@
 [workspace]
 resolver = "2"
-exclude = [
-    "provers/zisk/agent/guest",
-    "provers/zisk/agent/builder",
-]
+exclude = ["provers/zisk/agent/guest", "provers/zisk/agent/builder"]
 members = [
     "lib",
     "host",
