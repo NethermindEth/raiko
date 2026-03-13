@@ -5,6 +5,7 @@ ziskos::entrypoint!(main);
 
 mod precompile_shims;
 mod ruint_shims;
+mod zisk_crypto;
 
 use raiko_lib::{
     input::ZkAggregationGuestInput,
@@ -13,6 +14,8 @@ use raiko_lib::{
 };
 
 pub fn main() {
+    raiko_lib::revm::precompile::install_crypto(zisk_crypto::ZiskCrypto);
+
     // Read the aggregation input data from ziskos
     let input_data = ziskos::io::read_vec();
     assert!(!input_data.is_empty(), "aggregation input is empty");

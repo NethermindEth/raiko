@@ -1,7 +1,8 @@
 [workspace]
 resolver = "2"
 exclude = [
-    "provers/zisk/agent", # Entire ZISK agent is now self-contained
+    "provers/zisk/agent/guest",
+    "provers/zisk/agent/builder",
 ]
 members = [
     "lib",
@@ -24,6 +25,7 @@ members = [
     "reqpool",
     "reqactor",
     "ballot",
+    "provers/zisk/agent/driver",
 ]
 
 # Always optimize; building and running the guest takes much longer without optimization.
