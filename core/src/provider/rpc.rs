@@ -47,7 +47,7 @@ impl RpcBlockDataProvider {
         let mut storage_proofs: MerkleProof = HashMap::new();
         let mut idx = offset;
 
-        let mut accounts = accounts.clone();
+        let mut accounts = accounts;
 
         let batch_limit = 1000;
         while !accounts.is_empty() {

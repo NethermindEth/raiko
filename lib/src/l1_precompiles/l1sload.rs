@@ -4,7 +4,7 @@ use alethia_reth_evm::precompiles::l1sload::{
 use alloy_primitives::{Bytes, B256, U256};
 use alloy_rlp::{Buf, Decodable, Header as RlpHeader};
 use alloy_trie::{proof::verify_proof, Nibbles};
-use anyhow::{bail, Context, Result};
+use anyhow::{anyhow, bail, Context, Result};
 use reth_primitives::Header;
 use std::collections::HashMap;
 use std::sync::{LazyLock, Mutex, MutexGuard};
@@ -123,7 +123,9 @@ pub fn populate_l1sload_cache(
 
     info!(
         "L1SLOAD: populating cache (anchor={}, l1_origin={}, proofs={})",
-        anchor_block_number, l1_origin_block_number, l1_storage_proofs.len()
+        anchor_block_number,
+        l1_origin_block_number,
+        l1_storage_proofs.len()
     );
 
     for proof in l1_storage_proofs {
@@ -307,7 +309,13 @@ fn get_leaf_value(proof: &[Bytes]) -> Result<Vec<u8>> {
     // - 17 elements = branch node (non-existence proof terminates here)
     // - 2 elements = leaf or extension node
     // This matches alloy-trie's TrieNode::decode logic (nodes/mod.rs).
-    let mut count_data = &data[..list_header.payload_length];
+    let mut count_data = data.get(..list_header.payload_length).ok_or_else(|| {
+        anyhow!(
+            "Proof node truncated: payload_length {} exceeds remaining data {}",
+            list_header.payload_length,
+            data.len()
+        )
+    })?;
     let mut element_count = 0u32;
     while !count_data.is_empty() {
         let header = RlpHeader::decode(&mut count_data).with_context(|| {
@@ -337,7 +345,13 @@ fn get_leaf_value(proof: &[Bytes]) -> Result<Vec<u8>> {
     // The first nibble of the compact-encoded path encodes the node type:
     //   0x0 or 0x1 → extension node
     //   0x2 or 0x3 → leaf node
-    let path_bytes = &data[..path_header.payload_length];
+    let path_bytes = data.get(..path_header.payload_length).ok_or_else(|| {
+        anyhow!(
+            "Proof node truncated: path payload_length {} exceeds remaining data {}",
+            path_header.payload_length,
+            data.len()
+        )
+    })?;
     if !path_bytes.is_empty() {
         let hp_flag = path_bytes[0] >> 4;
         if hp_flag < 2 {
@@ -357,7 +371,16 @@ fn get_leaf_value(proof: &[Bytes]) -> Result<Vec<u8>> {
 
     // In an MPT leaf node [path, value], when the 2-element list is decoded,
     // the value field is the PAYLOAD only (not including the RLP header).
-    let value = data[..value_header.payload_length].to_vec();
+    let value = data
+        .get(..value_header.payload_length)
+        .ok_or_else(|| {
+            anyhow!(
+                "Proof node truncated: value payload_length {} exceeds remaining data {}",
+                value_header.payload_length,
+                data.len()
+            )
+        })?
+        .to_vec();
 
     trace!(
         "Extracted leaf value: {} bytes (RLP-encoded) from leaf node",
@@ -427,7 +450,7 @@ fn get_storage_root(account_rlp: &[u8]) -> Result<B256> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloy_primitives::{Address, B256, Bytes, U256};
+    use alloy_primitives::{Address, Bytes, B256, U256};
     use alloy_rlp::Encodable;
     use reth_primitives::Header;
 
@@ -446,7 +469,12 @@ mod tests {
     }
 
     /// RLP-encode an Ethereum account: [nonce, balance, storage_root, code_hash].
-    fn rlp_encode_account(nonce: u64, balance: U256, storage_root: B256, code_hash: B256) -> Vec<u8> {
+    fn rlp_encode_account(
+        nonce: u64,
+        balance: U256,
+        storage_root: B256,
+        code_hash: B256,
+    ) -> Vec<u8> {
         use alloy_rlp::BytesMut;
         let mut buf = BytesMut::new();
 
@@ -550,7 +578,10 @@ mod tests {
 
         let result = build_verified_state_root_map(&origin, &[wrong_parent]);
         assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("header chain broken"));
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("header chain broken"));
     }
 
     // ───────────────────────────────────────────────
@@ -734,7 +765,10 @@ mod tests {
 
         let result = verify_and_populate_l1sload_proofs(&[proof], 40, &origin, &[]);
         assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("No verified state root"));
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("No verified state root"));
     }
 
     // ───────────────────────────────────────────────
@@ -778,7 +812,10 @@ mod tests {
         input[52..84].copy_from_slice(block_num.as_slice());
 
         let result = l1sload_run(&input, 5000);
-        assert!(result.is_ok(), "Cached value should be retrievable via precompile");
+        assert!(
+            result.is_ok(),
+            "Cached value should be retrievable via precompile"
+        );
         assert_eq!(result.unwrap().bytes.as_ref(), value.as_slice());
 
         clear_l1sload_cache();

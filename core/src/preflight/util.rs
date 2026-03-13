@@ -836,10 +836,7 @@ pub async fn fetch_l1_proofs_for_rpc_served_calls(
     let l1_headers =
         fetch_l1_headers_in_range(l1_provider, min_requested_block, l1_origin_block_number).await?;
 
-    Ok(L1StorageProofCollection {
-        proofs,
-        l1_headers,
-    })
+    Ok(L1StorageProofCollection { proofs, l1_headers })
 }
 
 /// Fetch L1 block headers in the range `[from_block, to_block)`.
@@ -855,13 +852,9 @@ async fn fetch_l1_headers_in_range(
         return Ok(Vec::new());
     }
 
-    info!(
-        "Fetching L1 headers: blocks {}..{}",
-        from_block, to_block
-    );
+    info!("Fetching L1 headers: blocks {}..{}", from_block, to_block);
 
-    let blocks_to_fetch: Vec<(u64, bool)> =
-        (from_block..to_block).map(|n| (n, false)).collect();
+    let blocks_to_fetch: Vec<(u64, bool)> = (from_block..to_block).map(|n| (n, false)).collect();
 
     let blocks = l1_provider.get_blocks(&blocks_to_fetch).await?;
 

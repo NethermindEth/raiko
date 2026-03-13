@@ -62,12 +62,11 @@ fn prepare_l1sload_for_execution(input: &GuestInput) -> RaikoResult<MutexGuard<'
                 "Failed to determine active fork: {e}"
             )))
         })?;
-    let (anchor_block_number, _) = get_anchor_tx_info_by_fork(fork, anchor_tx)
-        .map_err(|e| {
-            RaikoError::Guest(raiko_lib::prover::ProverError::GuestError(format!(
-                "Failed to decode anchor tx info: {e}"
-            )))
-        })?;
+    let (anchor_block_number, _) = get_anchor_tx_info_by_fork(fork, anchor_tx).map_err(|e| {
+        RaikoError::Guest(raiko_lib::prover::ProverError::GuestError(format!(
+            "Failed to decode anchor tx info: {e}"
+        )))
+    })?;
     verify_and_populate_l1sload_proofs(
         &input.l1_storage_proofs,
         anchor_block_number,

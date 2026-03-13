@@ -196,12 +196,14 @@ pub async fn preflight<BDP: BlockDataProvider>(
         clear_l1_rpc_served_calls();
 
         let l1_rpc_url = l1_chain_spec.rpc.clone();
+        let parsed_url = reqwest::Url::parse(&l1_rpc_url)
+            .map_err(|e| RaikoError::Preflight(format!("invalid L1 RPC URL: {e}")))?;
+        let l1_client = alloy_rpc_client::ClientBuilder::default().http(parsed_url);
         let handle = tokio::runtime::Handle::current();
         set_l1_rpc_fetcher(move |address, storage_key, block_number| {
+            let client = l1_client.clone();
             tokio::task::block_in_place(|| {
                 handle.block_on(async {
-                    let client = alloy_rpc_client::ClientBuilder::default()
-                        .http(l1_rpc_url.parse().unwrap());
                     let block_id = alloy_rpc_types::BlockId::Number(block_number.into());
                     let value: alloy_primitives::U256 = client
                         .request("eth_getStorageAt", (address, storage_key, Some(block_id)))
@@ -531,12 +533,14 @@ pub async fn batch_preflight<BDP: BlockDataProvider>(
                     clear_l1_rpc_served_calls();
 
                     let l1_rpc_url = l1_rpc_url_for_chunk.clone();
+                    let parsed_url = reqwest::Url::parse(&l1_rpc_url)
+                        .map_err(|e| RaikoError::Preflight(format!("invalid L1 RPC URL: {e}")))?;
+                    let l1_client = alloy_rpc_client::ClientBuilder::default().http(parsed_url);
                     let handle = tokio::runtime::Handle::current();
                     set_l1_rpc_fetcher(move |address, storage_key, block_number| {
+                        let client = l1_client.clone();
                         tokio::task::block_in_place(|| {
                             handle.block_on(async {
-                                let client = alloy_rpc_client::ClientBuilder::default()
-                                    .http(l1_rpc_url.parse().unwrap());
                                 let block_id =
                                     alloy_rpc_types::BlockId::Number(block_number.into());
                                 let value: alloy_primitives::U256 = client
