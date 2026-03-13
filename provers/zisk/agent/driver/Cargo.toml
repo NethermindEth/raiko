@@ -30,12 +30,10 @@ libc = "0.2"
 # Raiko lib dependency (path relative to driver directory)
 raiko-lib = { path = "../../../../lib", features = ["std"] }
 
-# Zisk SDK and related dependencies
-# zisk: pinned to pre-develop-0.16.0 @ 6668726
-# proofman: use branch to match zisk's internal deps (avoids duplicate crate resolution)
-zisk-sdk = { git = "https://github.com/0xPolygonHermez/zisk.git", rev = "6668726" }
-zisk-common = { git = "https://github.com/0xPolygonHermez/zisk.git", rev = "6668726" }
-fields = { git = "https://github.com/0xPolygonHermez/pil2-proofman.git", branch = "pre-develop-0.16.0" }
+# Zisk SDK and related dependencies — v0.16.0
+zisk-sdk = { git = "https://github.com/0xPolygonHermez/zisk.git", tag = "v0.16.0" }
+zisk-common = { git = "https://github.com/0xPolygonHermez/zisk.git", tag = "v0.16.0" }
+fields = { git = "https://github.com/0xPolygonHermez/pil2-proofman.git", tag = "v0.16.0" }
 
 [[bin]]
 name = "dump-proof"

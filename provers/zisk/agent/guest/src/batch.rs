@@ -1,8 +1,11 @@
 #![no_main]
 ziskos::entrypoint!(main);
 
-mod precompile_shims;
-mod ruint_shims;
+// v0.16.0: patch crates removed — ziskos provides native precompile implementations.
+// These shims were needed for the 0.15.0 patch crates (k256, sha2, ruint) which
+// called extern "C" functions. Kept for reference if custom shims are needed later.
+// mod precompile_shims;
+// mod ruint_shims;
 
 use raiko_lib::{
     builder::calculate_batch_blocks_final_header, input::GuestBatchInput, proof_type::ProofType,

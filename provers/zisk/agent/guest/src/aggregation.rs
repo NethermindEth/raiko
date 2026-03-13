@@ -3,8 +3,9 @@
 #![no_main]
 ziskos::entrypoint!(main);
 
-mod precompile_shims;
-mod ruint_shims;
+// v0.16.0: patch crates removed — ziskos provides native precompile implementations.
+// mod precompile_shims;
+// mod ruint_shims;
 
 use raiko_lib::{
     input::ZkAggregationGuestInput,
