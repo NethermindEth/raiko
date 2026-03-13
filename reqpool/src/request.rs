@@ -558,11 +558,12 @@ impl RequestKey {
             RequestKey::GuestInput(_)
             | RequestKey::BatchGuestInput(_)
             | RequestKey::ShastaGuestInput(_) => RequestStage::GuestInput,
-            RequestKey::SingleProof(_)
-            | RequestKey::BatchProof(_)
-            | RequestKey::ShastaProof(_) => RequestStage::Proof,
-            RequestKey::Aggregation(_)
-            | RequestKey::ShastaAggregation(_) => RequestStage::Aggregation,
+            RequestKey::SingleProof(_) | RequestKey::BatchProof(_) | RequestKey::ShastaProof(_) => {
+                RequestStage::Proof
+            }
+            RequestKey::Aggregation(_) | RequestKey::ShastaAggregation(_) => {
+                RequestStage::Aggregation
+            }
         }
     }
 }

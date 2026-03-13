@@ -107,7 +107,8 @@ RUN TARGET=sp1 make guest
 # Verify sp1 guest ELFs were produced
 RUN ls provers/sp1/guest/elf/*
 
-# ── Stage 3: Host build with CUDA (depends on all source code) ──────
+# ── Stage 3: Host build (depends on all source code) ────────────────
+# CUDA is opt-in via --build-arg CARGO_FEATURES="sp1,risc0,cuda"
 FROM nvidia/cuda:12.4.0-devel-ubuntu22.04 AS builder
 
 ENV DEBIAN_FRONTEND=noninteractive
@@ -177,7 +178,8 @@ RUN mkdir -p ~/.cargo/bin
 # ARG CARGO_BUILD_JOBS=2
 # ENV CARGO_BUILD_JOBS=${CARGO_BUILD_JOBS}
 # ENV NUM_JOBS=${CARGO_BUILD_JOBS}
-RUN cargo build --release ${BUILD_FLAGS} --features "sp1,risc0,cuda"
+ARG CARGO_FEATURES="sp1,risc0"
+RUN cargo build --release ${BUILD_FLAGS} --features "${CARGO_FEATURES}"
 
 FROM ubuntu:22.04 AS raiko-zk
 

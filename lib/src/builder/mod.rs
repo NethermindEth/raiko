@@ -8,9 +8,11 @@ use crate::primitives::mpt::StateAccount;
 use crate::utils::txs::generate_transactions;
 use crate::utils::txs::generate_transactions_for_batch_blocks;
 use crate::{
+    anchor::get_anchor_tx_info_by_fork,
     consts::MAX_BLOCK_HASH_AGE,
     guest_mem_forget,
     input::{GuestBatchInput, GuestInput},
+    l1_precompiles::{clear_l1sload_cache, populate_l1sload_cache},
     mem_db::{AccountState, DbAccount, MemDb},
     CycleTracker,
 };
@@ -254,6 +256,27 @@ pub fn calculate_block_header(input: &mut GuestInput) -> Header {
     let db = create_mem_db(input).unwrap();
     cycle_tracker.end();
 
+    clear_l1sload_cache();
+    if input.chain_spec.is_taiko() {
+        let anchor_tx = input
+            .taiko
+            .anchor_tx
+            .as_ref()
+            .expect("anchor tx required for L1SLOAD");
+        let fork = input
+            .chain_spec
+            .active_fork(input.block.header.number, input.block.header.timestamp)
+            .expect("failed to determine active fork for L1SLOAD");
+        let (anchor_block_number, _) =
+            get_anchor_tx_info_by_fork(fork, anchor_tx).expect("failed to decode anchor tx info");
+        let l1_origin_block_number = input.taiko.l1_header.number;
+        populate_l1sload_cache(
+            &input.l1_storage_proofs,
+            anchor_block_number,
+            l1_origin_block_number,
+        );
+    }
+
     let pool_tx = generate_transactions(
         &input.chain_spec,
         &input.taiko.block_proposed,
@@ -284,6 +307,30 @@ pub fn calculate_batch_blocks_final_header(input: &mut GuestBatchInput) -> Vec<T
     let pool_txs_list = generate_transactions_for_batch_blocks(&input);
     let mut final_blocks = Vec::new();
     for (i, pool_txs) in pool_txs_list.iter().enumerate() {
+        clear_l1sload_cache();
+        if input.inputs[i].chain_spec.is_taiko() {
+            let anchor_tx = input.inputs[i]
+                .taiko
+                .anchor_tx
+                .as_ref()
+                .expect("anchor tx required for L1SLOAD in batch");
+            let fork = input.inputs[i]
+                .chain_spec
+                .active_fork(
+                    input.inputs[i].block.header.number,
+                    input.inputs[i].block.header.timestamp,
+                )
+                .expect("failed to determine active fork for L1SLOAD in batch");
+            let (anchor_block_number, _) = get_anchor_tx_info_by_fork(fork, anchor_tx)
+                .expect("failed to decode anchor tx info in batch");
+            let l1_origin_block_number = input.inputs[i].taiko.l1_header.number;
+            populate_l1sload_cache(
+                &input.inputs[i].l1_storage_proofs,
+                anchor_block_number,
+                l1_origin_block_number,
+            );
+        }
+
         // First, create the MemDb using a mutable reference (no clone needed —
         // create_mem_db only mem::takes `contracts` and storage `slots`).
         let db = create_mem_db(&mut input.inputs[i]).unwrap();
