@@ -51,6 +51,11 @@ fn prover_config(proof_type: ProofType) -> serde_json::Value {
                 "verify": false,
             });
         }
+        ProofType::Zisk => {
+            config["zisk"] = serde_json::json!({
+                "batch_snark": true,
+            });
+        }
         _ => {}
     }
 
