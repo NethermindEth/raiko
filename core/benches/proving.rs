@@ -127,8 +127,10 @@ fn main() {
 
     if bench_name == Some("all") || bench_name == Some("batch") {
         bench_batch_run(&rt);
+        bench_batch_run(&rt);
     }
     if bench_name == Some("all") || bench_name == Some("aggregate") {
+        bench_shasta_aggregate(&rt);
         bench_shasta_aggregate(&rt);
     }
 

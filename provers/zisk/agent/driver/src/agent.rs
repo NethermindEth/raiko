@@ -261,10 +261,19 @@ fn stark_proof_to_raiko_proof(
     result: &ZiskProveResult,
     output_hash: B256,
     vkey: Option<String>,
+    inner_vkey: Option<&str>,
 ) -> ProverResult<Proof> {
     let proof_bytes = zisk_proof_to_bytes(result.get_proof())?;
+    // Prepend vkey(s) to proof bytes, matching SP1 format:
+    //   batch:  "0x" + vkey_hex + proof_hex
+    //   agg:    "0x" + vkey_hex + inner_vkey_hex + proof_hex
+    let vk_hex = vkey.as_deref().map(|v| v.strip_prefix("0x").unwrap_or(v)).unwrap_or("");
+    let inner_hex = inner_vkey
+        .map(|v| v.strip_prefix("0x").unwrap_or(v))
+        .unwrap_or("");
+    let proof_string = format!("0x{}{}{}", vk_hex, inner_hex, hex::encode(&proof_bytes));
     Ok(Proof {
-        proof: Some(format!("0x{}", hex::encode(&proof_bytes))),
+        proof: Some(proof_string),
         quote: None,
         input: Some(output_hash),
         uuid: vkey,
@@ -277,12 +286,21 @@ fn snark_proof_to_raiko_proof(
     result: &ZiskProveResult,
     output_hash: B256,
     vkey: Option<String>,
+    inner_vkey: Option<&str>,
 ) -> ProverResult<Proof> {
     let proof_bytes = zisk_proof_to_bytes(result.get_proof())?;
     // For SNARK proofs, publics are encoded separately
     let program_vk = result.get_program_vk();
+    // Prepend vkey(s) to proof bytes, matching SP1 format:
+    //   batch:  "0x" + vkey_hex + proof_hex
+    //   agg:    "0x" + vkey_hex + inner_vkey_hex + proof_hex
+    let vk_hex = vkey.as_deref().map(|v| v.strip_prefix("0x").unwrap_or(v)).unwrap_or("");
+    let inner_hex = inner_vkey
+        .map(|v| v.strip_prefix("0x").unwrap_or(v))
+        .unwrap_or("");
+    let proof_string = format!("0x{}{}{}", vk_hex, inner_hex, hex::encode(&proof_bytes));
     Ok(Proof {
-        proof: Some(format!("0x{}", hex::encode(&proof_bytes))),
+        proof: Some(proof_string),
         quote: Some(hex::encode(&program_vk.vk)),
         input: Some(output_hash),
         uuid: vkey,
@@ -352,10 +370,19 @@ impl ZiskAgentProver {
         &self,
         input: GuestBatchInput,
         output: &GuestBatchOutput,
-        _config: &Value,
+        config: &Value,
         _id_store: Option<&mut dyn IdWrite>,
     ) -> ProverResult<Proof> {
-        info!("Zisk local batch proof starting");
+        let batch_snark = config
+            .get("zisk")
+            .and_then(|z| z.get("batch_snark"))
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
+
+        info!(
+            "Zisk local batch proof starting (mode: {})",
+            if batch_snark { "snark" } else { "stark" }
+        );
 
         let serialized_input = bincode::serialize(&input).map_err(|e| {
             ProverError::GuestError(format!("Failed to serialize GuestBatchInput: {e}"))
@@ -364,8 +391,13 @@ impl ZiskAgentProver {
         let output_hash = output.hash;
         let proof = tokio::task::spawn_blocking(move || {
             let batch_vkey = cached_vkey_hex("zisk-batch");
-            let result = prove_stark("zisk-batch", serialized_input)?;
-            stark_proof_to_raiko_proof(&result, output_hash, Some(batch_vkey))
+            if batch_snark {
+                let result = prove_stark_with_snark("zisk-batch", serialized_input)?;
+                snark_proof_to_raiko_proof(&result, output_hash, Some(batch_vkey), None)
+            } else {
+                let result = prove_stark("zisk-batch", serialized_input)?;
+                stark_proof_to_raiko_proof(&result, output_hash, Some(batch_vkey), None)
+            }
         })
         .await
         .map_err(|e| ProverError::GuestError(format!("spawn_blocking failed: {e}")))??;
@@ -406,7 +438,7 @@ impl ZiskAgentProver {
         let proof = tokio::task::spawn_blocking(move || {
             let agg_vkey = cached_vkey_hex("zisk-aggregation");
             let result = prove_stark_with_snark("zisk-aggregation", serialized_input)?;
-            snark_proof_to_raiko_proof(&result, output_hash, Some(agg_vkey))
+            snark_proof_to_raiko_proof(&result, output_hash, Some(agg_vkey), Some(&batch_vkey))
         })
         .await
         .map_err(|e| ProverError::GuestError(format!("spawn_blocking failed: {e}")))??;
@@ -481,7 +513,7 @@ impl ZiskAgentProver {
         let proof = tokio::task::spawn_blocking(move || {
             let shasta_vkey = cached_vkey_hex("zisk-shasta-aggregation");
             let result = prove_stark_with_snark("zisk-shasta-aggregation", serialized_input)?;
-            snark_proof_to_raiko_proof(&result, output_hash, Some(shasta_vkey))
+            snark_proof_to_raiko_proof(&result, output_hash, Some(shasta_vkey), Some(&batch_vkey))
         })
         .await
         .map_err(|e| ProverError::GuestError(format!("spawn_blocking failed: {e}")))??;

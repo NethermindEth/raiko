@@ -37,6 +37,9 @@
 		"bootstrap": false,
 		"prove": true
 	},
+	"zisk": {
+		"batch_snark": true
+	},
 	"risc0": {
 		"boundless": false,
 		"bonsai": false,

@@ -1,402 +1,254 @@
 #!/usr/bin/env bash
-
-# Any error will result in failure
 set -e
 
-# GPU support for Zisk proofs is automatically enabled when CUDA toolkit is detected.
-# The installation script will automatically rebuild Zisk with GPU features if CUDA is available.
-# 
-# Prerequisites for GPU support:
-# - NVIDIA GPU  
-# - CUDA Toolkit installed (https://developer.nvidia.com/cuda-toolkit)
-# 
-# For brand new environments: Just run `TARGET=zisk make install` - GPU support will be automatically
-# configured if CUDA toolkit is available on the system.
+# ─── Configuration ─────────────────────────────────────────────────────────────
+# ZisK version to install (override via env: ZISK_VERSION=0.16.0)
+ZISK_VERSION="${ZISK_VERSION:-0.16.0}"
+# ZisK install path (override via env: ZISK_DIR=/ephemeral/.zisk).
+# If different from ~/.zisk, a symlink ~/.zisk -> ZISK_DIR is created automatically.
+ZISK_DIR="${ZISK_DIR:-$HOME/.zisk}"
 
-# report the CI image status
+# ─── CI check ──────────────────────────────────────────────────────────────────
 if [ -n "$CI" ]; then
-	source ./script/ci-env-check.sh
+    source ./script/ci-env-check.sh
 fi
 
-# # toolchain necessary to compile c-kzg in SP1/risc0
-# if [ -z "$1" ] || [ "$1" == "sp1" ] || [ "$1" == "risc0" ]; then
-# 	# Check if the RISC-V GCC prebuilt binary archive already exists
-# 	if [ -f /tmp/riscv32-unknown-elf.gcc-13.2.0.tar.gz ]; then
-# 		echo "riscv-gcc-prebuilt existed, please check the file manually"
-# 	else
-# 		# Download the file using wget
-# 		wget -O /tmp/riscv32-unknown-elf.gcc-13.2.0.tar.gz https://github.com/stnolting/riscv-gcc-prebuilt/releases/download/rv32i-131023/riscv32-unknown-elf.gcc-13.2.0.tar.gz
-# 		# Check if wget succeeded
-# 		if [ $? -ne 0 ]; then
-# 			echo "Failed to download riscv-gcc-prebuilt"
-# 			exit 1
-# 		fi
-# 		# Create the directory if it doesn't exist
-# 		if [ ! -d /opt/riscv ]; then
-# 			mkdir /opt/riscv
-# 		fi
-# 		# Extract the downloaded archive
-# 		tar -xzf /tmp/riscv32-unknown-elf.gcc-13.2.0.tar.gz -C /opt/riscv/
-# 		# Check if tar succeeded
-# 		if [ $? -ne 0 ]; then
-# 			echo "Failed to extract riscv-gcc-prebuilt"
-# 			exit 1
-# 		fi
-# 	fi
-# fi
-ensure_zisk_proving_key() {
-	if [ -d "$HOME/.zisk/provingKey" ]; then
-		echo "Zisk proving key already present"
-		return 0
-	fi
+# ═══════════════════════════════════════════════════════════════════════════════
+# Helper functions
+# ═══════════════════════════════════════════════════════════════════════════════
 
-	echo "Zisk proving key not found, installing..."
-	local zisk_version=""
-	if command -v cargo-zisk >/dev/null 2>&1; then
-		zisk_version=$(cargo-zisk --version | awk '{print $2}')
-	fi
+# ─── SP1 ───────────────────────────────────────────────────────────────────────
+install_sp1() {
+    curl -L https://sp1.succinct.xyz | bash
+    echo "SP1 installed"
+    source "$HOME/.profile" 2>/dev/null || true
+    if command -v sp1up >/dev/null 2>&1; then
+        sp1up --c-toolchain
+    else
+        "$HOME/.sp1/bin/sp1up" --c-toolchain
+    fi
+}
 
-	if [ -x "$HOME/.zisk/bin/ziskup" ]; then
-		if [ -n "$zisk_version" ]; then
-			"$HOME/.zisk/bin/ziskup" --version "$zisk_version" --provingkey
-		else
-			"$HOME/.zisk/bin/ziskup" --provingkey
-		fi
-	else
-		if [ -n "$zisk_version" ]; then
-			curl -s https://raw.githubusercontent.com/0xPolygonHermez/zisk/main/ziskup/install.sh | bash -s -- --version "$zisk_version" --provingkey
-		else
-			curl -s https://raw.githubusercontent.com/0xPolygonHermez/zisk/main/ziskup/install.sh | bash -s -- --provingkey
-		fi
-	fi
+# ─── ZisK ──────────────────────────────────────────────────────────────────────
+
+# Create ZISK_DIR and, when using a custom path, symlink ~/.zisk -> ZISK_DIR.
+# Must be called before any ziskup/cargo-zisk commands.
+setup_zisk_dir() {
+    mkdir -p "$ZISK_DIR"
+    if [ "$ZISK_DIR" != "$HOME/.zisk" ]; then
+        if [ -e "$HOME/.zisk" ] && [ ! -L "$HOME/.zisk" ]; then
+            echo "Error: $HOME/.zisk exists and is not a symlink."
+            echo "Remove it manually before using a custom ZISK_DIR."
+            exit 1
+        fi
+        ln -sfn "$ZISK_DIR" "$HOME/.zisk"
+        echo "Symlinked $HOME/.zisk -> $ZISK_DIR"
+    fi
+}
+
+# Run ziskup, preferring the already-installed binary; falls back to the install script.
+run_ziskup() {
+    if [ -x "$ZISK_DIR/bin/ziskup" ]; then
+        ZISK_DIR="$ZISK_DIR" "$ZISK_DIR/bin/ziskup" "$@"
+    else
+        ZISK_DIR="$ZISK_DIR" curl -s \
+            https://raw.githubusercontent.com/0xPolygonHermez/zisk/main/ziskup/install.sh \
+            | bash -s -- "$@"
+    fi
+}
+
+install_zisk_cli() {
+    if command -v cargo-zisk >/dev/null 2>&1; then
+        echo "Zisk already installed: $(cargo-zisk --version)"
+        return 0
+    fi
+    echo "Installing Zisk v$ZISK_VERSION..."
+    run_ziskup --version "$ZISK_VERSION" --nokey
+    export PATH="$ZISK_DIR/bin:$PATH"
+    source "$HOME/.profile" 2>/dev/null || source "$HOME/.bashrc" 2>/dev/null || true
+    command -v cargo-zisk >/dev/null 2>&1 || {
+        echo "Error: Failed to install Zisk. Install manually:"
+        echo "  curl https://raw.githubusercontent.com/0xPolygonHermez/zisk/main/ziskup/install.sh | bash"
+        exit 1
+    }
+}
+
+install_zisk_toolchain() {
+    echo "Installing Zisk Rust toolchain..."
+    if cargo-zisk sdk install-toolchain; then
+        return 0
+    fi
+    echo "Automatic toolchain installation failed"
+	exit 1
+}
+
+ensure_zisk_proving_keys() {
+    if [ ! -d "$ZISK_DIR/provingKey" ]; then
+        echo "Installing Zisk proving key..."
+        run_ziskup --version "$ZISK_VERSION" --provingkey
+    else
+        echo "Zisk proving key already present"
+    fi
+
+    if [ ! -d "$ZISK_DIR/provingKeySnark" ]; then
+        echo "Installing Zisk SNARK proving key..."
+        run_ziskup setup_snark
+    else
+        echo "Zisk SNARK proving key already present"
+    fi
 }
 
 run_zisk_check_setup() {
-	if [ ! -x "$HOME/.zisk/bin/cargo-zisk" ]; then
-		echo "cargo-zisk not found; skipping check-setup"
-		return 0
-	fi
-	if [ ! -d "$HOME/.zisk/provingKey" ]; then
-		echo "Zisk proving key missing; skipping check-setup"
-		return 0
-	fi
-
-	echo "Regenerating Zisk constant tree files..."
-	if ! "$HOME/.zisk/bin/cargo-zisk" check-setup -a --proving-key "$HOME/.zisk/provingKey"; then
-		echo "Warning: cargo-zisk check-setup -a failed; rerun manually if needed."
-	fi
+    echo "Regenerating Zisk constant tree files..."
+    "$ZISK_DIR/bin/cargo-zisk" check-setup -a --snark 
 }
 
 copy_zisk_gpu_binaries() {
-	local src_dir="$1"
-	local bin=""
+    local src="$1"
 
-	for bin in cargo-zisk ziskemu libzisk_witness.so libziskclib.a zisk-worker zisk-coordinator riscv2zisk; do
-		if [ -f "$src_dir/$bin" ]; then
-			cp "$src_dir/$bin" "$HOME/.zisk/bin/"
-		else
-			echo "Warning: $bin not found in GPU build output"
-		fi
-	done
+    mkdir -p "$ZISK_DIR/bin"
+    cp "$src/cargo-zisk" "$src/ziskemu" "$src/riscv2zisk" \
+       "$src/zisk-coordinator" "$src/zisk-worker" "$src/libziskclib.a" \
+       "$ZISK_DIR/bin/"
+
+    mkdir -p "$ZISK_DIR/zisk/emulator-asm"
+    cp -r ./emulator-asm/src "$ZISK_DIR/zisk/emulator-asm/"
+    cp ./emulator-asm/Makefile "$ZISK_DIR/zisk/emulator-asm/"
+    cp -r ./lib-c "$ZISK_DIR/zisk/"
 }
 
+build_zisk_gpu() {
+    local marker="$ZISK_DIR/.gpu-enabled"
+    local built_version
+    built_version=$(cat "$marker" 2>/dev/null || echo "")
 
-# RISC-V64 bare-metal toolchain necessary for Zisk
-if [ -z "$1" ] || [ "$1" == "zisk" ]; then
-	# Check if we can use the existing riscv toolchain with 64-bit support
-	if [ -f /opt/riscv/bin/riscv-none-elf-gcc ]; then
-		echo "Checking if existing RISC-V toolchain supports 64-bit..."
-		# Test if the existing toolchain can compile for rv64ima
-		if /opt/riscv/bin/riscv-none-elf-gcc -march=rv64ima -mabi=lp64 -S -o /dev/null -xc /dev/null 2>/dev/null; then
-			echo "Existing RISC-V toolchain supports 64-bit, will use /opt/riscv/bin/riscv-none-elf-gcc"
-		else
-			echo "Warning: Existing RISC-V toolchain doesn't support 64-bit."
-			echo "You may need to install a 64-bit capable RISC-V toolchain manually."
-		fi
-	else
-		echo "Installing bare-metal RISC-V64 cross-compiler toolchain..."
-		if command -v apt-get >/dev/null 2>&1; then
-			# Ubuntu/Debian - try bare-metal toolchain first
-			sudo apt-get update
-			if sudo apt-get install -y gcc-riscv64-unknown-elf 2>/dev/null; then
-				echo "Installed gcc-riscv64-unknown-elf"
-			else
-				echo "gcc-riscv64-unknown-elf not available, trying alternative..."
-				# Download prebuilt bare-metal RISC-V64 toolchain
-				RISCV64_ARCHIVE="/tmp/riscv64-unknown-elf-gcc.tar.gz"
-				echo "Downloading prebuilt RISC-V64 bare-metal toolchain..."
-				wget -O "$RISCV64_ARCHIVE" "https://github.com/riscv-collab/riscv-gnu-toolchain/releases/download/2024.02.02/riscv64-elf-ubuntu-22.04-gcc-nightly-2024.02.02-nightly.tar.gz" || {
-					echo "Warning: Could not download RISC-V64 toolchain."
-					echo "Please install a bare-metal RISC-V64 toolchain manually."
-					echo "The existing /opt/riscv toolchain may work if it supports rv64ima."
-				}
-				if [ -f "$RISCV64_ARCHIVE" ]; then
-					echo "Extracting RISC-V64 toolchain to /opt/riscv64..."
-					sudo mkdir -p /opt/riscv64
-					sudo tar -xzf "$RISCV64_ARCHIVE" -C /opt/riscv64 --strip-components=1
-					echo "RISC-V64 bare-metal toolchain installed to /opt/riscv64"
-				fi
-			fi
-		else
-			echo "Warning: Could not install RISC-V64 toolchain automatically."
-			echo "Please install a bare-metal RISC-V64 toolchain manually."
-		fi
-	fi
-fi
+    if [ "$built_version" = "$ZISK_VERSION" ]; then
+        echo "Zisk GPU support already built for v$ZISK_VERSION"
+        return 0
+    fi
 
-# SGX
+    if [ -n "$built_version" ]; then
+        echo "Zisk GPU version mismatch (built: $built_version, wanted: $ZISK_VERSION), rebuilding..."
+    fi
+
+    echo "Building Zisk with GPU support (tag v$ZISK_VERSION)..."
+    local tmp
+    tmp=$(mktemp -d)
+    (
+        git clone --depth=1 --branch "v$ZISK_VERSION" \
+            https://github.com/0xPolygonHermez/zisk.git "$tmp/zisk"
+        cd "$tmp/zisk"
+        if cargo build --release --features gpu; then
+            copy_zisk_gpu_binaries "target/release"
+            echo "$ZISK_VERSION" > "$marker"
+            echo "Zisk successfully built with GPU support!"
+            run_zisk_check_setup
+        else
+            echo "GPU build failed, continuing with existing binaries"
+        fi
+    )
+    rm -rf "$tmp"
+}
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Installation sections
+# ═══════════════════════════════════════════════════════════════════════════════
+
+# ─── RISC-V64 bare-metal toolchain (needed by ZisK guest) ──────────────────────
+# if [ -z "$1" ] || [ "$1" == "zisk" ]; then
+#     if [ -f /opt/riscv/bin/riscv-none-elf-gcc ]; then
+#         echo "Checking existing RISC-V toolchain for 64-bit support..."
+#         if /opt/riscv/bin/riscv-none-elf-gcc -march=rv64ima -mabi=lp64 -S -o /dev/null -xc /dev/null 2>/dev/null; then
+#             echo "Existing RISC-V toolchain supports 64-bit"
+#         else
+#             echo "Warning: Existing RISC-V toolchain doesn't support 64-bit."
+#         fi
+#     else
+#         echo "Installing bare-metal RISC-V64 cross-compiler toolchain..."
+#         if command -v apt-get >/dev/null 2>&1; then
+#             sudo apt-get update
+#             if ! sudo apt-get install -y gcc-riscv64-unknown-elf 2>/dev/null; then
+#                 echo "gcc-riscv64-unknown-elf not available, downloading prebuilt toolchain..."
+#                 local riscv_archive="/tmp/riscv64-unknown-elf-gcc.tar.gz"
+#                 wget -O "$riscv_archive" \
+#                     "https://github.com/riscv-collab/riscv-gnu-toolchain/releases/download/2024.02.02/riscv64-elf-ubuntu-22.04-gcc-nightly-2024.02.02-nightly.tar.gz" \
+#                     && sudo mkdir -p /opt/riscv64 \
+#                     && sudo tar -xzf "$riscv_archive" -C /opt/riscv64 --strip-components=1 \
+#                     || echo "Warning: Could not install RISC-V64 toolchain. Please install manually."
+#             fi
+#         else
+#             echo "Warning: Could not install RISC-V64 toolchain automatically (no apt-get)."
+#         fi
+#     fi
+# fi
+
+# ─── SGX ───────────────────────────────────────────────────────────────────────
 if [ -z "$1" ] || [ "$1" == "sgx" ]; then
-	# also check if sgx is already installed
-	if command -v gramine-sgx >/dev/null 2>&1; then
-		echo "gramine already installed"
-	else
-		echo "gramine not installed, installing..."
-		# For SGX, install gramine: https://github.com/gramineproject/gramine.
-		sudo curl -fsSLo /etc/apt/keyrings/gramine-keyring-$(lsb_release -sc).gpg https://packages.gramineproject.io/gramine-keyring-$(lsb_release -sc).gpg
-
-		echo "deb [arch=amd64 signed-by=/etc/apt/keyrings/gramine-keyring-$(lsb_release -sc).gpg] https://packages.gramineproject.io/ $(lsb_release -sc) main" \
-		| sudo tee /etc/apt/sources.list.d/gramine.list
-
-		sudo curl -fsSLo /etc/apt/keyrings/intel-sgx-deb.asc https://download.01.org/intel-sgx/sgx_repo/ubuntu/intel-sgx-deb.key
-
-		echo "deb [arch=amd64 signed-by=/etc/apt/keyrings/intel-sgx-deb.asc] https://download.01.org/intel-sgx/sgx_repo/ubuntu $(lsb_release -sc) main" \
-		| sudo tee /etc/apt/sources.list.d/intel-sgx.list
-
-		sudo apt-get update
-		sudo apt-get install -y gramine
-
-		echo "Gramine installed, REBOOT MAY BE REQUIRED."
-	fi
+    if command -v gramine-sgx >/dev/null 2>&1; then
+        echo "gramine already installed"
+    else
+        echo "Installing gramine..."
+        sudo curl -fsSLo /etc/apt/keyrings/gramine-keyring-$(lsb_release -sc).gpg \
+            https://packages.gramineproject.io/gramine-keyring-$(lsb_release -sc).gpg
+        echo "deb [arch=amd64 signed-by=/etc/apt/keyrings/gramine-keyring-$(lsb_release -sc).gpg] \
+https://packages.gramineproject.io/ $(lsb_release -sc) main" \
+            | sudo tee /etc/apt/sources.list.d/gramine.list
+        sudo curl -fsSLo /etc/apt/keyrings/intel-sgx-deb.asc \
+            https://download.01.org/intel-sgx/sgx_repo/ubuntu/intel-sgx-deb.key
+        echo "deb [arch=amd64 signed-by=/etc/apt/keyrings/intel-sgx-deb.asc] \
+https://download.01.org/intel-sgx/sgx_repo/ubuntu $(lsb_release -sc) main" \
+            | sudo tee /etc/apt/sources.list.d/intel-sgx.list
+        sudo apt-get update
+        sudo apt-get install -y gramine
+        echo "Gramine installed. REBOOT MAY BE REQUIRED."
+    fi
 fi
-# RISC0
+
+# ─── RISC0 ─────────────────────────────────────────────────────────────────────
 if [ -z "$1" ] || [ "$1" == "risc0" ]; then
-	echo "Current TERM: $TERM"
-	if [ -z "$TERM" ] || [ "$TERM" = "dumb" ]; then
-		# Set TERM to xterm-color256
-		echo "Setting TERM to xterm"
-		export TERM=xterm
-	fi
-	curl -L https://risczero.com/install | bash
+    if [ -z "$TERM" ] || [ "$TERM" = "dumb" ]; then
+        export TERM=xterm
+    fi
+    curl -L https://risczero.com/install | bash
 
-	env_rzup=rzup
-	if [ -z "${CI}" ] || ! command -v rzup >/dev/null 2>&1; then
-		PROFILE=$HOME/.bashrc
-		echo "Load PROFILE: $PROFILE"
-		if [ -f "$PROFILE" ]; then
-			source "$PROFILE"
-		fi
-		if ! command -v rzup >/dev/null 2>&1; then
-			export PATH="$HOME/.risc0/bin:$PATH"
-			env_rzup="$HOME/.risc0/bin/rzup"
-		fi
-	else
-		echo "/home/runner/.risc0/bin" >>"$GITHUB_PATH"
-		echo "/home/runner/.config/.risc0/bin" >>$GITHUB_PATH
-		echo $GITHUB_PATH
-		env_rzup=/home/runner/.risc0/bin/rzup
-	fi
-	echo "start running $env_rzup"
-	if ! command -v "$env_rzup" >/dev/null 2>&1; then
-		echo "env_rzup is not working, please re-install rzup."
-		exit 1
-	fi
-	$env_rzup install 
-	$env_rzup install risc0-groth16
+    local env_rzup=rzup
+    if [ -z "${CI}" ] || ! command -v rzup >/dev/null 2>&1; then
+        source "$HOME/.bashrc" 2>/dev/null || true
+        if ! command -v rzup >/dev/null 2>&1; then
+            export PATH="$HOME/.risc0/bin:$PATH"
+            env_rzup="$HOME/.risc0/bin/rzup"
+        fi
+    else
+        echo "/home/runner/.risc0/bin" >> "$GITHUB_PATH"
+        echo "/home/runner/.config/.risc0/bin" >> "$GITHUB_PATH"
+        env_rzup=/home/runner/.risc0/bin/rzup
+    fi
+
+    command -v "$env_rzup" >/dev/null 2>&1 || { echo "Error: rzup not found; please reinstall."; exit 1; }
+    $env_rzup install
+    $env_rzup install risc0-groth16
 fi
 
-# SP1
+# ─── SP1 ───────────────────────────────────────────────────────────────────────
 if [ -z "$1" ] || [ "$1" == "sp1" ]; then
-	curl -L https://sp1.succinct.xyz | bash
-	echo "SP1 installed"
-	# if [ -z "${CI}" ] || [ ! command -v sp1up &> /dev/null ]; then
-	# echo "Non-CI environment"
-	# Need to add sp1up to the path here
-	PROFILE=$HOME/.profile
-	echo ${PROFILE}
-	source ${PROFILE}
-	if command -v sp1up >/dev/null 2>&1; then
-		echo "sp1 found in path"
-		sp1up --c-toolchain
-	else
-		echo "sp1 not found in path"
-		"$HOME/.sp1/bin/sp1up" --c-toolchain
-	fi
-	# else
-	# 	echo "CI environment"
-	# 	source /home/runner/.bashrc
-	# 	echo "/home/runner/.sp1/bin" >> $GITHUB_PATH
-	# 	/home/runner/.sp1/bin/sp1up
-	# fi
+    install_sp1
 fi
 
-# ZISK
+# ─── ZisK ──────────────────────────────────────────────────────────────────────
 if [ -z "$1" ] || [ "$1" == "zisk" ]; then
-	# Always ensure PATH includes zisk bin directory
-	export PATH="$HOME/.zisk/bin:$PATH"
-	
-	# Check if cargo-zisk is already installed
-	if command -v cargo-zisk >/dev/null 2>&1; then
-		echo "Zisk already installed, version: $(cargo-zisk --version)"
-		
-		# Check if rust toolchain is installed (needed for zisk compilation)
-		if [ ! -f "$HOME/.zisk/bin/rustc" ]; then
-			echo "Installing Zisk Rust toolchain..."
-			
-			# Install using official installation script first if needed
-			if [ ! -d "$HOME/.zisk" ]; then
-				curl -s https://raw.githubusercontent.com/0xPolygonHermez/zisk/main/ziskup/install.sh | bash
-				export PATH="$HOME/.zisk/bin:$PATH"
-			fi
-			
-			# Try to install toolchain, if it fails, do manual extraction
-			echo "Attempting to install Zisk Rust toolchain..."
-			if ! cargo-zisk sdk install-toolchain; then
-				echo "Automatic toolchain installation failed, trying manual extraction..."
-				cd "$HOME/.zisk"
-				if [ -f "rust-toolchain-x86_64-unknown-linux-gnu.tar.gz" ]; then
-					echo "Extracting rust toolchain manually..."
-					tar -xzf rust-toolchain-x86_64-unknown-linux-gnu.tar.gz
-					if [ -f "$HOME/.zisk/bin/rustc" ]; then
-						echo "Rust toolchain extracted successfully"
-					else
-						echo "Failed to extract rust toolchain"
-						exit 1
-					fi
-				else
-					echo "Rust toolchain archive not found, please run: cargo-zisk sdk install-toolchain"
-					exit 1
-				fi
-			fi
-		else
-			echo "Zisk Rust toolchain already installed"
-		fi
+    # setup_zisk_dir
+    # install_sp1
+    # install_zisk_cli
+    # install_zisk_toolchain
+    # ensure_zisk_proving_keys
 
-		ensure_zisk_proving_key
-		
-		# Check if GPU support should be enabled and rebuild if necessary
-		if command -v nvcc >/dev/null 2>&1; then
-			echo "CUDA toolkit detected, checking if Zisk has GPU support..."
-			
-			# Check if current binaries were built with GPU support by looking at build timestamp
-			# If CUDA is available but binaries are old, rebuild with GPU
-			ZISK_BUILD_DATE=$(stat -c %Y "$HOME/.zisk/bin/cargo-zisk" 2>/dev/null || echo "0")
-			CURRENT_TIME=$(date +%s)
-			REBUILD_THRESHOLD=3600  # Rebuild if binaries are older than 1 hour and no GPU marker exists
-			
-			if [ ! -f "$HOME/.zisk/.gpu-enabled" ]; then
-				echo "Rebuilding Zisk with GPU support for better performance..."
-				
-				# Clone and build Zisk with GPU features
-				TEMP_DIR=$(mktemp -d)
-				cd "$TEMP_DIR"
-				git clone https://github.com/0xPolygonHermez/zisk.git zisk-gpu-build
-				cd zisk-gpu-build
-				
-				echo "Building Zisk with GPU features (this may take a few minutes)..."
-				if cargo build --release --features gpu; then
-					# Replace binaries with GPU-enabled versions
-					copy_zisk_gpu_binaries "target/release"
-					
-					# Mark as GPU-enabled
-					touch "$HOME/.zisk/.gpu-enabled"
-					echo "Zisk successfully rebuilt with GPU support!"
-					run_zisk_check_setup
-				else
-					echo "GPU build failed, continuing with existing binaries"
-				fi
-				
-				# Cleanup
-				cd /
-				rm -rf "$TEMP_DIR"
-			else
-				echo "Zisk already has GPU support enabled"
-			fi
-		fi
-	else
-		echo "Installing Zisk using prebuilt binaries..."
-		
-		# Install Zisk using the official installation script
-		curl -s https://raw.githubusercontent.com/0xPolygonHermez/zisk/main/ziskup/install.sh | bash
-		
-		# Ensure PATH is updated
-		export PATH="$HOME/.zisk/bin:$PATH"
-		
-		# Source profile to ensure zisk tools are in PATH
-		PROFILE=$HOME/.profile
-		if [ -f "$PROFILE" ]; then
-			source "$PROFILE"
-		fi
-		
-		# Also try .bashrc if .profile doesn't work
-		if ! command -v cargo-zisk >/dev/null 2>&1; then
-			PROFILE=$HOME/.bashrc
-			if [ -f "$PROFILE" ]; then
-				source "$PROFILE"
-			fi
-		fi
-		
-		# Verify installation
-		if command -v cargo-zisk >/dev/null 2>&1; then
-			echo "Zisk installed successfully, version: $(cargo-zisk --version)"
-			
-			# Install rust toolchain
-			echo "Installing Zisk Rust toolchain..."
-			if ! cargo-zisk sdk install-toolchain; then
-				echo "Automatic toolchain installation failed, trying manual extraction..."
-				cd "$HOME/.zisk"
-				if [ -f "rust-toolchain-x86_64-unknown-linux-gnu.tar.gz" ]; then
-					echo "Extracting rust toolchain manually..."
-					tar -xzf rust-toolchain-x86_64-unknown-linux-gnu.tar.gz
-					if [ -f "$HOME/.zisk/bin/rustc" ]; then
-						echo "Rust toolchain extracted successfully"
-					else
-						echo "Failed to extract rust toolchain"
-						exit 1
-					fi
-				else
-					echo "Rust toolchain archive not found"
-					exit 1
-				fi
-			fi
+    if command -v nvcc >/dev/null 2>&1; then
+        echo "CUDA toolkit detected, building Zisk with GPU support..."
+        build_zisk_gpu
+    fi
+fi
 
-			ensure_zisk_proving_key
-			
-			# Check if CUDA is available and rebuild with GPU support for new installations
-			if command -v nvcc >/dev/null 2>&1; then
-				echo "CUDA toolkit detected, building Zisk with GPU support for optimal performance..."
-				
-				# Clone and build Zisk with GPU features
-				TEMP_DIR=$(mktemp -d)
-				cd "$TEMP_DIR"
-				git clone https://github.com/0xPolygonHermez/zisk.git zisk-gpu-build
-				cd zisk-gpu-build
-				
-				echo "Building Zisk with GPU features (this may take a few minutes)..."
-				if cargo build --release --features gpu; then
-					# Replace binaries with GPU-enabled versions
-					copy_zisk_gpu_binaries "target/release"
-					
-					# Mark as GPU-enabled
-					touch "$HOME/.zisk/.gpu-enabled"
-					echo "Zisk successfully built with GPU support!"
-					run_zisk_check_setup
-				else
-					echo "GPU build failed, continuing with prebuilt binaries"
-				fi
-				
-				# Cleanup
-				cd /
-				rm -rf "$TEMP_DIR"
-			fi
-		else
-			echo "Failed to install Zisk. Please install manually:"
-			echo "curl https://raw.githubusercontent.com/0xPolygonHermez/zisk/main/ziskup/install.sh | bash"
-			exit 1
-		fi
-	fi
-fi 
-
-# TDX
+# ─── TDX ───────────────────────────────────────────────────────────────────────
 if [ -z "$1" ] || [ "$1" == "tdx" ]; then
-	echo "TDX prover doesn't require additional toolchain installation"
+    echo "TDX prover doesn't require additional toolchain installation"
 fi
