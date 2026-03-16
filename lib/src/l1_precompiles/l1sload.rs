@@ -443,7 +443,13 @@ fn get_storage_root(account_rlp: &[u8]) -> Result<B256> {
     }
 
     // Extract the storage root bytes
-    let storage_root_bytes = &data[..32];
+    let storage_root_bytes = data.get(..32).ok_or_else(|| {
+        anyhow!(
+            "Account RLP truncated at storage root: expected 32 bytes, got {}, raw: 0x{}",
+            data.len(),
+            hex::encode(account_rlp)
+        )
+    })?;
     Ok(B256::from_slice(storage_root_bytes))
 }
 

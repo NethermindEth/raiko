@@ -12,7 +12,7 @@ use crate::{
     consts::MAX_BLOCK_HASH_AGE,
     guest_mem_forget,
     input::{GuestBatchInput, GuestInput},
-    l1_precompiles::{clear_l1sload_cache, populate_l1sload_cache},
+    l1_precompiles::{clear_l1sload_cache, verify_and_populate_l1sload_proofs},
     mem_db::{AccountState, DbAccount, MemDb},
     CycleTracker,
 };
@@ -269,12 +269,13 @@ pub fn calculate_block_header(input: &mut GuestInput) -> Header {
             .expect("failed to determine active fork for L1SLOAD");
         let (anchor_block_number, _) =
             get_anchor_tx_info_by_fork(fork, anchor_tx).expect("failed to decode anchor tx info");
-        let l1_origin_block_number = input.taiko.l1_header.number;
-        populate_l1sload_cache(
+        verify_and_populate_l1sload_proofs(
             &input.l1_storage_proofs,
             anchor_block_number,
-            l1_origin_block_number,
-        );
+            &input.taiko.l1_header,
+            &input.l1_headers,
+        )
+        .expect("L1SLOAD proof verification failed");
     }
 
     let pool_tx = generate_transactions(
@@ -323,12 +324,13 @@ pub fn calculate_batch_blocks_final_header(input: &mut GuestBatchInput) -> Vec<T
                 .expect("failed to determine active fork for L1SLOAD in batch");
             let (anchor_block_number, _) = get_anchor_tx_info_by_fork(fork, anchor_tx)
                 .expect("failed to decode anchor tx info in batch");
-            let l1_origin_block_number = input.inputs[i].taiko.l1_header.number;
-            populate_l1sload_cache(
+            verify_and_populate_l1sload_proofs(
                 &input.inputs[i].l1_storage_proofs,
                 anchor_block_number,
-                l1_origin_block_number,
-            );
+                &input.inputs[i].taiko.l1_header,
+                &input.inputs[i].l1_headers,
+            )
+            .expect("L1SLOAD proof verification failed");
         }
 
         // First, create the MemDb using a mutable reference (no clone needed —
