@@ -65,31 +65,49 @@ build_guest_programs() {
     # Clear RISC-V related environment variables
     unset TARGET_CC
 
-    # Detect riscv sysroot for C includes
-    # risc0's bundled riscv32 gcc sysroot provides compatible C headers for riscv64
+    # Detect riscv sysroot for C includes.
+    # Preference order:
+    #   1. SP1 bundled gcc (~/.sp1/riscv/bin/riscv64-unknown-elf-gcc) — has newlib sysroot
+    #   2. SP1 newlib headers directly (~/.sp1/riscv/riscv64-unknown-elf/include)
+    #   3. System riscv64-unknown-elf-gcc sysroot
     SYSROOT=""
-    RISC0_GCC="$HOME/.risc0/cpp/bin/riscv32-unknown-elf-gcc"
-    if [ -x "$RISC0_GCC" ]; then
-        SYSROOT="$($RISC0_GCC -print-sysroot)/include"
-        log "Using risc0 sysroot: $SYSROOT"
+    SP1_GCC="$HOME/.sp1/riscv/bin/riscv64-unknown-elf-gcc"
+    SP1_INCLUDE="$HOME/.sp1/riscv/riscv64-unknown-elf/include"
+
+    if [ -x "$SP1_GCC" ] && "$SP1_GCC" --version &>/dev/null; then
+        SYSROOT="$($SP1_GCC -print-sysroot)/include"
+        log "Using SP1 bundled gcc sysroot: $SYSROOT"
+    elif [ -d "$SP1_INCLUDE" ] && [ -n "$(ls -A "$SP1_INCLUDE" 2>/dev/null)" ]; then
+        SYSROOT="$SP1_INCLUDE"
+        log "Using SP1 newlib headers: $SYSROOT"
     elif command -v riscv64-unknown-elf-gcc &> /dev/null; then
         CANDIDATE="$(riscv64-unknown-elf-gcc -print-sysroot)/include"
         if [ -d "$CANDIDATE" ]; then
             SYSROOT="$CANDIDATE"
             log "Using system riscv64 sysroot: $SYSROOT"
+        else
+            SYSROOT="$SP1_INCLUDE"
+            log "System gcc has no sysroot, falling back to SP1 headers: $SYSROOT"
         fi
     fi
 
     if [ -z "$SYSROOT" ] || [ ! -d "$SYSROOT" ]; then
         warn "No riscv sysroot found. C dependencies may fail to compile."
-        warn "Install riscv64-unknown-elf-gcc or ensure ~/.risc0/cpp is present."
+        warn "Install SP1 toolchain (sp1up) or riscv64-unknown-elf-gcc."
     fi
 
     # Build guest programs using cargo-zisk
     log "Building with cargo-zisk for riscv64ima-zisk-zkvm-elf target..."
     log "Running: cargo-zisk build --release"
 
-    CC_riscv64ima_zisk_zkvm_elf="riscv64-unknown-elf-gcc -march=rv64ima -mabi=lp64 -mstrict-align -falign-functions=2" \
+    # Pick the gcc binary: prefer SP1 bundled (if usable), fall back to system.
+    if [ -x "$SP1_GCC" ] && "$SP1_GCC" --version &>/dev/null; then
+        RISCV_GCC="$SP1_GCC"
+    else
+        RISCV_GCC="riscv64-unknown-elf-gcc"
+    fi
+
+    CC_riscv64ima_zisk_zkvm_elf="$RISCV_GCC -march=rv64ima -mabi=lp64 -mstrict-align -falign-functions=2" \
         CFLAGS_riscv64ima_zisk_zkvm_elf="${SYSROOT:+-isystem $SYSROOT}" \
         RUSTFLAGS='--cfg getrandom_backend="custom"' \
         cargo-zisk build --release
