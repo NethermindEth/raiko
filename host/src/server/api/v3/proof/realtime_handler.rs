@@ -44,9 +44,14 @@ async fn realtime_handler(
     Json(mut realtime_request_opt): Json<Value>,
 ) -> HostResult<Status> {
     tracing::info!(
-        "Incoming RealTime request: {} from {}",
+        "Incoming RealTime request from {}, l2_block_numbers: {}, proof_type: {}",
+        authenticated_key.name,
+        &realtime_request_opt["l2_block_numbers"],
+        &realtime_request_opt["proof_type"],
+    );
+    tracing::trace!(
+        "Incoming RealTime request full payload: {}",
         serde_json::to_string(&realtime_request_opt)?,
-        authenticated_key.name
     );
 
     // For zk_any request, draw zk proof type.
@@ -108,8 +113,14 @@ async fn realtime_handler(
         finalize_realtime_request(&actor, realtime_request_opt)?;
 
     tracing::info!(
-        "Accepted {}'s RealTime request: {}",
+        "Accepted {}'s RealTime request, l2_blocks: {:?}, proof_type: {:?}, network: {}",
         authenticated_key.name,
+        realtime_request.l2_block_numbers,
+        realtime_request.proof_type,
+        realtime_request.network,
+    );
+    tracing::trace!(
+        "Accepted RealTime request full payload: {}",
         serde_json::to_string(&realtime_request)?,
     );
 

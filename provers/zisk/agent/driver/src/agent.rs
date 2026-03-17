@@ -267,7 +267,10 @@ fn stark_proof_to_raiko_proof(
     // Prepend vkey(s) to proof bytes, matching SP1 format:
     //   batch:  "0x" + vkey_hex + proof_hex
     //   agg:    "0x" + vkey_hex + inner_vkey_hex + proof_hex
-    let vk_hex = vkey.as_deref().map(|v| v.strip_prefix("0x").unwrap_or(v)).unwrap_or("");
+    let vk_hex = vkey
+        .as_deref()
+        .map(|v| v.strip_prefix("0x").unwrap_or(v))
+        .unwrap_or("");
     let inner_hex = inner_vkey
         .map(|v| v.strip_prefix("0x").unwrap_or(v))
         .unwrap_or("");
@@ -294,7 +297,10 @@ fn snark_proof_to_raiko_proof(
     // Prepend vkey(s) to proof bytes, matching SP1 format:
     //   batch:  "0x" + vkey_hex + proof_hex
     //   agg:    "0x" + vkey_hex + inner_vkey_hex + proof_hex
-    let vk_hex = vkey.as_deref().map(|v| v.strip_prefix("0x").unwrap_or(v)).unwrap_or("");
+    let vk_hex = vkey
+        .as_deref()
+        .map(|v| v.strip_prefix("0x").unwrap_or(v))
+        .unwrap_or("");
     let inner_hex = inner_vkey
         .map(|v| v.strip_prefix("0x").unwrap_or(v))
         .unwrap_or("");

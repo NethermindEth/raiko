@@ -12,7 +12,9 @@ use reth_primitives::Header;
 #[cfg(not(feature = "std"))]
 use crate::no_std::*;
 use crate::{
-    anchor::{decode_anchor_pacaya, decode_anchor_realtime, decode_anchor_shasta, ANCHOR_GAS_LIMIT},
+    anchor::{
+        decode_anchor_pacaya, decode_anchor_realtime, decode_anchor_shasta, ANCHOR_GAS_LIMIT,
+    },
     input::{
         ontake::{BlockMetadataV2, BlockProposedV2},
         pacaya::{BatchInfo, BatchMetadata, BlockParams, Transition as PacayaTransition},
@@ -355,19 +357,15 @@ fn verify_blob(
                 let kzg_proof: [u8; 48] = proof_bytes[..48].try_into().unwrap();
                 (x, y, kzg_proof)
             } else {
-                let (x, y) =
-                    eip4844::proof_of_equivalence(blob_data, &expected_versioned_hash)?;
-                let kzg_proof: [u8; 48] = proof_bytes.as_slice().try_into()
+                let (x, y) = eip4844::proof_of_equivalence(blob_data, &expected_versioned_hash)?;
+                let kzg_proof: [u8; 48] = proof_bytes
+                    .as_slice()
+                    .try_into()
                     .map_err(|_| anyhow::anyhow!("invalid KZG proof length"))?;
                 (x, y, kzg_proof)
             };
             ct.end();
-            let verified = eip4844::verify_kzg_proof_impl(
-                *commitment,
-                x,
-                y,
-                kzg_proof,
-            )?;
+            let verified = eip4844::verify_kzg_proof_impl(*commitment, x, y, kzg_proof)?;
             ensure!(verified);
         }
         BlobProofType::KzgVersionedHash => {
@@ -814,15 +812,11 @@ impl ProtocolInstance {
                     );
                 }
 
-                let proposal_hash: B256 = keccak(
-                    event_data.proposal.abi_encode(),
-                )
-                .into();
+                let proposal_hash: B256 = keccak(event_data.proposal.abi_encode()).into();
 
                 // last_finalized_block_hash = parent block hash of the first L2 block
                 // This binds the proof to the correct starting state.
-                let last_finalized_block_hash =
-                    batch_input.inputs[0].parent_header.hash_slow();
+                let last_finalized_block_hash = batch_input.inputs[0].parent_header.hash_slow();
 
                 TransitionFork::RealTime(RealTimeTransitionData {
                     proposal_hash,
