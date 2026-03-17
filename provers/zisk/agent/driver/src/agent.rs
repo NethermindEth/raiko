@@ -259,7 +259,6 @@ fn zisk_proof_to_bytes(proof: &ZiskProof) -> ProverResult<Vec<u8>> {
 
 fn stark_proof_to_raiko_proof(
     result: &ZiskProveResult,
-    output_hash: B256,
     vkey: Option<String>,
     inner_vkey: Option<&str>,
 ) -> ProverResult<Proof> {
@@ -278,7 +277,11 @@ fn stark_proof_to_raiko_proof(
     Ok(Proof {
         proof: Some(proof_string),
         quote: None,
-        input: Some(output_hash),
+        input: Some(
+            result.get_publics().public_bytes_solidity()[..32]
+                .try_into()
+                .expect("Expected 32 bytes for output hash"),
+        ),
         uuid: vkey,
         kzg_proof: None,
         extra_data: None,
@@ -287,7 +290,6 @@ fn stark_proof_to_raiko_proof(
 
 fn snark_proof_to_raiko_proof(
     result: &ZiskProveResult,
-    output_hash: B256,
     vkey: Option<String>,
     inner_vkey: Option<&str>,
 ) -> ProverResult<Proof> {
@@ -308,7 +310,11 @@ fn snark_proof_to_raiko_proof(
     Ok(Proof {
         proof: Some(proof_string),
         quote: Some(hex::encode(&program_vk.vk)),
-        input: Some(output_hash),
+        input: Some(
+            result.get_publics().public_bytes_solidity()[..32]
+                .try_into()
+                .expect("Expected 32 bytes for output hash"),
+        ),
         uuid: vkey,
         kzg_proof: None,
         extra_data: None,
@@ -375,7 +381,7 @@ impl ZiskAgentProver {
     pub async fn batch_run(
         &self,
         input: GuestBatchInput,
-        output: &GuestBatchOutput,
+        _output: &GuestBatchOutput,
         config: &Value,
         _id_store: Option<&mut dyn IdWrite>,
     ) -> ProverResult<Proof> {
@@ -394,15 +400,14 @@ impl ZiskAgentProver {
             ProverError::GuestError(format!("Failed to serialize GuestBatchInput: {e}"))
         })?;
 
-        let output_hash = output.hash;
         let proof = tokio::task::spawn_blocking(move || {
             let batch_vkey = cached_vkey_hex("zisk-batch");
             if batch_snark {
                 let result = prove_stark_with_snark("zisk-batch", serialized_input)?;
-                snark_proof_to_raiko_proof(&result, output_hash, Some(batch_vkey), None)
+                snark_proof_to_raiko_proof(&result, Some(batch_vkey), None)
             } else {
                 let result = prove_stark("zisk-batch", serialized_input)?;
-                stark_proof_to_raiko_proof(&result, output_hash, Some(batch_vkey), None)
+                stark_proof_to_raiko_proof(&result, Some(batch_vkey), None)
             }
         })
         .await
@@ -414,7 +419,7 @@ impl ZiskAgentProver {
     pub async fn aggregate(
         &self,
         input: AggregationGuestInput,
-        output: &AggregationGuestOutput,
+        _output: &AggregationGuestOutput,
         _config: &Value,
         _id_store: Option<&mut dyn IdWrite>,
     ) -> ProverResult<Proof> {
@@ -440,11 +445,10 @@ impl ZiskAgentProver {
             ProverError::GuestError(format!("Failed to serialize aggregation input: {e}"))
         })?;
 
-        let output_hash = output.hash;
         let proof = tokio::task::spawn_blocking(move || {
             let agg_vkey = cached_vkey_hex("zisk-aggregation");
             let result = prove_stark_with_snark("zisk-aggregation", serialized_input)?;
-            snark_proof_to_raiko_proof(&result, output_hash, Some(agg_vkey), Some(&batch_vkey))
+            snark_proof_to_raiko_proof(&result, Some(agg_vkey), Some(&batch_vkey))
         })
         .await
         .map_err(|e| ProverError::GuestError(format!("spawn_blocking failed: {e}")))??;
@@ -455,7 +459,7 @@ impl ZiskAgentProver {
     pub async fn shasta_aggregate(
         &self,
         input: ShastaAggregationGuestInput,
-        output: &AggregationGuestOutput,
+        _output: &AggregationGuestOutput,
         _config: &Value,
         _id_store: Option<&mut dyn IdWrite>,
     ) -> ProverResult<Proof> {
@@ -515,11 +519,10 @@ impl ZiskAgentProver {
             ProverError::GuestError(format!("Failed to serialize shasta input: {e}"))
         })?;
 
-        let output_hash = output.hash;
         let proof = tokio::task::spawn_blocking(move || {
             let shasta_vkey = cached_vkey_hex("zisk-shasta-aggregation");
             let result = prove_stark_with_snark("zisk-shasta-aggregation", serialized_input)?;
-            snark_proof_to_raiko_proof(&result, output_hash, Some(shasta_vkey), Some(&batch_vkey))
+            snark_proof_to_raiko_proof(&result, Some(shasta_vkey), Some(&batch_vkey))
         })
         .await
         .map_err(|e| ProverError::GuestError(format!("spawn_blocking failed: {e}")))??;
