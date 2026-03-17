@@ -50,7 +50,7 @@ dependencies = [
 [[package]]
 name = "alethia-reth-block"
 version = "0.6.0"
-source = "git+https://github.com/NethermindEth/alethia-reth.git?branch=main#5154271d90ce0ecc172987dd2fc51c24bb553108"
+source = "git+https://github.com/NethermindEth/alethia-reth.git?branch=real-time-proving-migration#93ac809a39652ddad3f5710b39628b3a9a89f18e"
 dependencies = [
  "alethia-reth-chainspec",
  "alethia-reth-consensus",
@@ -82,7 +82,7 @@ dependencies = [
 [[package]]
 name = "alethia-reth-chainspec"
 version = "0.6.0"
-source = "git+https://github.com/NethermindEth/alethia-reth.git?branch=main#5154271d90ce0ecc172987dd2fc51c24bb553108"
+source = "git+https://github.com/NethermindEth/alethia-reth.git?branch=real-time-proving-migration#93ac809a39652ddad3f5710b39628b3a9a89f18e"
 dependencies = [
  "alloy-chains",
  "alloy-consensus",
@@ -105,7 +105,7 @@ dependencies = [
 [[package]]
 name = "alethia-reth-consensus"
 version = "0.6.0"
-source = "git+https://github.com/NethermindEth/alethia-reth.git?branch=main#5154271d90ce0ecc172987dd2fc51c24bb553108"
+source = "git+https://github.com/NethermindEth/alethia-reth.git?branch=real-time-proving-migration#93ac809a39652ddad3f5710b39628b3a9a89f18e"
 dependencies = [
  "alethia-reth-chainspec",
  "alethia-reth-evm",
@@ -132,7 +132,7 @@ dependencies = [
 [[package]]
 name = "alethia-reth-evm"
 version = "0.6.0"
-source = "git+https://github.com/NethermindEth/alethia-reth.git?branch=main#5154271d90ce0ecc172987dd2fc51c24bb553108"
+source = "git+https://github.com/NethermindEth/alethia-reth.git?branch=real-time-proving-migration#93ac809a39652ddad3f5710b39628b3a9a89f18e"
 dependencies = [
  "alloy-evm",
  "alloy-primitives",
@@ -148,7 +148,7 @@ dependencies = [
 [[package]]
 name = "alethia-reth-primitives"
 version = "0.6.0"
-source = "git+https://github.com/NethermindEth/alethia-reth.git?branch=main#5154271d90ce0ecc172987dd2fc51c24bb553108"
+source = "git+https://github.com/NethermindEth/alethia-reth.git?branch=real-time-proving-migration#93ac809a39652ddad3f5710b39628b3a9a89f18e"
 dependencies = [
  "alethia-reth-chainspec",
  "alethia-reth-consensus",
@@ -170,7 +170,7 @@ dependencies = [
  "reth-revm",
  "serde",
  "serde_with",
- "sha2 0.10.8",
+ "sha2 0.10.9",
  "tracing",
 ]
 
@@ -308,7 +308,7 @@ dependencies = [
  "ethereum_ssz_derive",
  "serde",
  "serde_with",
- "sha2 0.10.8",
+ "sha2 0.10.9",
  "thiserror 2.0.18",
 ]
 
@@ -2751,7 +2751,7 @@ dependencies = [
  "hex",
  "once_cell",
  "serdect",
- "sha2 0.10.8",
+ "sha2 0.10.9",
  "signature",
  "sp1-lib",
 ]
@@ -2783,7 +2783,7 @@ dependencies = [
  "hashbrown 0.15.5",
  "rkyv",
  "serde",
- "sha2 0.10.8",
+ "sha2 0.10.9",
  "siphasher",
 ]
 
@@ -3227,7 +3227,7 @@ dependencies = [
  "ethereum_ssz_derive",
  "op-alloy-consensus",
  "serde",
- "sha2 0.10.8",
+ "sha2 0.10.9",
  "snap",
  "thiserror 2.0.18",
 ]
@@ -3252,7 +3252,7 @@ dependencies = [
  "elliptic-curve",
  "hex",
  "primeorder",
- "sha2 0.10.8",
+ "sha2 0.10.9",
  "sp1-lib",
 ]
 
@@ -3840,6 +3840,7 @@ dependencies = [
  "chrono",
  "flate2",
  "hex",
+ "k256",
  "kzg",
  "lazy_static",
  "libflate",
@@ -3863,9 +3864,10 @@ dependencies = [
  "serde",
  "serde_json",
  "serde_with",
- "sha2 0.10.8",
+ "sha2 0.10.9",
  "thiserror 1.0.69",
  "thiserror-no-std",
+ "tiny-keccak",
  "tracing",
  "url",
  "utoipa",
@@ -4252,7 +4254,7 @@ dependencies = [
  "reth-payload-primitives",
  "reth-primitives-traits",
  "serde",
- "sha2 0.10.8",
+ "sha2 0.10.9",
  "thiserror 2.0.18",
 ]
 
@@ -5510,7 +5512,7 @@ dependencies = [
  "lazy_static",
  "num-bigint 0.4.6",
  "serde",
- "sha2 0.10.8",
+ "sha2 0.10.9",
  "slop-algebra",
  "slop-bn254",
  "slop-challenger",
@@ -5534,7 +5536,7 @@ dependencies = [
  "lazy_static",
  "libm",
  "rand 0.8.5",
- "sha2 0.10.8",
+ "sha2 0.10.9",
  "slop-algebra",
  "sp1-lib",
  "sp1-primitives",
@@ -5798,6 +5800,16 @@ checksum = "2e70e4c5a0e0a8a4823ad65dfe1a6930e4f4d756dcd9dd7939022b5e8c501215"
 dependencies = [
  "num-conv",
  "time-core",
+]
+
+[[package]]
+name = "tiny-keccak"
+version = "2.0.2"
+source = "git+https://github.com/sp1-patches/tiny-keccak?tag=patch-2.0.2-sp1-6.0.0#957430a459f7a2332ab5bab4a12f9b473bb95c87"
+dependencies = [
+ "cfg-if",
+ "crunchy",
+ "sp1-lib",
 ]
 
 [[package]]
@@ -6548,7 +6560,7 @@ dependencies = [
  "pasta_curves 0.5.1",
  "rand 0.8.5",
  "serde",
- "sha2 0.10.8",
+ "sha2 0.10.9",
  "sha3",
  "subtle",
 ]
@@ -6586,8 +6598,3 @@ dependencies = [
  "cc",
  "pkg-config",
 ]
-
-[[patch.unused]]
-name = "tiny-keccak"
-version = "2.0.2"
-source = "git+https://github.com/sp1-patches/tiny-keccak?tag=patch-2.0.2-sp1-6.0.0#957430a459f7a2332ab5bab4a12f9b473bb95c87"

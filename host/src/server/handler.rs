@@ -142,10 +142,7 @@ pub(crate) async fn prove_many(
                 let status = prove(actor, key.into(), entity.into()).await?;
                 statuses.push(status);
             }
-            (
-                RequestKey::RealTimeGuestInput(key),
-                RequestEntity::RealTimeGuestInput(entity),
-            ) => {
+            (RequestKey::RealTimeGuestInput(key), RequestEntity::RealTimeGuestInput(entity)) => {
                 let status = prove(actor, key.into(), entity.into()).await?;
                 statuses.push(status);
             }

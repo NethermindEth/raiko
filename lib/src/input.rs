@@ -12,10 +12,10 @@ use alloy_primitives::U256;
 use anyhow::{anyhow, Error, Result};
 use ontake::BlockProposedV2;
 use pacaya::{BatchInfo, BatchProposed};
+use realtime::RealTimeEventData;
 use reth_primitives::Header;
 use serde::{Deserialize, Serialize};
 use serde_with::serde_as;
-use realtime::RealTimeEventData;
 use shasta::ShastaEventData;
 use tracing::error;
 
@@ -383,12 +383,10 @@ impl BlockProposedFork {
     pub fn proposal_hash(&self) -> B256 {
         match self {
             BlockProposedFork::Shasta(event_data) => hash_proposal(&event_data.proposal),
-            BlockProposedFork::RealTime(event_data) => {
-                crate::primitives::keccak::keccak(
-                    alloy_sol_types::SolValue::abi_encode(&event_data.proposal),
-                )
-                .into()
-            }
+            BlockProposedFork::RealTime(event_data) => crate::primitives::keccak::keccak(
+                alloy_sol_types::SolValue::abi_encode(&event_data.proposal),
+            )
+            .into(),
             _ => B256::ZERO,
         }
     }

@@ -631,12 +631,8 @@ async fn prepare_taiko_chain_batch_input_realtime(
         hash_signal_slots(&realtime_event_data.signal_slots);
 
     // 3. Read L1 ancestor headers for anchor linkage
-    let l1_ancestor_headers = get_max_anchor_headers(
-        &provider_l1,
-        batch_anchor_tx_info,
-        max_anchor_block_number,
-    )
-    .await?;
+    let l1_ancestor_headers =
+        get_max_anchor_headers(&provider_l1, batch_anchor_tx_info, max_anchor_block_number).await?;
 
     // 4. Build data sources from DerivationSource[]
     // For RealTime: blobs are supplied directly by the proposer (not yet on L1).
@@ -1435,7 +1431,7 @@ fn calc_blob_versioned_hash(blob_str: &str) -> [u8; 32] {
     let blob = Blob::try_from(blob_bytes.as_slice()).expect("Could not create blob from bytes");
     let commitment = blob_to_kzg_commitment_rust(
         &eip4844::deserialize_blob_rust(&blob).expect("Could not deserialize blob"),
-        &KZG_SETTINGS.clone(),
+        &*KZG_SETTINGS,
     )
     .expect("Could not create kzg commitment from blob");
     commitment_to_version_hash(&commitment.to_bytes()).0

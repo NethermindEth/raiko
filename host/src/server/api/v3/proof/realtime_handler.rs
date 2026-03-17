@@ -5,8 +5,8 @@ use crate::{
         auth::AuthenticatedApiKey,
         handler::prove_many,
         utils::{
-            draw_shasta_zk_request, draw_shasta_sgx_request, is_sgx_any_request,
-            is_zk_any_request, to_v3_status,
+            draw_shasta_sgx_request, draw_shasta_zk_request, is_sgx_any_request, is_zk_any_request,
+            to_v3_status,
         },
     },
 };
@@ -131,12 +131,7 @@ async fn realtime_handler(
         process_realtime_request(&realtime_request, &image_id);
 
     // Two-stage proving: first generate guest input, then run real prover.
-    let statuses = prove_many(
-        &actor,
-        vec![input_request_key],
-        vec![input_request_entity],
-    )
-    .await?;
+    let statuses = prove_many(&actor, vec![input_request_key], vec![input_request_entity]).await?;
 
     let is_all_sub_success = statuses
         .iter()

@@ -118,11 +118,9 @@ pub fn calc_kzg_proof_commitment(blob_bytes: &[u8]) -> Result<KzgGroup, Eip4844E
     let blob = Blob::try_from(blob_bytes).map_err(|_| Eip4844Error::BlobConversion)?;
 
     let blob_fields = deserialize_blob_rust(&blob).map_err(|_| Eip4844Error::DeserializeBlob)?;
-    Ok(
-        blob_to_kzg_commitment_rust(&blob_fields, &*KZG_SETTINGS)
-            .map_err(Eip4844Error::ComputeKzgProof)?
-            .to_bytes(),
-    )
+    Ok(blob_to_kzg_commitment_rust(&blob_fields, &*KZG_SETTINGS)
+        .map_err(Eip4844Error::ComputeKzgProof)?
+        .to_bytes())
 }
 
 pub fn commitment_to_version_hash(commitment: &[u8; 48]) -> B256 {
@@ -222,7 +220,8 @@ mod test {
 
         // Random number hash to field
         let x = hash_to_bls_field(&[5; BYTES_PER_FIELD_ELEMENT]);
-        let y = evaluate_polynomial_in_evaluation_form(&poly, &x, &(*KZG_SETTINGS).clone()).unwrap();
+        let y =
+            evaluate_polynomial_in_evaluation_form(&poly, &x, &(*KZG_SETTINGS).clone()).unwrap();
         let proof = calc_kzg_proof_with_point(&blob.0, x).unwrap();
 
         // Verify a correct proof
