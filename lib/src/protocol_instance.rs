@@ -322,16 +322,30 @@ fn verify_blob(
             // Even in PoE mode, the blob must be anchored to the on-chain versioned hash.
             ensure!(*expected_versioned_hash == commitment_to_version_hash(commitment));
 
+            let proof_bytes = blob_proof.as_ref().expect("missing blob proof in PoE mode");
+
             let ct = CycleTracker::start("proof_of_equivalence");
-            let (x, y) = eip4844::proof_of_equivalence(blob_data, &expected_versioned_hash)?;
+            // If the host appended a precomputed y value (32 bytes) after the KZG proof
+            // (48 bytes), use it to skip the expensive blob deserialization and polynomial
+            // evaluation. The KZG proof verification still guarantees y = f(x).
+            let (x, y, kzg_proof) = if proof_bytes.len() >= 80 {
+                let x = eip4844::get_evaluation_point_bytes(blob_data, expected_versioned_hash);
+                let y: [u8; 32] = proof_bytes[48..80].try_into().unwrap();
+                let kzg_proof: [u8; 48] = proof_bytes[..48].try_into().unwrap();
+                (x, y, kzg_proof)
+            } else {
+                let (x, y) =
+                    eip4844::proof_of_equivalence(blob_data, &expected_versioned_hash)?;
+                let kzg_proof: [u8; 48] = proof_bytes.as_slice().try_into()
+                    .map_err(|_| anyhow::anyhow!("invalid KZG proof length"))?;
+                (x, y, kzg_proof)
+            };
             ct.end();
             let verified = eip4844::verify_kzg_proof_impl(
                 *commitment,
                 x,
                 y,
-                blob_proof
-                    .map(|p| TryInto::<[u8; 48]>::try_into(p).unwrap())
-                    .unwrap(),
+                kzg_proof,
             )?;
             ensure!(verified);
         }
@@ -772,9 +786,7 @@ fn get_blob_proof_type(
     // due to performance considerations
     match proof_type {
         ProofType::Native => blob_proof_type_hint,
-        ProofType::Sgx | ProofType::SgxGeth | ProofType::Tdx => {
-            BlobProofType::KzgVersionedHash
-        }
+        ProofType::Sgx | ProofType::SgxGeth | ProofType::Tdx => BlobProofType::KzgVersionedHash,
         ProofType::Sp1 | ProofType::Risc0 | ProofType::Zisk => BlobProofType::ProofOfEquivalence,
     }
 }

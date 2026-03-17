@@ -65,11 +65,21 @@ pub struct GuestInput {
     pub taiko: TaikoGuestInput,
 }
 
+#[serde_as]
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
 pub struct InputDataSource {
+    #[serde_as(as = "serde_with::Bytes")]
     pub tx_data_from_calldata: Vec<u8>,
+    #[serde_as(as = "Vec<serde_with::Bytes>")]
     pub tx_data_from_blob: Vec<Vec<u8>>,
+    #[serde_as(as = "Option<Vec<serde_with::Bytes>>")]
     pub blob_commitments: Option<Vec<Vec<u8>>>,
+    /// In PoE mode, each entry is the KZG proof (48 bytes). When the host
+    /// precomputes the polynomial evaluation y-value, it appends 32 bytes
+    /// of y after the proof (total 80 bytes). The guest splits them apart:
+    /// proof = blob_proof[..48], y = blob_proof[48..80].
+    /// If only 48 bytes, the guest computes y itself (backwards compatible).
+    #[serde_as(as = "Option<Vec<serde_with::Bytes>>")]
     pub blob_proofs: Option<Vec<Vec<u8>>>,
     pub blob_proof_type: BlobProofType,
     pub is_forced_inclusion: bool,
@@ -110,9 +120,11 @@ pub struct AggregationGuestInput {
 }
 
 /// The raw proof data necessary to verify a proof
+#[serde_as]
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
 pub struct RawProof {
     /// The actual proof
+    #[serde_as(as = "serde_with::Bytes")]
     pub proof: Vec<u8>,
     /// The resulting hash
     pub input: B256,
@@ -421,12 +433,15 @@ pub struct TaikoGuestInput {
     #[serde_as(as = "serde_bincode_compat::Header")]
     /// header
     pub l1_header: Header,
+    #[serde_as(as = "serde_with::Bytes")]
     pub tx_data: Vec<u8>,
     #[serde_as(as = "Option<BincodeCompactTaikoTxEnvelope<'_>>")]
     pub anchor_tx: Option<TaikoTxEnvelope>,
     pub block_proposed: BlockProposedFork,
     pub prover_data: TaikoProverData,
+    #[serde_as(as = "Option<serde_with::Bytes>")]
     pub blob_commitment: Option<Vec<u8>>,
+    #[serde_as(as = "Option<serde_with::Bytes>")]
     pub blob_proof: Option<Vec<u8>>,
     pub blob_proof_type: BlobProofType,
     // extra data: is force inclusion flag

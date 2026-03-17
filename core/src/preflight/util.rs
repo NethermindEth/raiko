@@ -739,11 +739,14 @@ pub async fn filter_tx_blob_beacon_with_proof(
             let point = eip4844::calc_kzg_proof_with_point(&blob, ZFr::from_bytes(&x).unwrap());
             debug!("calc_kzg_proof_with_point {point:?}");
 
-            Some(
-                point
-                    .map(|g1| g1.to_bytes().to_vec())
-                    .map_err(|e| anyhow!(e))?,
-            )
+            // Append precomputed y (32 bytes) after the KZG proof (48 bytes).
+            // The guest detects the extended proof (80 bytes) and skips the expensive
+            // blob deserialization + polynomial evaluation.
+            let mut proof_with_y = point
+                .map(|g1| g1.to_bytes().to_vec())
+                .map_err(|e| anyhow!(e))?;
+            proof_with_y.extend_from_slice(&y);
+            Some(proof_with_y)
         }
     };
 
