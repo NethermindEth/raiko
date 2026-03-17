@@ -957,6 +957,8 @@ pub struct RealTimeInputRequestEntity {
     basefee_sharing_pctg: u8,
     /// Derivation sources for blob data
     sources: Vec<DerivationSource>,
+    /// Raw blob data (hex-encoded), supplied by the proposer
+    blobs: Vec<String>,
     /// Previous finalized checkpoint
     checkpoint: Option<ShastaProposalCheckpoint>,
 }
@@ -974,6 +976,7 @@ impl RealTimeInputRequestEntity {
         basefee_sharing_pctg: u8,
         checkpoint: Option<ShastaProposalCheckpoint>,
         sources: Vec<DerivationSource>,
+        blobs: Vec<String>,
     ) -> Self {
         Self {
             l2_block_numbers,
@@ -987,6 +990,7 @@ impl RealTimeInputRequestEntity {
             basefee_sharing_pctg,
             checkpoint,
             sources,
+            blobs,
         }
     }
 }

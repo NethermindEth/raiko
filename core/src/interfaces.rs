@@ -865,6 +865,11 @@ pub struct RealTimeProofRequest {
     /// Derivation sources for blob data
     #[serde(default)]
     pub sources: Vec<DerivationSource>,
+    /// Raw blob data (hex-encoded). For RealTime proving the blobs are not yet
+    /// posted on L1, so the proposer must supply them directly. One entry per
+    /// blob referenced in `sources`, in the same order as the blob hashes.
+    #[serde(default)]
+    pub blobs: Vec<String>,
     /// Previous finalized checkpoint
     pub checkpoint: Option<ShastaProposalCheckpoint>,
 }
@@ -893,6 +898,9 @@ pub struct RealTimeProofRequestOpt {
     pub basefee_sharing_pctg: u8,
     #[serde(default)]
     pub sources: Vec<DerivationSource>,
+    /// Raw blob data (hex-encoded), supplied by the proposer.
+    #[serde(default)]
+    pub blobs: Vec<String>,
     pub checkpoint: Option<ShastaProposalCheckpoint>,
 }
 
@@ -937,6 +945,7 @@ impl TryFrom<RealTimeProofRequestOpt> for RealTimeProofRequest {
             last_finalized_block_hash: value.last_finalized_block_hash,
             basefee_sharing_pctg: value.basefee_sharing_pctg,
             sources: value.sources,
+            blobs: value.blobs,
             checkpoint: value.checkpoint,
         })
     }

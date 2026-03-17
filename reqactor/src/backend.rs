@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use alloy_primitives::{B256, Uint};
+use alloy_primitives::{Uint, B256};
 
 use raiko_core::{
     interfaces::{aggregate_proofs, aggregate_shasta_proposals, ProofRequest},
@@ -732,6 +732,7 @@ async fn new_raiko_for_realtime_request(
         },
         signal_slots: entity.signal_slots().clone(),
         last_finalized_block_hash: *entity.last_finalized_block_hash(),
+        blobs: entity.blobs().clone(),
     };
 
     let proof_request = ProofRequest {
@@ -747,7 +748,7 @@ async fn new_raiko_for_realtime_request(
         prover_args: request_entity.prover_args().clone(),
         l2_block_numbers: entity.l2_block_numbers().clone(),
         checkpoint: entity.checkpoint().clone(),
-        last_anchor_block_number: None,
+        last_anchor_block_number: Some(*entity.max_anchor_block_number()),
         cached_event_data: Some(BlockProposedFork::RealTime(realtime_event_data)),
         gpu_number,
     };
@@ -767,10 +768,9 @@ pub async fn do_generate_realtime_guest_input(
         Default::default(),
         Default::default(),
     );
-    let raiko =
-        new_raiko_for_realtime_request(chain_specs, realtime_proof_request_entity, None)
-            .await
-            .map_err(|err| format!("failed to create raiko: {err:?}"))?;
+    let raiko = new_raiko_for_realtime_request(chain_specs, realtime_proof_request_entity, None)
+        .await
+        .map_err(|err| format!("failed to create raiko: {err:?}"))?;
     let input = generate_input_for_batch(&raiko)
         .await
         .map_err(|err| format!("failed to generate realtime guest input: {err:?}"))?;

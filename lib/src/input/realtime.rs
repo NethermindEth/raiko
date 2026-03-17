@@ -78,4 +78,8 @@ pub struct RealTimeEventData {
     /// Block hash of last finalized L2 block (proof starting state).
     /// Comes from on-chain `lastFinalizedBlockHash`, not from the proposal.
     pub last_finalized_block_hash: B256,
+    /// Raw blob data (hex-encoded) supplied by the proposer.
+    /// For RealTime proving, blobs are not yet on L1 so the proposer provides them directly.
+    #[serde(default)]
+    pub blobs: Vec<String>,
 }

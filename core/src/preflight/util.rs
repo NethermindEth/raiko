@@ -638,16 +638,57 @@ async fn prepare_taiko_chain_batch_input_realtime(
     )
     .await?;
 
-    // 4. Build data sources from DerivationSource[] (same pattern as Shasta, no forced inclusions)
+    // 4. Build data sources from DerivationSource[]
+    // For RealTime: blobs are supplied directly by the proposer (not yet on L1).
+    // Fall back to beacon fetch if no blobs are provided.
+    let provided_blobs = &realtime_event_data.blobs;
+    let has_provided_blobs = !provided_blobs.is_empty();
+
     let mut data_sources = Vec::new();
+    let mut blob_idx = 0usize; // tracks position in the flat provided_blobs array
     for derivation_source in realtime_event_data.proposal.sources.clone() {
         let blob_hashes = derivation_source.blobSlice.blobHashes;
-        // RealTime: use source's blob timestamp (forced inclusions removed)
         let l1_blob_timestamp: u64 = derivation_source.blobSlice.timestamp.to();
 
         let (tx_data_from_calldata, blob_tx_buffers_with_proofs) = if blob_hashes.is_empty() {
             unimplemented!("calldata txlist is not supported in realtime");
+        } else if has_provided_blobs {
+            // Use proposer-supplied blobs: compute commitments & proofs locally
+            let mut buffers = Vec::new();
+            for _hash in &blob_hashes {
+                if blob_idx >= provided_blobs.len() {
+                    return Err(RaikoError::Preflight(
+                        "Not enough blobs provided for the derivation sources".to_string(),
+                    ));
+                }
+                let blob_bytes = blob_to_bytes(&provided_blobs[blob_idx]);
+                let commitment =
+                    eip4844::calc_kzg_proof_commitment(&blob_bytes).map_err(|e| anyhow!(e))?;
+                let blob_proof = match blob_proof_type {
+                    BlobProofType::KzgVersionedHash => None,
+                    BlobProofType::ProofOfEquivalence => {
+                        let (x, _y) = eip4844::proof_of_equivalence(
+                            &blob_bytes,
+                            &commitment_to_version_hash(&commitment),
+                        )
+                        .map_err(|e| anyhow!(e))?;
+                        let point = eip4844::calc_kzg_proof_with_point(
+                            &blob_bytes,
+                            ZFr::from_bytes(&x).unwrap(),
+                        );
+                        Some(
+                            point
+                                .map(|g1| g1.to_bytes().to_vec())
+                                .map_err(|e| anyhow!(e))?,
+                        )
+                    }
+                };
+                buffers.push((blob_bytes, Some(commitment.to_vec()), blob_proof));
+                blob_idx += 1;
+            }
+            (Vec::new(), buffers)
         } else {
+            // Fallback: fetch blobs from beacon chain (post-posting scenario)
             let blob_tx_buffers = get_batch_tx_data_with_proofs(
                 blob_hashes,
                 l1_blob_timestamp,

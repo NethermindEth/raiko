@@ -48,6 +48,7 @@ fn create_realtime_requests(
         request.basefee_sharing_pctg,
         request.checkpoint.clone(),
         request.sources.clone(),
+        request.blobs.clone(),
     );
 
     let proof_request_entity = RealTimeProofRequestEntity::new_with_guest_input_entity(
