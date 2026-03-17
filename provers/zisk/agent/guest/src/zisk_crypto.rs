@@ -145,7 +145,7 @@ use raiko_lib::alloy_primitives::Address;
 
 use raiko_lib::revm::precompile::{
     bls12_381::{G1Point, G1PointScalar, G2Point, G2PointScalar},
-    Crypto, DefaultCrypto, PrecompileError,
+    Crypto, PrecompileError,
 };
 
 /// Unit struct wired into `revm_precompile::install_crypto` to dispatch all

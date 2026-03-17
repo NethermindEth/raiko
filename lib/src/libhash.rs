@@ -359,6 +359,16 @@ pub fn hash_derivation(derivation: &Derivation) -> B256 {
     keccak(&buffer).into()
 }
 
+/// Hash signal slots for RealTimeInbox.
+/// Empty → bytes32(0), non-empty → keccak256(abi.encode(signalSlots))
+pub fn hash_signal_slots(signal_slots: &[B256]) -> B256 {
+    if signal_slots.is_empty() {
+        B256::ZERO
+    } else {
+        keccak(signal_slots.to_vec().abi_encode().as_slice()).into()
+    }
+}
+
 pub fn hash_public_input(
     prove_input_hash: B256,
     chain_id: u64,

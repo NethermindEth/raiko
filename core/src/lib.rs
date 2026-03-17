@@ -18,7 +18,8 @@ use tracing::{debug, error, info, warn};
 
 use crate::{
     interfaces::{
-        run_shasta_proposal_prover, ProofRequest, RaikoError, RaikoResult, ShastaProposalCheckpoint,
+        run_realtime_prover, run_shasta_proposal_prover, ProofRequest, RaikoError, RaikoResult,
+        ShastaProposalCheckpoint,
     },
     preflight::{batch_preflight, preflight, BatchPreflightData, PreflightData},
     provider::BlockDataProvider,
@@ -296,6 +297,25 @@ impl Raiko {
     ) -> RaikoResult<Proof> {
         let config = serde_json::to_value(&self.request)?;
         run_shasta_proposal_prover(
+            self.request.proof_type,
+            input,
+            output,
+            &config,
+            store,
+            mock_key,
+        )
+        .await
+    }
+
+    pub async fn realtime_prove(
+        &self,
+        input: GuestBatchInput,
+        output: &GuestBatchOutput,
+        store: Option<&mut dyn IdWrite>,
+        mock_key: Option<String>,
+    ) -> RaikoResult<Proof> {
+        let config = serde_json::to_value(&self.request)?;
+        run_realtime_prover(
             self.request.proof_type,
             input,
             output,
