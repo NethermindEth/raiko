@@ -63,9 +63,22 @@ install_zisk_cli() {
         return 0
     fi
     echo "Installing Zisk v$ZISK_VERSION..."
-    run_ziskup --version "$ZISK_VERSION" --nokey
+    # The upstream ziskup install script automatically runs ziskup after
+    # installing the binary, which prompts for key options interactively.
+    # In non-TTY environments (Docker), pipe "4" (None) to skip the menu.
+    # When --nokey is passed, ziskup may still prompt if the flag isn't
+    # forwarded to the inner invocation.
+    echo "4" | run_ziskup --version "$ZISK_VERSION" --nokey || true
     export PATH="$ZISK_DIR/bin:$PATH"
     source "$HOME/.profile" 2>/dev/null || source "$HOME/.bashrc" 2>/dev/null || true
+    # If the piped install didn't fully complete, run ziskup directly with --nokey
+    if ! command -v cargo-zisk >/dev/null 2>&1; then
+        if [ -x "$ZISK_DIR/bin/ziskup" ]; then
+            echo "Running ziskup directly with --nokey..."
+            "$ZISK_DIR/bin/ziskup" --version "$ZISK_VERSION" --nokey
+            export PATH="$ZISK_DIR/bin:$PATH"
+        fi
+    fi
     command -v cargo-zisk >/dev/null 2>&1 || {
         echo "Error: Failed to install Zisk. Install manually:"
         echo "  curl https://raw.githubusercontent.com/0xPolygonHermez/zisk/main/ziskup/install.sh | bash"
@@ -211,7 +224,7 @@ if [ -z "$1" ] || [ "$1" == "risc0" ]; then
     fi
     curl -L https://risczero.com/install | bash
 
-    local env_rzup=rzup
+    env_rzup=rzup
     if [ -z "${CI}" ] || ! command -v rzup >/dev/null 2>&1; then
         source "$HOME/.bashrc" 2>/dev/null || true
         if ! command -v rzup >/dev/null 2>&1; then
@@ -236,11 +249,17 @@ fi
 
 # ─── ZisK ──────────────────────────────────────────────────────────────────────
 if [ -z "$1" ] || [ "$1" == "zisk" ]; then
-    # setup_zisk_dir
-    # install_sp1
-    # install_zisk_cli
-    # install_zisk_toolchain
-    # ensure_zisk_proving_keys
+    setup_zisk_dir
+    install_sp1
+    install_zisk_cli
+    install_zisk_toolchain
+
+    # Install proving keys unless explicitly disabled (INSTALL_KEYS=false)
+    if [ "${INSTALL_KEYS:-true}" != "false" ]; then
+        ensure_zisk_proving_keys
+    else
+        echo "Skipping Zisk proving key installation (INSTALL_KEYS=false)"
+    fi
 
     if command -v nvcc >/dev/null 2>&1; then
         echo "CUDA toolkit detected, building Zisk with GPU support..."

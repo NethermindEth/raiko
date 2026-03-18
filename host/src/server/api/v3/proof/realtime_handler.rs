@@ -49,7 +49,7 @@ async fn realtime_handler(
         &realtime_request_opt["l2_block_numbers"],
         &realtime_request_opt["proof_type"],
     );
-    tracing::trace!(
+    tracing::debug!(
         "Incoming RealTime request full payload: {}",
         serde_json::to_string(&realtime_request_opt)?,
     );

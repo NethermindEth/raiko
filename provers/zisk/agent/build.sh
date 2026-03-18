@@ -30,23 +30,49 @@ error() {
     echo -e "${RED}[ZISK Agent]${NC} $1"
 }
 
-# Check if cargo-zisk is installed
+# Locate the ZisK custom rustc.  When cargo-zisk is installed the toolchain
+# lives under ~/.zisk/toolchains/<hash>/bin/rustc.  In Docker we may have
+# downloaded it directly to $ZISK_TOOLCHAIN_DIR.  Sets ZISK_RUSTC.
+find_zisk_rustc() {
+    # 1. Explicit override (e.g. set by Dockerfile)
+    if [ -n "$ZISK_RUSTC" ] && [ -x "$ZISK_RUSTC" ]; then
+        log "Using ZISK_RUSTC from environment: $ZISK_RUSTC"
+        return 0
+    fi
+
+    # 2. Toolchain downloaded to a well-known directory
+    local zisk_dir="${ZISK_DIR:-$HOME/.zisk}"
+    if [ -n "$ZISK_TOOLCHAIN_DIR" ] && [ -x "$ZISK_TOOLCHAIN_DIR/bin/rustc" ]; then
+        ZISK_RUSTC="$ZISK_TOOLCHAIN_DIR/bin/rustc"
+        log "Using ZISK rustc from ZISK_TOOLCHAIN_DIR: $ZISK_RUSTC"
+        return 0
+    fi
+
+    # 3. Installed via cargo-zisk sdk install-toolchain (hash-named dirs)
+    for tc_dir in "$zisk_dir"/toolchains/*/bin/rustc; do
+        if [ -x "$tc_dir" ]; then
+            ZISK_RUSTC="$tc_dir"
+            log "Using ZISK rustc from toolchains: $ZISK_RUSTC"
+            return 0
+        fi
+    done
+
+    error "ZisK Rust toolchain not found."
+    echo "  Install via: cargo-zisk sdk install-toolchain"
+    echo "  Or set ZISK_RUSTC=/path/to/zisk/rustc"
+    exit 1
+}
+
+# Check if cargo-zisk is installed (optional — only needed outside Docker)
 check_zisk_toolchain() {
-    if ! command -v cargo-zisk &> /dev/null; then
-        error "cargo-zisk not found. Please install ZISK toolchain:"
-        echo "  curl https://raw.githubusercontent.com/0xPolygonHermez/zisk/main/ziskup/install.sh | bash"
-        echo "  source ~/.bashrc"
+    find_zisk_rustc
+
+    # Verify the rustc knows the zisk target
+    if ! "$ZISK_RUSTC" --print target-list | grep -q "riscv64ima-zisk-zkvm-elf"; then
+        error "ZISK rustc at $ZISK_RUSTC does not support riscv64ima-zisk-zkvm-elf target"
         exit 1
     fi
-    
-    log "Found cargo-zisk: $(which cargo-zisk)"
-    
-    # Check if ZISK target is available
-    if ! rustc --print target-list | grep -q "riscv64ima-zisk-zkvm-elf"; then
-        warn "ZISK target 'riscv64ima-zisk-zkvm-elf' not found in rustc"
-        warn "This is expected - ZISK uses its own custom target"
-        log "cargo-zisk will handle the custom target compilation"
-    fi
+    log "ZISK rustc supports riscv64ima-zisk-zkvm-elf target"
 }
 
 # Build ZISK guest programs (batch and aggregation)
@@ -96,9 +122,9 @@ build_guest_programs() {
         warn "Install SP1 toolchain (sp1up) or riscv64-unknown-elf-gcc."
     fi
 
-    # Build guest programs using cargo-zisk
-    log "Building with cargo-zisk for riscv64ima-zisk-zkvm-elf target..."
-    log "Running: cargo-zisk build --release"
+    # Build guest programs using the ZisK custom rustc + cargo
+    log "Building with ZISK rustc for riscv64ima-zisk-zkvm-elf target..."
+    log "RUSTC=$ZISK_RUSTC"
 
     # Pick the gcc binary: prefer SP1 bundled (if usable), fall back to system.
     if [ -x "$SP1_GCC" ] && "$SP1_GCC" --version &>/dev/null; then
@@ -107,10 +133,11 @@ build_guest_programs() {
         RISCV_GCC="riscv64-unknown-elf-gcc"
     fi
 
-    CC_riscv64ima_zisk_zkvm_elf="$RISCV_GCC -march=rv64ima -mabi=lp64 -mstrict-align -falign-functions=2" \
+    RUSTC="$ZISK_RUSTC" \
+        CC_riscv64ima_zisk_zkvm_elf="$RISCV_GCC -march=rv64ima -mabi=lp64 -mstrict-align -falign-functions=2" \
         CFLAGS_riscv64ima_zisk_zkvm_elf="${SYSROOT:+-isystem $SYSROOT}" \
         RUSTFLAGS='--cfg getrandom_backend="custom"' \
-        cargo-zisk build --release
+        cargo build --target riscv64ima-zisk-zkvm-elf --release
     
     # Create ELF directory in guest if it doesn't exist
     mkdir -p "$SCRIPT_DIR/guest/elf"

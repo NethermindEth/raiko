@@ -1,11 +1,11 @@
-name: "[Nethermind] Raiko Client ZK - Docker build and push"
+name: "[Nethermind] Raiko Client - Docker build and push"
 
 on:
   workflow_dispatch:
   push:
     branches: [main, master]
     tags:
-      - "v*-surge"
+      - "v*"
     paths:
       - "**"
       - "!docs/**"
@@ -29,13 +29,12 @@ permissions:
 
 env:
   DOCKER_REGISTRY: docker.io
-  DOCKER_REPOSITORY: nethermind/surge-raiko-zk
   DOCKER_USERNAME: ${{ secrets.DOCKER_HUB_USERNAME }}
   DOCKER_PASSWORD: ${{ secrets.DOCKER_HUB_PASSWORD }}
 
 jobs:
   build:
-    name: Build and push docker image
+    name: Build and push ${{ matrix.variant }} image
     runs-on: ${{ matrix.os }}
     if: github.repository == 'NethermindEth/raiko'
     strategy:
@@ -43,6 +42,14 @@ jobs:
         include:
           - os: ubuntu-latest
             platform: linux/amd64
+            variant: zk
+            dockerfile: Dockerfile.zk
+            repository: nethermind/surge-raiko-zk
+          - os: ubuntu-latest
+            platform: linux/amd64
+            variant: mock
+            dockerfile: Dockerfile.mock
+            repository: nethermind/surge-raiko-mock
     steps:
       - name: Prepare Environment
         run: |
@@ -51,7 +58,7 @@ jobs:
 
       - name: Checkout
         uses: actions/checkout@v5
-  
+
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3
 
@@ -72,7 +79,7 @@ jobs:
         id: meta
         uses: docker/metadata-action@v5
         with:
-          images: ${{ env.DOCKER_REGISTRY }}/${{ env.DOCKER_REPOSITORY }}
+          images: ${{ env.DOCKER_REGISTRY }}/${{ matrix.repository }}
           tags: |
             type=sha
             type=ref,event=pr
@@ -97,11 +104,11 @@ jobs:
         with:
           platforms: ${{ matrix.platform }}
           context: .
-          file: ./Dockerfile.zk
+          file: ./${{ matrix.dockerfile }}
           push: true
-          tags: ${{ env.DOCKER_REGISTRY }}/${{ env.DOCKER_REPOSITORY }}
+          tags: ${{ env.DOCKER_REGISTRY }}/${{ matrix.repository }}
           labels: ${{ steps.meta.outputs.labels }}
-          outputs: type=image,name=${{ env.DOCKER_REGISTRY }}/${{ env.DOCKER_REPOSITORY }},push-by-digest=true,name-canonical=true,push=true
+          outputs: type=image,name=${{ env.DOCKER_REGISTRY }}/${{ matrix.repository }},push-by-digest=true,name-canonical=true,push=true
 
       - name: Export digest
         run: |
@@ -112,7 +119,7 @@ jobs:
       - name: Upload digest
         uses: actions/upload-artifact@v5
         with:
-          name: digests-${{ env.PLATFORM_PAIR }}
+          name: digests-${{ matrix.variant }}-${{ env.PLATFORM_PAIR }}
           path: /tmp/digests/*
           if-no-files-found: error
           retention-days: 1
@@ -121,12 +128,19 @@ jobs:
     runs-on: ubuntu-latest
     needs:
       - build
+    strategy:
+      matrix:
+        include:
+          - variant: zk
+            repository: nethermind/surge-raiko-zk
+          - variant: mock
+            repository: nethermind/surge-raiko-mock
     steps:
       - name: Download digests
         uses: actions/download-artifact@v6
         with:
           path: /tmp/digests
-          pattern: digests-*
+          pattern: digests-${{ matrix.variant }}-*
           merge-multiple: true
 
       - name: Set up Docker Buildx
@@ -146,7 +160,7 @@ jobs:
         id: meta
         uses: docker/metadata-action@v5
         with:
-          images: ${{ env.DOCKER_REGISTRY }}/${{ env.DOCKER_REPOSITORY }}
+          images: ${{ env.DOCKER_REGISTRY }}/${{ matrix.repository }}
           tags: |
             type=raw,value=latest
             type=ref,event=branch
@@ -158,22 +172,22 @@ jobs:
         working-directory: /tmp/digests
         run: |
           docker buildx imagetools create $(jq -cr '.tags | map("-t " + .) | join(" ")' <<< "$DOCKER_METADATA_OUTPUT_JSON") \
-            $(printf '${{ env.DOCKER_REGISTRY }}/${{ env.DOCKER_REPOSITORY }}@sha256:%s ' *)
+            $(printf '${{ env.DOCKER_REGISTRY }}/${{ matrix.repository }}@sha256:%s ' *)
 
       - name: Inspect image
         run: |
           if [[ "${{ github.ref }}" == refs/tags/* ]]; then
             VERSION=${GITHUB_REF#refs/tags/}
-            docker buildx imagetools inspect ${{ env.DOCKER_REGISTRY }}/${{ env.DOCKER_REPOSITORY }}:$VERSION
+            docker buildx imagetools inspect ${{ env.DOCKER_REGISTRY }}/${{ matrix.repository }}:$VERSION
           elif [[ "${{ github.ref }}" == "refs/heads/main" ]]; then
-            docker buildx imagetools inspect ${{ env.DOCKER_REGISTRY }}/${{ env.DOCKER_REPOSITORY }}:latest
+            docker buildx imagetools inspect ${{ env.DOCKER_REGISTRY }}/${{ matrix.repository }}:latest
           else
             echo "Skipping inspect for PR builds"
           fi
 
       - name: Summary
         run: |
-          echo "## Docker build completed :green_circle:" >> $GITHUB_STEP_SUMMARY
+          echo "## Docker build completed (${{ matrix.variant }}) :green_circle:" >> $GITHUB_STEP_SUMMARY
           echo "### Tags" >> $GITHUB_STEP_SUMMARY
           echo "${{ steps.meta.outputs.tags }}" | while IFS= read -r TAG; do
             echo "- $TAG" >> $GITHUB_STEP_SUMMARY
