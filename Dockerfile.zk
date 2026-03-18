@@ -224,6 +224,9 @@ RUN mkdir -p ~/.cargo/bin
 # ARG CARGO_BUILD_JOBS=2
 # ENV CARGO_BUILD_JOBS=${CARGO_BUILD_JOBS}
 # ENV NUM_JOBS=${CARGO_BUILD_JOBS}
+# Allow multiple definitions: risc0_groth16_sys and proofman_starks_lib_c both
+# define the same CUDA sort kernel — they're compatible, let the linker pick one.
+ENV RUSTFLAGS="-C link-arg=-Wl,--allow-multiple-definition"
 RUN cargo build --release ${BUILD_FLAGS} --features "sp1,risc0,zisk,cuda"
 
 FROM ubuntu:22.04 AS raiko-zk
