@@ -419,7 +419,7 @@ pub async fn batch_preflight<BDP: BlockDataProvider>(
         .zip(pool_txs_list.iter().cloned())
         .collect();
 
-    // Create L1 provider once and share across all chunks (PR #14)
+    // Create L1 provider once and share across all chunks
     let shared_l1_provider = RpcBlockDataProvider::new(&l1_chain_spec.rpc).await?;
 
     for task_batch in tasks.chunks(chunk_size) {

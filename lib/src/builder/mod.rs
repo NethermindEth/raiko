@@ -12,7 +12,7 @@ use crate::{
     consts::MAX_BLOCK_HASH_AGE,
     guest_mem_forget,
     input::{GuestBatchInput, GuestInput},
-    l1_precompiles::{clear_l1sload_cache, verify_and_populate_l1sload_proofs},
+    l1_precompiles::{acquire_l1sload_lock, clear_l1sload_cache, verify_and_populate_l1sload_proofs},
     mem_db::{AccountState, DbAccount, MemDb},
     CycleTracker,
 };
@@ -256,6 +256,7 @@ pub fn calculate_block_header(input: &mut GuestInput) -> Header {
     let db = create_mem_db(input).unwrap();
     cycle_tracker.end();
 
+    let _l1sload_guard = acquire_l1sload_lock();
     clear_l1sload_cache();
     if input.chain_spec.is_taiko() {
         let anchor_tx = input
@@ -293,6 +294,7 @@ pub fn calculate_block_header(input: &mut GuestInput) -> Header {
         .execute_transactions(pool_tx, false)
         .expect("execute");
     cycle_tracker.end();
+    drop(_l1sload_guard);
 
     let cycle_tracker = CycleTracker::start("finalize");
     let header = builder.finalize().expect("execute");
@@ -308,6 +310,7 @@ pub fn calculate_batch_blocks_final_header(input: &mut GuestBatchInput) -> Vec<T
     let pool_txs_list = generate_transactions_for_batch_blocks(&input);
     let mut final_blocks = Vec::new();
     for (i, pool_txs) in pool_txs_list.iter().enumerate() {
+        let _l1sload_guard = acquire_l1sload_lock();
         clear_l1sload_cache();
         if input.inputs[i].chain_spec.is_taiko() {
             let anchor_tx = input.inputs[i]
@@ -347,6 +350,7 @@ pub fn calculate_batch_blocks_final_header(input: &mut GuestBatchInput) -> Vec<T
         builder
             .execute_transactions(execute_tx.clone(), false)
             .expect("execute");
+        drop(_l1sload_guard);
         final_blocks.push(
             builder
                 .finalize_block()

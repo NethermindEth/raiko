@@ -170,7 +170,15 @@ fn build_verified_state_root_map(
     // Walk in reverse (newest→oldest), starting from the origin's parent_hash since
     // the highest header in l1_headers is block (l1_origin - 1).
     let mut expected_hash = l1_origin_header.parent_hash;
+    let mut expected_number = l1_origin_number - 1;
     for header in l1_headers.iter().rev() {
+        if header.number != expected_number {
+            bail!(
+                "L1 header block number mismatch: expected {}, got {}",
+                expected_number,
+                header.number
+            );
+        }
         let header_hash = header.hash_slow();
         if header_hash != expected_hash {
             bail!(
@@ -182,6 +190,7 @@ fn build_verified_state_root_map(
         }
         state_root_map.insert(header.number, header.state_root);
         expected_hash = header.parent_hash;
+        expected_number -= 1;
     }
 
     Ok(state_root_map)
@@ -250,7 +259,7 @@ fn verify_l1_proof(proof: &L1StorageProof, state_root: B256) -> Result<()> {
 }
 
 /// Get value and verify proof.
-/// Single-pass: extracts the leaf value first, then verifies once (PR #5 optimization).
+/// Single-pass: extracts the leaf value first, then verifies once.
 fn get_and_verify_value(key_hash: B256, root: B256, proof: &[Bytes]) -> Result<Vec<u8>> {
     let nibbles = Nibbles::unpack(&key_hash);
     let proof_refs: Vec<&Bytes> = proof.iter().collect();
@@ -588,6 +597,26 @@ mod tests {
             .unwrap_err()
             .to_string()
             .contains("header chain broken"));
+    }
+
+    #[test]
+    fn test_state_root_map_wrong_block_number() {
+        // Hash chain is valid, but block number is wrong (97 instead of 99).
+        let h98 = make_header(98, B256::from([1u8; 32]), B256::ZERO);
+        let h98_hash = h98.hash_slow();
+
+        // Wrong number: should be 99, but we set 97.
+        let h_wrong = make_header(97, B256::from([2u8; 32]), h98_hash);
+        let h_wrong_hash = h_wrong.hash_slow();
+
+        let origin = make_header(100, B256::from([3u8; 32]), h_wrong_hash);
+
+        let result = build_verified_state_root_map(&origin, &[h98, h_wrong]);
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("block number mismatch"));
     }
 
     // ───────────────────────────────────────────────
