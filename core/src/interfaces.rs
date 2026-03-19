@@ -138,7 +138,7 @@ pub async fn get_guest_data() -> RaikoResult<serde_json::Value> {
     }
     #[cfg(feature = "zisk")]
     {
-        let zisk_data = tdx_prover::TdxProver::get_guest_data().await?;
+        let zisk_data = zisk_agent_driver::ZiskAgentProver::get_guest_data().await?;
         let zisk_map = zisk_data
             .as_object()
             .cloned()
