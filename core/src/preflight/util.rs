@@ -27,6 +27,7 @@ use raiko_lib::{
     },
     libhash::hash_signal_slots,
     primitives::eip4844::{self, commitment_to_version_hash, KZG_SETTINGS},
+    utils::blobs::decode_blob_data,
     utils::shasta_rules::ANCHOR_MAX_OFFSET,
 };
 use serde::{Deserialize, Serialize};
@@ -405,6 +406,7 @@ async fn prepare_pacaya_batch_input(
         l2_grandparent_header: grandparent_header,
         data_sources: vec![InputDataSource {
             tx_data_from_calldata,
+            decoded_blob_data: None,
             tx_data_from_blob: blob_tx_buffers_with_proofs
                 .iter()
                 .map(|(blob_tx_data, _, _)| blob_tx_data.clone())
@@ -466,6 +468,7 @@ async fn prepare_shasta_batch_input(
         };
         data_sources.push(InputDataSource {
             tx_data_from_calldata,
+            decoded_blob_data: None,
             tx_data_from_blob: blob_tx_buffers_with_proofs
                 .iter()
                 .map(|(blob_tx_data, _, _)| blob_tx_data.clone())
@@ -644,7 +647,6 @@ async fn prepare_taiko_chain_batch_input_realtime(
     let mut blob_idx = 0usize; // tracks position in the flat provided_blobs array
     for derivation_source in realtime_event_data.proposal.sources.clone() {
         let blob_hashes = derivation_source.blobSlice.blobHashes;
-        let l1_blob_timestamp: u64 = derivation_source.blobSlice.timestamp.to();
 
         let (tx_data_from_calldata, blob_tx_buffers_with_proofs) = if blob_hashes.is_empty() {
             unimplemented!("calldata txlist is not supported in realtime");
@@ -663,7 +665,7 @@ async fn prepare_taiko_chain_batch_input_realtime(
                 let blob_proof = match blob_proof_type {
                     BlobProofType::KzgVersionedHash => None,
                     BlobProofType::ProofOfEquivalence => {
-                        let (x, _y) = eip4844::proof_of_equivalence(
+                        let (x, y) = eip4844::proof_of_equivalence(
                             &blob_bytes,
                             &commitment_to_version_hash(&commitment),
                         )
@@ -672,11 +674,12 @@ async fn prepare_taiko_chain_batch_input_realtime(
                             &blob_bytes,
                             ZFr::from_bytes(&x).unwrap(),
                         );
-                        Some(
-                            point
-                                .map(|g1| g1.to_bytes().to_vec())
-                                .map_err(|e| anyhow!(e))?,
-                        )
+                        // Append precomputed y (32 bytes) after the KZG proof (48 bytes).
+                        let mut proof_with_y = point
+                            .map(|g1| g1.to_bytes().to_vec())
+                            .map_err(|e| anyhow!(e))?;
+                        proof_with_y.extend_from_slice(&y);
+                        Some(proof_with_y)
                     }
                 };
                 buffers.push((blob_bytes, Some(commitment.to_vec()), blob_proof));
@@ -684,18 +687,17 @@ async fn prepare_taiko_chain_batch_input_realtime(
             }
             (Vec::new(), buffers)
         } else {
-            // Fallback: fetch blobs from beacon chain (post-posting scenario)
-            let blob_tx_buffers = get_batch_tx_data_with_proofs(
-                blob_hashes,
-                l1_blob_timestamp,
-                l1_chain_spec,
-                blob_proof_type,
-            )
-            .await?;
-            (Vec::new(), blob_tx_buffers)
+            panic!("No blobs provided for RealTime proposal, and blob fetching from beacon is not supported");
         };
         data_sources.push(InputDataSource {
             tx_data_from_calldata,
+            decoded_blob_data: Some(
+                blob_tx_buffers_with_proofs
+                    .iter()
+                    .map(|(blob_tx_data, _, _)| decode_blob_data(blob_tx_data))
+                    .collect::<Vec<Vec<u8>>>()
+                    .concat(),
+            ),
             tx_data_from_blob: blob_tx_buffers_with_proofs
                 .iter()
                 .map(|(blob_tx_data, _, _)| blob_tx_data.clone())
@@ -884,11 +886,14 @@ pub async fn get_tx_blob(
             let point = eip4844::calc_kzg_proof_with_point(&blob, ZFr::from_bytes(&x).unwrap());
             debug!("calc_kzg_proof_with_point {point:?}");
 
-            Some(
-                point
-                    .map(|g1| g1.to_bytes().to_vec())
-                    .map_err(|e| anyhow!(e))?,
-            )
+            // Append precomputed y (32 bytes) after the KZG proof (48 bytes).
+            // The guest detects the extended proof (80 bytes) and skips the expensive
+            // blob deserialization + polynomial evaluation.
+            let mut proof_with_y = point
+                .map(|g1| g1.to_bytes().to_vec())
+                .map_err(|e| anyhow!(e))?;
+            proof_with_y.extend_from_slice(&y);
+            Some(proof_with_y)
         }
     };
 

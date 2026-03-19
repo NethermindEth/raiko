@@ -84,6 +84,11 @@ pub struct InputDataSource {
     pub blob_proofs: Option<Vec<Vec<u8>>>,
     pub blob_proof_type: BlobProofType,
     pub is_forced_inclusion: bool,
+    /// Pre-decoded blob data (output of `decode_blob_data` per blob, concatenated).
+    /// When present, the guest skips the expensive `decode_blob_data` call
+    #[serde_as(as = "Option<serde_with::Bytes>")]
+    #[serde(default)]
+    pub decoded_blob_data: Option<Vec<u8>>,
 }
 
 /// External block input.

@@ -80,8 +80,8 @@ pub fn generate_transactions_for_shasta_blocks(
     for (idx, data_source) in data_sources.iter().enumerate() {
         let use_blob = batch_proposal.blob_used();
         let compressed_tx_list_buf = if use_blob {
-            let blob_data_bufs = data_source.tx_data_from_blob.clone();
-            let decoded_blob_data_concat = blob_data_bufs
+            let decoded_blob_data_concat = data_source
+                .tx_data_from_blob
                 .iter()
                 .map(|blob_data_buf| decode_blob_data(blob_data_buf))
                 .collect::<Vec<Vec<u8>>>()

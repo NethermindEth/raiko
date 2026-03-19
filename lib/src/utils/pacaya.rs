@@ -21,18 +21,18 @@ pub fn generate_transactions_for_pacaya_blocks(
     );
     let use_blob = batch_proposal.blob_used();
     let compressed_tx_list_buf = if use_blob {
-        let blob_data_bufs = data_source.tx_data_from_blob.clone();
-        let compressed_tx_list_buf = blob_data_bufs
+        let decoded_concat = data_source
+            .tx_data_from_blob
             .iter()
             .map(|blob_data_buf| decode_blob_data(blob_data_buf))
             .collect::<Vec<Vec<u8>>>()
             .concat();
         let (blob_offset, blob_size) = batch_proposal.blob_tx_slice_param().unwrap_or_else(|| {
             warn!("blob_tx_slice_param not found, use full buffer to decode tx_list");
-            (0, compressed_tx_list_buf.len())
+            (0, decoded_concat.len())
         });
         tracing::info!("blob_offset: {blob_offset}, blob_size: {blob_size}");
-        compressed_tx_list_buf[blob_offset..blob_offset + blob_size].to_vec()
+        decoded_concat[blob_offset..blob_offset + blob_size].to_vec()
     } else {
         data_source.tx_data_from_calldata.clone()
     };
