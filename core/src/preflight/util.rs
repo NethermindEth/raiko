@@ -663,7 +663,7 @@ async fn prepare_taiko_chain_batch_input_realtime(
                 let blob_proof = match blob_proof_type {
                     BlobProofType::KzgVersionedHash => None,
                     BlobProofType::ProofOfEquivalence => {
-                        let (x, _y) = eip4844::proof_of_equivalence(
+                        let (x, y) = eip4844::proof_of_equivalence(
                             &blob_bytes,
                             &commitment_to_version_hash(&commitment),
                         )
@@ -672,11 +672,14 @@ async fn prepare_taiko_chain_batch_input_realtime(
                             &blob_bytes,
                             ZFr::from_bytes(&x).unwrap(),
                         );
-                        Some(
-                            point
-                                .map(|g1| g1.to_bytes().to_vec())
-                                .map_err(|e| anyhow!(e))?,
-                        )
+                        // Append precomputed y (32 bytes) after the KZG proof (48 bytes).
+                        // The guest detects the extended proof (80 bytes) and skips the expensive
+                        // blob deserialization + polynomial evaluation.
+                        let mut proof_with_y = point
+                            .map(|g1| g1.to_bytes().to_vec())
+                            .map_err(|e| anyhow!(e))?;
+                        proof_with_y.extend_from_slice(&y);
+                        Some(proof_with_y)
                     }
                 };
                 buffers.push((blob_bytes, Some(commitment.to_vec()), blob_proof));
@@ -884,11 +887,14 @@ pub async fn get_tx_blob(
             let point = eip4844::calc_kzg_proof_with_point(&blob, ZFr::from_bytes(&x).unwrap());
             debug!("calc_kzg_proof_with_point {point:?}");
 
-            Some(
-                point
-                    .map(|g1| g1.to_bytes().to_vec())
-                    .map_err(|e| anyhow!(e))?,
-            )
+            // Append precomputed y (32 bytes) after the KZG proof (48 bytes).
+            // The guest detects the extended proof (80 bytes) and skips the expensive
+            // blob deserialization + polynomial evaluation.
+            let mut proof_with_y = point
+                .map(|g1| g1.to_bytes().to_vec())
+                .map_err(|e| anyhow!(e))?;
+            proof_with_y.extend_from_slice(&y);
+            Some(proof_with_y)
         }
     };
 
