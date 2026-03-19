@@ -129,7 +129,7 @@ fn cached_pk(elf_name: &str) -> &'static (ZiskProgramPK, ZiskProgramVK) {
 /// so subsequent calls are just pointer dereferences.
 fn cached_vkey_hex(elf_name: &str) -> String {
     let (_pk, vk) = cached_pk(elf_name);
-    format!("0x{}", hex::encode(&vk.vk))
+    hex::encode(&vk.vk)
 }
 
 // ---------------------------------------------------------------------------
