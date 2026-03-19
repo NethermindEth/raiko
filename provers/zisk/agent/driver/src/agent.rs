@@ -14,7 +14,7 @@ use raiko_lib::{
     proof_type::ProofType as RaikoProofType,
     prover::{IdStore, IdWrite, Prover, ProverConfig, ProverError, ProverResult},
 };
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::path::PathBuf;
 use tracing::{info, warn};
 
@@ -546,13 +546,9 @@ impl Prover for ZiskAgentProver {
         // All subsequent calls return cached results instantly.
         let data = tokio::task::spawn_blocking(|| -> ProverResult<serde_json::Value> {
             let batch_vkey = cached_vkey_hex("zisk-batch");
-            let agg_vkey = cached_vkey_hex("zisk-aggregation");
-            let shasta_agg_vkey = cached_vkey_hex("zisk-shasta-aggregation");
             Ok(json!({
                 "zisk": {
                     "batch_vkey": batch_vkey,
-                    "aggregation_vkey": agg_vkey,
-                    "shasta_aggregation_vkey": shasta_agg_vkey,
                 }
             }))
         })

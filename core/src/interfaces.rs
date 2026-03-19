@@ -136,6 +136,16 @@ pub async fn get_guest_data() -> RaikoResult<serde_json::Value> {
 
         guest_data_object.extend(tdx_map);
     }
+    #[cfg(feature = "zisk")]
+    {
+        let zisk_data = tdx_prover::TdxProver::get_guest_data().await?;
+        let zisk_map = zisk_data
+            .as_object()
+            .cloned()
+            .expect("zisk guest data is not an object");
+
+        guest_data_object.extend(zisk_map);
+    }
 
     Ok(serde_json::Value::Object(guest_data_object))
 }
