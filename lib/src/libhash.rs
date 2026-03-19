@@ -4,6 +4,7 @@ use crate::input::shasta::{Commitment, Derivation, Proposal};
 
 use crate::input::shasta::Checkpoint;
 use crate::primitives::keccak::keccak;
+use crate::protocol_instance::RealTimeTransitionData;
 use crate::prover::{ProofCarryData, TransitionInputData};
 use alloy_primitives::{b256, Address, B256, U256};
 use alloy_sol_types::SolValue;
@@ -95,6 +96,36 @@ const EMPTY_BYTES_HASH: B256 =
 
 pub const VERIFY_PROOF_B256: B256 =
     b256!("5645524946595f50524f4f460000000000000000000000000000000000000000");
+
+/// Domain-separated hash for a RealTime sub-proof public input.
+///
+/// Inner hash: `keccak256(abi.encode(proposalHash, lastFinalizedBlockHash, blockNumber, blockHash, stateRoot))`
+/// Outer hash: `hash(VERIFY_PROOF, chain_id, verifier, innerHash, bytes32(0))`
+pub fn hash_realtime_subproof_input(
+    chain_id: u64,
+    verifier: Address,
+    rt: &RealTimeTransitionData,
+) -> B256 {
+    tracing::info!("hash_realtime_subproof_input: {rt:?}");
+    let inner_hash = keccak(
+        (
+            rt.proposal_hash,
+            rt.last_finalized_block_hash,
+            rt.checkpoint.blockNumber,
+            rt.checkpoint.blockHash,
+            rt.checkpoint.stateRoot,
+        )
+            .abi_encode(),
+    )
+    .into();
+    hash_five_values(
+        VERIFY_PROOF_B256,
+        U256::from(chain_id).into(),
+        address_to_b256(verifier),
+        inner_hash,
+        B256::ZERO,
+    )
+}
 
 /// Domain-separated hash for a Shasta sub-proof public input.
 ///

@@ -24,8 +24,8 @@ use crate::{
         GuestInput, ShastaRawAggregationGuestInput, Transition,
     },
     libhash::{
-        hash_commitment, hash_proposal, hash_public_input, hash_shasta_subproof_input,
-        hash_signal_slots, hash_two_values,
+        hash_commitment, hash_proposal, hash_public_input, hash_realtime_subproof_input,
+        hash_shasta_subproof_input, hash_signal_slots, hash_two_values,
     },
     primitives::{
         eip4844::{self, commitment_to_version_hash},
@@ -930,19 +930,10 @@ impl ProtocolInstance {
                 })
             }
             TransitionFork::RealTime(rt) => {
-                // commitmentHash = keccak256(abi.encode(proposalHash, lastFinalizedBlockHash, blockNumber, blockHash, stateRoot))
-                // This is the value passed to verifyProof(0, commitmentHash, proof).
-                keccak(
-                    (
-                        rt.proposal_hash,
-                        rt.last_finalized_block_hash,
-                        rt.checkpoint.blockNumber,
-                        rt.checkpoint.blockHash,
-                        rt.checkpoint.stateRoot,
-                    )
-                        .abi_encode(),
-                )
-                .into()
+                // Domain-separated hash mirroring Shasta pattern:
+                //   inner = keccak256(abi.encode(proposalHash, lastFinalizedBlockHash, blockNumber, blockHash, stateRoot, bytes32(0)))
+                //   outer = hash(VERIFY_PROOF, chain_id, verifier, inner)
+                hash_realtime_subproof_input(self.chain_id, self.verifier_address, &rt)
             }
         }
     }

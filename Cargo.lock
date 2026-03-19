@@ -2860,7 +2860,7 @@ dependencies = [
  "serde_json",
  "tempfile",
  "thiserror 2.0.18",
- "winnow 0.7.14",
+ "winnow 0.7.15",
  "wtns-file",
 ]
 
