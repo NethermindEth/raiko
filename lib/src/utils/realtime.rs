@@ -9,7 +9,7 @@ use crate::input::GuestBatchInput;
 use crate::manifest::DerivationSourceManifest;
 #[cfg(not(feature = "std"))]
 use crate::no_std::*;
-use crate::utils::blobs::zlib_decompress_data;
+use crate::utils::blobs::{decode_blob_data, zlib_decompress_data};
 use crate::utils::shasta_rules::{
     clamp_timestamp_lower_bound, validate_force_inc_proposal_manifest, validate_input_block_param,
     validate_realtime_proposal_manifest, validate_shasta_block_base_fee,
@@ -84,12 +84,14 @@ pub fn generate_transactions_for_realtime_blocks(
     for (idx, data_source) in data_sources.iter().enumerate() {
         let use_blob = batch_proposal.blob_used();
         let compressed_tx_list_buf = if use_blob {
-            let decoded_blob_data_concat = data_source
-                .decoded_blob_data
-                .as_ref()
-                .expect("decoded_blob_data must be set for realtime proving");
+            let blob_data_bufs = data_source.tx_data_from_blob.clone();
+            let decoded_blob_data_concat = blob_data_bufs
+                .iter()
+                .map(|blob_data_buf| decode_blob_data(blob_data_buf))
+                .collect::<Vec<Vec<u8>>>()
+                .concat();
             let sliced = batch_proposal
-                .blob_tx_slice_param_for_source(idx, decoded_blob_data_concat)
+                .blob_tx_slice_param_for_source(idx, &decoded_blob_data_concat)
                 .and_then(|(blob_offset, blob_size)| {
                     tracing::info!("blob_offset: {blob_offset}, blob_size: {blob_size}");
                     decoded_blob_data_concat

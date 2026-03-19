@@ -716,15 +716,7 @@ impl ProtocolInstance {
         proof_type: ProofType,
     ) -> Result<Self> {
         // verify blob usage, either by commitment or proof equality.
-        // Skip KZG verification for RealTime: the host supplies blobs, commitments,
-        // proofs, and expected hashes — all from itself, making verification circular.
-        // Security is preserved because wrong data → wrong state root → L1 rejects.
-        if !matches!(
-            batch_input.taiko.batch_proposed,
-            BlockProposedFork::RealTime(_)
-        ) {
-            verify_batch_mode_blob_usage(batch_input, proof_type)?;
-        }
+        verify_batch_mode_blob_usage(batch_input, proof_type)?;
 
         // todo: move chain_spec into the batch input
         let input = &batch_input.inputs[0];
