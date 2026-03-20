@@ -40,8 +40,8 @@ pub fn main() {
         ProtocolInstance::new_batch(&batch_input, final_blocks, ProofType::Zisk)
             .expect("failed to build Zisk protocol instance");
 
-    // Get the instance hash and commit as public output
-    let instance_hash = protocol_instance.instance_hash();
+    // Get the instance hash in LE uint32 format for zisk publics
+    let instance_hash = protocol_instance.instance_hash_le();
     ziskos::io::write(&instance_hash.0);
 
     // Close hints stream (flushes all pending hints)

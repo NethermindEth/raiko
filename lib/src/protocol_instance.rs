@@ -869,6 +869,17 @@ impl ProtocolInstance {
     }
 
     // keccak256(abi.encode(tran, newInstance, prover, metaHash))
+    /// Returns the instance hash with each 4-byte word byte-swapped (BE → LE).
+    /// Use this for zisk proofs where publics are stored as little-endian uint32 words.
+    pub fn instance_hash_le(&self) -> B256 {
+        let hash = self.instance_hash();
+        let mut le_bytes = hash.0;
+        for chunk in le_bytes.chunks_exact_mut(4) {
+            chunk.reverse();
+        }
+        B256::from(le_bytes)
+    }
+
     pub fn instance_hash(&self) -> B256 {
         // packages/protocol/contracts/verifiers/libs/LibPublicInput.sol
         // "VERIFY_PROOF", _chainId, _verifierContract, _tran, _newInstance, _prover, _metaHash

@@ -14,7 +14,7 @@ use raiko_lib::{
     proof_type::ProofType as RaikoProofType,
     prover::{IdStore, IdWrite, Prover, ProverConfig, ProverError, ProverResult},
 };
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 use std::path::PathBuf;
 use tracing::{info, warn};
 
@@ -129,7 +129,13 @@ fn cached_pk(elf_name: &str) -> &'static (ZiskProgramPK, ZiskProgramVK) {
 /// so subsequent calls are just pointer dereferences.
 fn cached_vkey_hex(elf_name: &str) -> String {
     let (_pk, vk) = cached_pk(elf_name);
-    hex::encode(&vk.vk)
+    // Swap byte order within each 8-byte (uint64) word: zisk stores vkey as
+    // LE uint64 values, but the on-chain verifier expects BE uint64 layout.
+    let mut swapped = vk.vk.clone();
+    for chunk in swapped.chunks_exact_mut(8) {
+        chunk.reverse();
+    }
+    hex::encode(&swapped)
 }
 
 // ---------------------------------------------------------------------------
@@ -274,6 +280,7 @@ fn stark_proof_to_raiko_proof(
         .map(|v| v.strip_prefix("0x").unwrap_or(v))
         .unwrap_or("");
     let proof_string = format!("0x{}{}{}", vk_hex, inner_hex, hex::encode(&proof_bytes));
+
     Ok(Proof {
         proof: Some(proof_string),
         quote: None,
