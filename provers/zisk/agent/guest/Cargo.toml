@@ -60,10 +60,10 @@ blst = { git = "https://github.com/0xPolygonHermez/zisk-patch-blst.git", tag = "
 # Precompile acceleration patches — use syscalls for crypto operations at the
 # compress/field-op level. The 0.15.0 patch tags are compatible with v0.16.0
 # ziskos since the underlying syscalls are unchanged.
-tiny-keccak = { git = "https://github.com/0xPolygonHermez/zisk-patch-tiny-keccak.git", tag = "patch-2.0.2-zisk-0.15.0" }
-sha2 = { git = "https://github.com/0xPolygonHermez/zisk-patch-hashes.git", tag = "patch-sha2-0.10.9-zisk-0.15.0" }
+#tiny-keccak = { git = "https://github.com/0xPolygonHermez/zisk-patch-tiny-keccak.git", tag = "patch-2.0.2-zisk-0.15.0" }
+#sha2 = { git = "https://github.com/0xPolygonHermez/zisk-patch-hashes.git", tag = "patch-sha2-0.10.9-zisk-0.15.0" }
 # sha3: local patch that calls syscall_keccak_f directly (bypasses keccak crate transitive dep issue)
-sha3 = { path = "patches/sha3" }
-# sha3 = { git = "https://github.com/0xPolygonHermez/zisk-patch-hashes.git", tag = "patch-sha3-0.10.8-zisk-0.15.0" }
+#sha3 = { path = "patches/sha3" }
+#sha3 = { git = "https://github.com/0xPolygonHermez/zisk-patch-hashes.git", tag = "patch-sha3-0.10.8-zisk-0.15.0" }
 k256 = { git = "https://github.com/0xPolygonHermez/zisk-patch-elliptic-curves.git", tag = "patch-k256-0.13.4-zisk-0.15.0" }
-ruint = { git = "https://github.com/0xPolygonHermez/zisk-patch-ruint.git", tag = "patch-1.17.0-zisk-0.15.0" }
+#ruint = { git = "https://github.com/0xPolygonHermez/zisk-patch-ruint.git", tag = "patch-1.17.0-zisk-0.15.0" }
