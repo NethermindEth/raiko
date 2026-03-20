@@ -106,7 +106,9 @@ pub fn hash_realtime_subproof_input(
     verifier: Address,
     rt: &RealTimeTransitionData,
 ) -> B256 {
-    tracing::info!("hash_realtime_subproof_input: {rt:?}");
+    tracing::info!(
+        "hash_realtime_subproof_input: {rt:?}, chain_id: {chain_id}, verifier: {verifier:?}"
+    );
     let inner_hash = keccak(
         (
             rt.proposal_hash,
@@ -118,13 +120,26 @@ pub fn hash_realtime_subproof_input(
             .abi_encode(),
     )
     .into();
-    hash_five_values(
+
+    tracing::debug!(
+        "hash_realtime_subproof_input inner hash: {:?}",
+        hex::encode(inner_hash)
+    );
+
+    let result = hash_five_values(
         VERIFY_PROOF_B256,
         U256::from(chain_id).into(),
         address_to_b256(verifier),
         inner_hash,
         B256::ZERO,
-    )
+    );
+
+    tracing::debug!(
+        "hash_realtime_subproof_input result: {:?}",
+        hex::encode(result)
+    );
+
+    result
 }
 
 /// Domain-separated hash for a Shasta sub-proof public input.

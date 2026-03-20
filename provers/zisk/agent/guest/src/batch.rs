@@ -3,7 +3,7 @@ ziskos::entrypoint!(main);
 
 mod precompile_shims;
 mod ruint_shims;
-mod zisk_crypto;
+//mod zisk_crypto;
 
 //use std::sync::Arc;
 

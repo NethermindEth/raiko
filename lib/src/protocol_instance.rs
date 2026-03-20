@@ -812,6 +812,8 @@ impl ProtocolInstance {
                     );
                 }
 
+                tracing::debug!("Real Time proposal data: {:#?}", event_data.proposal);
+
                 let proposal_hash: B256 = keccak(event_data.proposal.abi_encode()).into();
 
                 // last_finalized_block_hash = parent block hash of the first L2 block
