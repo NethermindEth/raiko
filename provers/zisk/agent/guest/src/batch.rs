@@ -1,11 +1,9 @@
 #![no_main]
 ziskos::entrypoint!(main);
 
-mod precompile_shims;
-mod ruint_shims;
-//mod zisk_crypto;
+mod zisk_crypto;
 
-//use std::sync::Arc;
+use std::sync::Arc;
 
 use raiko_lib::{
     builder::calculate_batch_blocks_final_header, input::GuestBatchInput, proof_type::ProofType,
@@ -13,12 +11,16 @@ use raiko_lib::{
 };
 
 pub fn main() {
-    // Route ecrecover through the ziskos high-level syscall instead of the
-    // k256 patch field-op path (reduces ROM size from ~500+ calls to 1).
-    //raiko_lib::revm::precompile::install_crypto(zisk_crypto::ZiskCrypto);
-    //let crypto = Arc::new(zisk_crypto::ZiskCrypto);
-    //raiko_lib::alloy_consensus::crypto::install_default_provider(crypto.clone())
-    //.expect("crypto provider already set");
+    // Route all crypto through ZiskCrypto high-level syscalls instead of the
+    // k256 patch field-op path. The k256 patch uses many individual
+    // arith256_mod + secp256k1_add/dbl calls which trigger a ZisK prover bug
+    // ("Fixed MT verification failed" / "VerifyEvaluations0" ~8% of the time).
+    // ZiskCrypto uses single high-level C calls (e.g. secp256k1_ecdsa_address_recover_c)
+    // that avoid the problematic precompile pattern.
+    raiko_lib::revm::install_crypto(zisk_crypto::ZiskCrypto);
+    let crypto = Arc::new(zisk_crypto::ZiskCrypto);
+    raiko_lib::alloy_consensus::crypto::install_default_provider(crypto.clone())
+        .expect("crypto provider already set");
 
     // Initialize hints stream (native build only — emits precompile hint requests)
     #[cfg(zisk_hints)]
