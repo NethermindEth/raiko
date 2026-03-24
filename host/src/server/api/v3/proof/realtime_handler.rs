@@ -3,7 +3,7 @@ use crate::{
     server::{
         api::v3::{ProofResponse, Status},
         auth::AuthenticatedApiKey,
-        handler::prove_many,
+        handler::prove,
         utils::{
             draw_shasta_sgx_request, draw_shasta_zk_request, is_sgx_any_request, is_zk_any_request,
             to_v3_status,
@@ -16,11 +16,8 @@ use raiko_core::{
     merge,
 };
 use raiko_lib::proof_type::ProofType;
-use raiko_lib::utils::shasta_guest_input::{
-    encode_guest_input_str_to_prover_arg_value, PROVER_ARG_SHASTA_GUEST_INPUT,
-};
 use raiko_reqactor::Actor;
-use raiko_reqpool::{ImageId, RealTimeProofRequestEntity};
+use raiko_reqpool::ImageId;
 use raiko_tasks::TaskStatus;
 use serde_json::Value;
 use utoipa::OpenApi;
@@ -127,54 +124,13 @@ async fn realtime_handler(
     // No aggregation for RealTime
     let image_id = ImageId::from_proof_type_and_request_type(&realtime_request.proof_type, false);
 
-    let (input_request_key, proof_request_key, input_request_entity, proof_request_entity) =
+    let (_input_request_key, proof_request_key, _input_request_entity, proof_request_entity) =
         process_realtime_request(&realtime_request, &image_id);
 
-    // Two-stage proving: first generate guest input, then run real prover.
-    let statuses = prove_many(&actor, vec![input_request_key], vec![input_request_entity]).await?;
-
-    let is_all_sub_success = statuses
-        .iter()
-        .all(|status| matches!(status, raiko_reqpool::Status::Success { .. }));
-
-    let result = if !is_all_sub_success {
-        Ok(raiko_reqpool::Status::Registered)
-    } else {
-        let guest_input_str = match &statuses[0] {
-            raiko_reqpool::Status::Success { proof, .. } => proof.proof.clone().unwrap(),
-            _ => unreachable!("is_all_sub_success checked"),
-        };
-
-        // Inject guest input into the proof request entity's prover_args
-        let enriched_entity = match proof_request_entity {
-            raiko_reqpool::RequestEntity::RealTimeProof(ref entity) => {
-                let mut prover_args = entity.prover_args().clone();
-                prover_args.insert(
-                    PROVER_ARG_SHASTA_GUEST_INPUT.to_string(),
-                    encode_guest_input_str_to_prover_arg_value(&guest_input_str)
-                        .expect("failed to wrap guest_input string"),
-                );
-                RealTimeProofRequestEntity::new_with_guest_input_entity(
-                    entity.guest_input_entity().clone(),
-                    *entity.proof_type(),
-                    prover_args,
-                )
-                .into()
-            }
-            _ => unreachable!("Expected RealTimeProof entity"),
-        };
-
-        prove_many(&actor, vec![proof_request_key], vec![enriched_entity])
-            .await
-            .map(|statuses| {
-                statuses
-                    .into_iter()
-                    .next()
-                    .unwrap_or_else(|| raiko_reqpool::Status::Failed {
-                        error: "No status returned".to_string(),
-                    })
-            })
-    };
+    // Submit proof directly — do_prove_realtime will generate guest input
+    // inline if it's not already in prover_args, so no separate guest input
+    // stage is needed.
+    let result = prove(&actor, proof_request_key.into(), proof_request_entity).await;
 
     let status = to_v3_status(realtime_request.proof_type, None, result);
     Ok(status)
