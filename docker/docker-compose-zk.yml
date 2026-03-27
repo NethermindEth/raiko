@@ -6,7 +6,7 @@ services:
       dockerfile: Dockerfile.zk
       platforms:
         - linux/amd64
-    image: nethermind.jfrog.io/core-oci-local-staging/raiko-zk:latest
+    image: docker.io/nethermind/surge-raiko-zk:latest
     container_name: raiko-zk
     network_mode: host
     env_file:
