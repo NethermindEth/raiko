@@ -13,6 +13,7 @@ use tokio::runtime::Handle;
 use crate::{
     interfaces::{RaikoError, RaikoResult},
     provider::BlockDataProvider,
+    provider::rpc::PrestateTraceResult,
     MerkleProof,
 };
 use tracing::{info, trace};
@@ -211,6 +212,42 @@ impl<'a, BDP: BlockDataProvider> ProviderDb<'a, BDP> {
                 .insert_account_storage(&address, index, value);
         }
         Ok(())
+    }
+
+    /// Populate staging_db directly from debug_traceBlockByNumber prestate results.
+    /// This inserts actual account state (balance, nonce, code) and storage values,
+    /// eliminating the need for separate RPC fetches and multiple iterations.
+    pub fn populate_from_trace(&mut self, prestate: PrestateTraceResult) {
+        let mut num_accounts = 0usize;
+        let mut num_slots = 0usize;
+        for (address, state) in prestate.0 {
+            let balance = state.balance.unwrap_or(U256::ZERO);
+            let nonce = state.nonce.unwrap_or(0);
+            let code = state
+                .code
+                .map(|c| Bytecode::new_raw(c))
+                .unwrap_or_else(|| Bytecode::new_raw(Bytes::new()));
+            let account_info =
+                AccountInfo::new(balance, nonce, code.hash_slow(), code);
+            self.staging_db
+                .insert_account_info(address, account_info);
+            num_accounts += 1;
+
+            if let Some(storage) = state.storage {
+                for (slot, value) in storage {
+                    self.staging_db.insert_account_storage(
+                        &address,
+                        U256::from_be_bytes(slot.0),
+                        value,
+                    );
+                    num_slots += 1;
+                }
+            }
+        }
+        info!(
+            "populate_from_trace: inserted {} accounts, {} storage slots",
+            num_accounts, num_slots,
+        );
     }
 }
 

@@ -474,21 +474,93 @@ impl BlockDataProvider for RpcBlockDataProvider {
             all_slots.into_iter().collect(),
         ))
     }
+
+    async fn trace_block_prestate(
+        &self,
+        block_number: u64,
+    ) -> Option<RaikoResult<PrestateTraceResult>> {
+        Some(RpcBlockDataProvider::trace_block_prestate(self, block_number).await)
+    }
 }
 
 /// Prestate tracer result: map of address → account state
 #[derive(Debug, Deserialize)]
-struct PrestateTraceResult(HashMap<Address, PrestateAccountState>);
+pub struct PrestateTraceResult(pub HashMap<Address, PrestateAccountState>);
 
 #[derive(Debug, Deserialize)]
-struct PrestateAccountState {
-    #[allow(dead_code)]
-    balance: Option<U256>,
-    #[allow(dead_code)]
-    nonce: Option<u64>,
-    #[allow(dead_code)]
-    code: Option<Bytes>,
-    storage: Option<HashMap<StorageKey, U256>>,
+pub struct PrestateAccountState {
+    pub balance: Option<U256>,
+    pub nonce: Option<u64>,
+    pub code: Option<Bytes>,
+    pub storage: Option<HashMap<StorageKey, U256>>,
+}
+
+/// Wrapper for debug_traceBlockByNumber response: each tx trace is wrapped in {"txHash", "result"}
+#[derive(Debug, Deserialize)]
+struct BlockTraceResult {
+    result: PrestateTraceResult,
+}
+
+impl RpcBlockDataProvider {
+    /// Trace an entire block with prestateTracer to get ALL state accessed during execution.
+    /// Returns merged prestate across all transactions in the block.
+    pub async fn trace_block_prestate(
+        &self,
+        block_number: u64,
+    ) -> RaikoResult<PrestateTraceResult> {
+        let tracer_config = serde_json::json!({
+            "tracer": "prestateTracer",
+            "tracerConfig": { "diffMode": false }
+        });
+
+        let block_id = BlockNumberOrTag::from(block_number);
+
+        let results: Vec<BlockTraceResult> = self
+            .client
+            .request("debug_traceBlockByNumber", (block_id, &tracer_config))
+            .await
+            .map_err(|e| {
+                RaikoError::RPC(format!("debug_traceBlockByNumber failed: {e}"))
+            })?;
+
+        // Merge all per-tx prestates into one
+        let mut merged: HashMap<Address, PrestateAccountState> = HashMap::new();
+        for tx_result in results {
+            for (address, state) in tx_result.result.0 {
+                let entry = merged.entry(address).or_insert(PrestateAccountState {
+                    balance: None,
+                    nonce: None,
+                    code: None,
+                    storage: None,
+                });
+                // Take the first non-None value for each field (prestate is the state before execution)
+                if entry.balance.is_none() {
+                    entry.balance = state.balance;
+                }
+                if entry.nonce.is_none() {
+                    entry.nonce = state.nonce;
+                }
+                if entry.code.is_none() {
+                    entry.code = state.code;
+                }
+                // Merge storage: keep first value for each slot
+                if let Some(storage) = state.storage {
+                    let entry_storage = entry.storage.get_or_insert_with(HashMap::new);
+                    for (slot, value) in storage {
+                        entry_storage.entry(slot).or_insert(value);
+                    }
+                }
+            }
+        }
+
+        info!(
+            "debug_traceBlockByNumber (prestateTracer): {} addresses, {} storage slots",
+            merged.len(),
+            merged.values().filter_map(|s| s.storage.as_ref()).map(|s| s.len()).sum::<usize>(),
+        );
+
+        Ok(PrestateTraceResult(merged))
+    }
 }
 
 async fn retry_in_case_of_error<F, Fut, T>(

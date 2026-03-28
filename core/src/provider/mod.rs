@@ -6,7 +6,7 @@ use std::collections::HashMap;
 
 use crate::{
     interfaces::{RaikoError, RaikoResult},
-    provider::rpc::RpcBlockDataProvider,
+    provider::rpc::{PrestateTraceResult, RpcBlockDataProvider},
     MerkleProof,
 };
 
@@ -44,6 +44,15 @@ pub trait BlockDataProvider: Clone + std::fmt::Debug {
         block_number: u64,
         tx_requests: &[TransactionRequest],
     ) -> RaikoResult<(Vec<Address>, Vec<(Address, U256)>)>;
+
+    /// Trace an entire block with prestateTracer to get ALL state accessed during execution.
+    /// Returns None if the provider does not support debug APIs.
+    async fn trace_block_prestate(
+        &self,
+        _block_number: u64,
+    ) -> Option<RaikoResult<PrestateTraceResult>> {
+        None
+    }
 }
 
 pub async fn get_task_data(
