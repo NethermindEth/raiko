@@ -166,6 +166,34 @@ impl<'a, BDP: BlockDataProvider> ProviderDb<'a, BDP> {
             && self.pending_slots.is_empty()
             && self.pending_block_hashes.is_empty()
     }
+
+    /// Pre-populate staging_db with the given accounts and storage slots.
+    /// Used to seed the DB from an eth_createAccessList prefetch, reducing execute_txs iterations.
+    pub async fn prefetch_state(
+        &mut self,
+        addresses: Vec<Address>,
+        slots: Vec<(Address, U256)>,
+    ) -> RaikoResult<()> {
+        if !addresses.is_empty() {
+            let accounts = self
+                .provider
+                .get_accounts(self.block_number, &addresses)
+                .await?;
+            for (address, account) in addresses.into_iter().zip(accounts.into_iter()) {
+                self.staging_db.insert_account_info(address, account);
+            }
+        }
+        if !slots.is_empty() {
+            let values = self
+                .provider
+                .get_storage_values(self.block_number, &slots)
+                .await?;
+            for ((address, index), value) in slots.into_iter().zip(values.into_iter()) {
+                self.staging_db.insert_account_storage(&address, index, value);
+            }
+        }
+        Ok(())
+    }
 }
 
 impl<'a, BDP: BlockDataProvider> Database for ProviderDb<'a, BDP> {

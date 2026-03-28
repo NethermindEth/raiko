@@ -1,6 +1,7 @@
 use alethia_reth_primitives::{TaikoBlock, TaikoTxEnvelope};
 use alloy_consensus::{Blob, Transaction};
 use alloy_primitives::{hex, Log as LogStruct, Uint, B256};
+use alloy_rpc_types::{TransactionInput, TransactionRequest};
 use alloy_provider::{Provider, RootProvider};
 use alloy_rpc_types::{BlockId, Filter, Header, Log, Transaction as AlloyRpcTransaction};
 use alloy_sol_types::{SolCall, SolEvent};
@@ -39,6 +40,16 @@ use crate::{
     require,
 };
 
+fn taiko_tx_to_request(tx: &TaikoTxEnvelope) -> TransactionRequest {
+    TransactionRequest {
+        to: Some(tx.kind()),
+        input: TransactionInput::new(tx.input().clone()),
+        value: Some(tx.value()),
+        gas: Some(tx.gas_limit()),
+        ..Default::default()
+    }
+}
+
 /// Optimize data gathering by executing the transactions multiple times so data can be requested in batches
 pub async fn execute_txs<'a, BDP>(
     builder: &mut RethBlockBuilder<ProviderDb<'a, BDP>>,
@@ -47,6 +58,34 @@ pub async fn execute_txs<'a, BDP>(
 where
     BDP: BlockDataProvider,
 {
+    // Pre-fetch all accessed accounts and storage slots in one batch using eth_createAccessList.
+    // This seeds staging_db upfront so execute_txs converges in 1-2 iterations instead of ~17.
+    if let Some(db) = builder.db.as_mut() {
+        let tx_requests: Vec<TransactionRequest> =
+            pool_txs.iter().map(taiko_tx_to_request).collect();
+        let block_number = db.block_number;
+        match db
+            .provider
+            .get_access_list_for_txs(block_number, &tx_requests)
+            .await
+        {
+            Ok((addresses, slots)) if !addresses.is_empty() || !slots.is_empty() => {
+                info!(
+                    "execute_txs: prefetching {} addresses and {} slots",
+                    addresses.len(),
+                    slots.len(),
+                );
+                if let Err(e) = db.prefetch_state(addresses, slots).await {
+                    info!("execute_txs: access list prefetch failed (non-fatal): {e}");
+                }
+            }
+            Ok(_) => {}
+            Err(e) => {
+                info!("execute_txs: eth_createAccessList unavailable (non-fatal): {e}");
+            }
+        }
+    }
+
     let max_iterations = 100;
     info!("execute_txs: start");
     for num_iterations in 0.. {

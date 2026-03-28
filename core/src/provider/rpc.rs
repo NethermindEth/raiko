@@ -1,12 +1,15 @@
 use alloy_primitives::{Address, Bytes, StorageKey, Uint, U256};
 use alloy_provider::RootProvider;
 use alloy_rpc_client::{ClientBuilder, RpcClient};
-use alloy_rpc_types::{Block, BlockId, BlockNumberOrTag, EIP1186AccountProofResponse};
+use alloy_rpc_types::{
+    AccessListResult, Block, BlockId, BlockNumberOrTag, EIP1186AccountProofResponse,
+    TransactionRequest,
+};
 use raiko_lib::clear_line;
 use reth_revm::state::{AccountInfo, Bytecode};
-use std::{collections::HashMap, future::Future, time::Duration};
+use std::{collections::{HashMap, HashSet}, future::Future, time::Duration};
 use tokio::time::sleep;
-use tracing::{debug, trace};
+use tracing::{debug, info, trace};
 
 use crate::{
     interfaces::{RaikoError, RaikoResult},
@@ -342,6 +345,61 @@ impl BlockDataProvider for RpcBlockDataProvider {
         clear_line();
 
         Ok(storage_proofs)
+    }
+
+    async fn get_access_list_for_txs(
+        &self,
+        block_number: u64,
+        tx_requests: &[TransactionRequest],
+    ) -> RaikoResult<(Vec<Address>, Vec<(Address, U256)>)> {
+        if tx_requests.is_empty() {
+            return Ok((vec![], vec![]));
+        }
+
+        let block_id = BlockId::from(block_number);
+        let mut batch = self.client.new_batch();
+        let mut requests = Vec::with_capacity(tx_requests.len());
+
+        for tx_req in tx_requests {
+            requests.push(Box::pin(
+                batch
+                    .add_call::<_, AccessListResult>("eth_createAccessList", &(tx_req, block_id))
+                    .map_err(|_| {
+                        RaikoError::RPC(
+                            "Failed adding eth_createAccessList call to batch".to_owned(),
+                        )
+                    })?,
+            ));
+        }
+
+        batch.send().await.map_err(|e| {
+            RaikoError::RPC(format!("Error sending eth_createAccessList batch: {e}"))
+        })?;
+
+        let mut all_addresses: HashSet<Address> = HashSet::new();
+        let mut all_slots: HashSet<(Address, U256)> = HashSet::new();
+
+        for request in requests {
+            // Ignore per-tx errors — access list is best-effort
+            let Ok(result) = request.await else { continue };
+            for item in result.access_list.0 {
+                all_addresses.insert(item.address);
+                for key in item.storage_keys {
+                    all_slots.insert((item.address, U256::from_be_bytes(key.0)));
+                }
+            }
+        }
+
+        info!(
+            "eth_createAccessList: {} addresses, {} storage slots",
+            all_addresses.len(),
+            all_slots.len(),
+        );
+
+        Ok((
+            all_addresses.into_iter().collect(),
+            all_slots.into_iter().collect(),
+        ))
     }
 }
 

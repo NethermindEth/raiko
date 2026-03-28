@@ -1,5 +1,5 @@
 use alloy_primitives::{Address, B256, U256};
-use alloy_rpc_types::Block;
+use alloy_rpc_types::{Block, TransactionRequest};
 use raiko_lib::consts::SupportedChainSpecs;
 use reth_revm::state::AccountInfo;
 use std::collections::HashMap;
@@ -36,6 +36,14 @@ pub trait BlockDataProvider: Clone + std::fmt::Debug {
         offset: usize,
         num_storage_proofs: usize,
     ) -> RaikoResult<MerkleProof>;
+
+    /// Pre-fetch all accounts and storage slots accessed by the given transactions using
+    /// eth_createAccessList. Returns (addresses, slots) to pre-populate the staging DB.
+    async fn get_access_list_for_txs(
+        &self,
+        block_number: u64,
+        tx_requests: &[TransactionRequest],
+    ) -> RaikoResult<(Vec<Address>, Vec<(Address, U256)>)>;
 }
 
 pub async fn get_task_data(
