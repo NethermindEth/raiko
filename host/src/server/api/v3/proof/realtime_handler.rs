@@ -127,6 +127,13 @@ async fn realtime_handler(
     let (_input_request_key, proof_request_key, _input_request_entity, proof_request_entity) =
         process_realtime_request(&realtime_request, &image_id);
 
+    // If use_cache is false, evict any cached proof so we always re-prove.
+    if !realtime_request.use_cache {
+        let _ = actor
+            .pool_remove_request(&proof_request_key.clone().into())
+            .await;
+    }
+
     // Submit proof directly — do_prove_realtime will generate guest input
     // inline if it's not already in prover_args, so no separate guest input
     // stage is needed.

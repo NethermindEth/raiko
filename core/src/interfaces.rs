@@ -950,6 +950,9 @@ pub struct RealTimeProofRequest {
     pub blobs: Vec<String>,
     /// Previous finalized checkpoint
     pub checkpoint: Option<ShastaProposalCheckpoint>,
+    /// If true, return cached proof if available. If false (default), always re-prove.
+    #[serde(default)]
+    pub use_cache: bool,
 }
 
 #[serde_as]
@@ -980,6 +983,9 @@ pub struct RealTimeProofRequestOpt {
     #[serde(default)]
     pub blobs: Vec<String>,
     pub checkpoint: Option<ShastaProposalCheckpoint>,
+    /// If true, return cached proof if available. If false (default), always re-prove.
+    #[serde(default)]
+    pub use_cache: bool,
 }
 
 impl TryFrom<RealTimeProofRequestOpt> for RealTimeProofRequest {
@@ -1025,6 +1031,7 @@ impl TryFrom<RealTimeProofRequestOpt> for RealTimeProofRequest {
             sources: value.sources,
             blobs: value.blobs,
             checkpoint: value.checkpoint,
+            use_cache: value.use_cache,
         })
     }
 }
