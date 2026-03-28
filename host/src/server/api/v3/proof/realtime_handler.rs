@@ -129,9 +129,9 @@ async fn realtime_handler(
 
     // If use_cache is false, evict any cached proof so we always re-prove.
     if !realtime_request.use_cache {
-        let _ = actor
-            .pool_remove_request(&proof_request_key.clone().into())
-            .await;
+        if let Err(e) = actor.pool_remove_request(&proof_request_key.clone().into()).await {
+            tracing::warn!("Failed to evict cached proof for {:?}: {e}", proof_request_key);
+        }
     }
 
     // Submit proof directly — do_prove_realtime will generate guest input
