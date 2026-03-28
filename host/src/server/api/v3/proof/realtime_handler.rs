@@ -127,34 +127,22 @@ async fn realtime_handler(
     let (_input_request_key, proof_request_key, _input_request_entity, proof_request_entity) =
         process_realtime_request(&realtime_request, &image_id);
 
-    // If use_cache is false, evict only if a completed proof is cached — so the
-    // next prove() call re-proves from scratch. If proving is already in
-    // progress (Registered/WorkInProgress) we leave it alone so polling works.
-    if !realtime_request.use_cache {
-        let is_cached_success = actor
-            .pool_get_status(&proof_request_key.clone().into())
-            .await
-            .ok()
-            .flatten()
-            .map(|s| matches!(s.status(), raiko_reqpool::Status::Success { .. }))
-            .unwrap_or(false);
-        if is_cached_success {
-            if let Err(e) = actor
-                .pool_remove_request(&proof_request_key.clone().into())
-                .await
-            {
-                tracing::warn!(
-                    "Failed to evict cached proof for {:?}: {e}",
-                    proof_request_key
-                );
-            }
-        }
-    }
-
     // Submit proof directly — do_prove_realtime will generate guest input
     // inline if it's not already in prover_args, so no separate guest input
     // stage is needed.
-    let result = prove(&actor, proof_request_key.into(), proof_request_entity).await;
+    let result = prove(&actor, proof_request_key.clone().into(), proof_request_entity).await;
+
+    // If use_cache is false, evict the proof AFTER returning Success to the
+    // caller — so the next request re-proves from scratch instead of serving
+    // the cached result. Evicting before prove() would mean the caller never
+    // sees Success (each poll would re-submit and return Registered).
+    if !realtime_request.use_cache {
+        if matches!(result, Ok(raiko_reqpool::Status::Success { .. })) {
+            if let Err(e) = actor.pool_remove_request(&proof_request_key.into()).await {
+                tracing::warn!("Failed to evict cached proof for re-proving: {e}");
+            }
+        }
+    }
 
     let status = to_v3_status(realtime_request.proof_type, None, result);
     Ok(status)
