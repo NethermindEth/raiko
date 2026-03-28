@@ -127,10 +127,27 @@ async fn realtime_handler(
     let (_input_request_key, proof_request_key, _input_request_entity, proof_request_entity) =
         process_realtime_request(&realtime_request, &image_id);
 
-    // If use_cache is false, evict any cached proof so we always re-prove.
+    // If use_cache is false, evict only if a completed proof is cached — so the
+    // next prove() call re-proves from scratch. If proving is already in
+    // progress (Registered/WorkInProgress) we leave it alone so polling works.
     if !realtime_request.use_cache {
-        if let Err(e) = actor.pool_remove_request(&proof_request_key.clone().into()).await {
-            tracing::warn!("Failed to evict cached proof for {:?}: {e}", proof_request_key);
+        let is_cached_success = actor
+            .pool_get_status(&proof_request_key.clone().into())
+            .await
+            .ok()
+            .flatten()
+            .map(|s| matches!(s.status(), raiko_reqpool::Status::Success { .. }))
+            .unwrap_or(false);
+        if is_cached_success {
+            if let Err(e) = actor
+                .pool_remove_request(&proof_request_key.clone().into())
+                .await
+            {
+                tracing::warn!(
+                    "Failed to evict cached proof for {:?}: {e}",
+                    proof_request_key
+                );
+            }
         }
     }
 
