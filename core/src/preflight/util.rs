@@ -648,30 +648,26 @@ async fn prepare_taiko_chain_batch_input_realtime(
     let max_anchor_block_number: u64 = realtime_event_data.proposal.maxAnchorBlockNumber.to();
     let provider_l1 = RpcBlockDataProvider::new(&l1_chain_spec.rpc).await?;
 
-    // 1. Read L1 header at maxAnchorBlockNumber (the header's hash is maxAnchorBlockHash)
-    let l1_blocks = provider_l1
-        .get_blocks(&[(max_anchor_block_number, false)])
-        .await?;
-    let l1_header = l1_blocks
-        .first()
+    // 1. Compute signalSlotsHash
+    realtime_event_data.proposal.signalSlotsHash =
+        hash_signal_slots(&realtime_event_data.signal_slots);
+
+    // 2. Read L1 ancestor headers for anchor linkage (includes maxAnchorBlockNumber)
+    let l1_ancestor_headers =
+        get_max_anchor_headers(&provider_l1, batch_anchor_tx_info, max_anchor_block_number).await?;
+
+    // Extract L1 header at maxAnchorBlockNumber from the ancestor headers (always the last one)
+    let l1_header = l1_ancestor_headers
+        .last()
         .ok_or_else(|| {
             RaikoError::Preflight(format!(
                 "No L1 block at maxAnchorBlockNumber {max_anchor_block_number}"
             ))
         })?
-        .header
         .clone();
 
     // Fill in maxAnchorBlockHash from the fetched L1 header
     realtime_event_data.proposal.maxAnchorBlockHash = l1_header.hash;
-
-    // 2. Compute signalSlotsHash
-    realtime_event_data.proposal.signalSlotsHash =
-        hash_signal_slots(&realtime_event_data.signal_slots);
-
-    // 3. Read L1 ancestor headers for anchor linkage
-    let l1_ancestor_headers =
-        get_max_anchor_headers(&provider_l1, batch_anchor_tx_info, max_anchor_block_number).await?;
 
     // 4. Build data sources from DerivationSource[]
     // For RealTime: blobs are supplied directly by the proposer (not yet on L1).

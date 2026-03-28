@@ -174,23 +174,41 @@ impl<'a, BDP: BlockDataProvider> ProviderDb<'a, BDP> {
         addresses: Vec<Address>,
         slots: Vec<(Address, U256)>,
     ) -> RaikoResult<()> {
-        if !addresses.is_empty() {
-            let accounts = self
-                .provider
-                .get_accounts(self.block_number, &addresses)
-                .await?;
-            for (address, account) in addresses.into_iter().zip(accounts.into_iter()) {
-                self.staging_db.insert_account_info(address, account);
-            }
+        let has_addresses = !addresses.is_empty();
+        let has_slots = !slots.is_empty();
+
+        if !has_addresses && !has_slots {
+            return Ok(());
         }
-        if !slots.is_empty() {
-            let values = self
-                .provider
-                .get_storage_values(self.block_number, &slots)
-                .await?;
-            for ((address, index), value) in slots.into_iter().zip(values.into_iter()) {
-                self.staging_db.insert_account_storage(&address, index, value);
-            }
+
+        // Fetch accounts and storage values in parallel
+        let (accounts_result, slots_result) = tokio::join!(
+            async {
+                if has_addresses {
+                    self.provider
+                        .get_accounts(self.block_number, &addresses)
+                        .await
+                } else {
+                    Ok(vec![])
+                }
+            },
+            async {
+                if has_slots {
+                    self.provider
+                        .get_storage_values(self.block_number, &slots)
+                        .await
+                } else {
+                    Ok(vec![])
+                }
+            },
+        );
+
+        for (address, account) in addresses.into_iter().zip(accounts_result?.into_iter()) {
+            self.staging_db.insert_account_info(address, account);
+        }
+        for ((address, index), value) in slots.into_iter().zip(slots_result?.into_iter()) {
+            self.staging_db
+                .insert_account_storage(&address, index, value);
         }
         Ok(())
     }
@@ -333,21 +351,28 @@ impl<'a, BDP: BlockDataProvider> DatabaseCommit for ProviderDb<'a, BDP> {
 
 impl<'a, BDP: BlockDataProvider> OptimisticDatabase for ProviderDb<'a, BDP> {
     async fn fetch_data(&mut self) -> bool {
-        //println!("all accounts touched: {:?}", self.pending_accounts);
-        //println!("all slots touched: {:?}", self.pending_slots);
-        //println!("all block hashes touched: {:?}", self.pending_block_hashes);
-
         // This run was valid when no pending work was scheduled
         let valid_run = self.is_valid_run();
 
-        let Ok(accounts) = self
-            .provider
-            .get_accounts(
-                self.block_number,
-                &self.pending_accounts.iter().copied().collect::<Vec<_>>(),
-            )
-            .await
-        else {
+        let pending_accounts_vec: Vec<_> = self.pending_accounts.iter().copied().collect();
+        let pending_slots_vec: Vec<_> = self.pending_slots.iter().copied().collect();
+        let pending_blocks_vec: Vec<_> = self
+            .pending_block_hashes
+            .iter()
+            .copied()
+            .map(|block_number| (block_number, false))
+            .collect();
+
+        // Fetch accounts, storage values, and blocks in parallel
+        let (accounts_result, slots_result, blocks_result) = tokio::join!(
+            self.provider
+                .get_accounts(self.block_number, &pending_accounts_vec),
+            self.provider
+                .get_storage_values(self.block_number, &pending_slots_vec),
+            self.provider.get_blocks(&pending_blocks_vec),
+        );
+
+        let Ok(accounts) = accounts_result else {
             return false;
         };
         for (address, account) in take(&mut self.pending_accounts)
@@ -358,14 +383,7 @@ impl<'a, BDP: BlockDataProvider> OptimisticDatabase for ProviderDb<'a, BDP> {
                 .insert_account_info(address, account.clone());
         }
 
-        let Ok(slots) = self
-            .provider
-            .get_storage_values(
-                self.block_number,
-                &self.pending_slots.iter().copied().collect::<Vec<_>>(),
-            )
-            .await
-        else {
+        let Ok(slots) = slots_result else {
             return false;
         };
         for ((address, index), value) in take(&mut self.pending_slots).into_iter().zip(slots.iter())
@@ -374,18 +392,7 @@ impl<'a, BDP: BlockDataProvider> OptimisticDatabase for ProviderDb<'a, BDP> {
                 .insert_account_storage(&address, index, *value);
         }
 
-        let Ok(blocks) = self
-            .provider
-            .get_blocks(
-                &self
-                    .pending_block_hashes
-                    .iter()
-                    .copied()
-                    .map(|block_number| (block_number, false))
-                    .collect::<Vec<_>>(),
-            )
-            .await
-        else {
+        let Ok(blocks) = blocks_result else {
             return false;
         };
         for (block_number, block) in take(&mut self.pending_block_hashes)

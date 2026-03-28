@@ -7,6 +7,7 @@ use alloy_rpc_types::{
 };
 use raiko_lib::clear_line;
 use reth_revm::state::{AccountInfo, Bytecode};
+use serde::Deserialize;
 use std::{collections::{HashMap, HashSet}, future::Future, time::Duration};
 use tokio::time::sleep;
 use tracing::{debug, info, trace};
@@ -37,6 +38,66 @@ impl RpcBlockDataProvider {
 
     pub fn provider(&self) -> &RootProvider {
         &self.provider
+    }
+
+    /// Use debug_traceCall with prestateTracer to get ALL state accesses for transactions.
+    /// This captures nested contract calls unlike eth_createAccessList.
+    async fn get_prestate_for_txs(
+        &self,
+        block_number: u64,
+        tx_requests: &[TransactionRequest],
+    ) -> RaikoResult<(Vec<Address>, Vec<(Address, U256)>)> {
+        let block_id = BlockId::from(block_number);
+        let tracer_config = serde_json::json!({
+            "tracer": "prestateTracer",
+            "tracerConfig": { "diffMode": false }
+        });
+
+        let mut batch = self.client.new_batch();
+        let mut requests = Vec::with_capacity(tx_requests.len());
+
+        for tx_req in tx_requests {
+            requests.push(Box::pin(
+                batch
+                    .add_call::<_, PrestateTraceResult>(
+                        "debug_traceCall",
+                        &(tx_req, block_id, &tracer_config),
+                    )
+                    .map_err(|_| {
+                        RaikoError::RPC("Failed adding debug_traceCall to batch".to_owned())
+                    })?,
+            ));
+        }
+
+        batch.send().await.map_err(|e| {
+            RaikoError::RPC(format!("Error sending debug_traceCall batch: {e}"))
+        })?;
+
+        let mut all_addresses: HashSet<Address> = HashSet::new();
+        let mut all_slots: HashSet<(Address, U256)> = HashSet::new();
+
+        for request in requests {
+            let Ok(result) = request.await else { continue };
+            for (address, account_state) in result.0 {
+                all_addresses.insert(address);
+                if let Some(storage) = account_state.storage {
+                    for (slot, _value) in storage {
+                        all_slots.insert((address, U256::from_be_bytes(slot.0)));
+                    }
+                }
+            }
+        }
+
+        info!(
+            "debug_traceCall (prestateTracer): {} addresses, {} storage slots",
+            all_addresses.len(),
+            all_slots.len(),
+        );
+
+        Ok((
+            all_addresses.into_iter().collect(),
+            all_slots.into_iter().collect(),
+        ))
     }
 
     async fn construct_and_send_batch(
@@ -356,6 +417,18 @@ impl BlockDataProvider for RpcBlockDataProvider {
             return Ok((vec![], vec![]));
         }
 
+        // Try debug_traceCall with prestateTracer first (captures ALL state accesses
+        // including nested calls), fall back to eth_createAccessList if unavailable.
+        match self
+            .get_prestate_for_txs(block_number, tx_requests)
+            .await
+        {
+            Ok(result) => return Ok(result),
+            Err(e) => {
+                info!("debug_traceCall unavailable, falling back to eth_createAccessList: {e}");
+            }
+        }
+
         let block_id = BlockId::from(block_number);
         let mut batch = self.client.new_batch();
         let mut requests = Vec::with_capacity(tx_requests.len());
@@ -401,6 +474,21 @@ impl BlockDataProvider for RpcBlockDataProvider {
             all_slots.into_iter().collect(),
         ))
     }
+}
+
+/// Prestate tracer result: map of address → account state
+#[derive(Debug, Deserialize)]
+struct PrestateTraceResult(HashMap<Address, PrestateAccountState>);
+
+#[derive(Debug, Deserialize)]
+struct PrestateAccountState {
+    #[allow(dead_code)]
+    balance: Option<U256>,
+    #[allow(dead_code)]
+    nonce: Option<u64>,
+    #[allow(dead_code)]
+    code: Option<Bytes>,
+    storage: Option<HashMap<StorageKey, U256>>,
 }
 
 async fn retry_in_case_of_error<F, Fut, T>(
