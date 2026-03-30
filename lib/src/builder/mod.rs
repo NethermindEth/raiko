@@ -8,9 +8,11 @@ use crate::primitives::mpt::StateAccount;
 use crate::utils::txs::generate_transactions;
 use crate::utils::txs::generate_transactions_for_batch_blocks;
 use crate::{
+    anchor::get_anchor_tx_info_by_fork,
     consts::MAX_BLOCK_HASH_AGE,
     guest_mem_forget,
     input::{GuestBatchInput, GuestInput},
+    l1_precompiles::{acquire_l1sload_lock, clear_l1sload_cache, verify_and_populate_l1sload_proofs},
     mem_db::{AccountState, DbAccount, MemDb},
     CycleTracker,
 };
@@ -254,6 +256,29 @@ pub fn calculate_block_header(input: &mut GuestInput) -> Header {
     let db = create_mem_db(input).unwrap();
     cycle_tracker.end();
 
+    let _l1sload_guard = acquire_l1sload_lock();
+    clear_l1sload_cache();
+    if input.chain_spec.is_taiko() {
+        let anchor_tx = input
+            .taiko
+            .anchor_tx
+            .as_ref()
+            .expect("anchor tx required for L1SLOAD");
+        let fork = input
+            .chain_spec
+            .active_fork(input.block.header.number, input.block.header.timestamp)
+            .expect("failed to determine active fork for L1SLOAD");
+        let (anchor_block_number, _) =
+            get_anchor_tx_info_by_fork(fork, anchor_tx).expect("failed to decode anchor tx info");
+        verify_and_populate_l1sload_proofs(
+            &input.l1_storage_proofs,
+            anchor_block_number,
+            &input.taiko.l1_header,
+            &input.l1_headers,
+        )
+        .expect("L1SLOAD proof verification failed");
+    }
+
     let pool_tx = generate_transactions(
         &input.chain_spec,
         &input.taiko.block_proposed,
@@ -269,6 +294,7 @@ pub fn calculate_block_header(input: &mut GuestInput) -> Header {
         .execute_transactions(pool_tx, false)
         .expect("execute");
     cycle_tracker.end();
+    drop(_l1sload_guard);
 
     let cycle_tracker = CycleTracker::start("finalize");
     let header = builder.finalize().expect("execute");
@@ -284,6 +310,32 @@ pub fn calculate_batch_blocks_final_header(input: &mut GuestBatchInput) -> Vec<T
     let pool_txs_list = generate_transactions_for_batch_blocks(&input);
     let mut final_blocks = Vec::new();
     for (i, pool_txs) in pool_txs_list.iter().enumerate() {
+        let _l1sload_guard = acquire_l1sload_lock();
+        clear_l1sload_cache();
+        if input.inputs[i].chain_spec.is_taiko() {
+            let anchor_tx = input.inputs[i]
+                .taiko
+                .anchor_tx
+                .as_ref()
+                .expect("anchor tx required for L1SLOAD in batch");
+            let fork = input.inputs[i]
+                .chain_spec
+                .active_fork(
+                    input.inputs[i].block.header.number,
+                    input.inputs[i].block.header.timestamp,
+                )
+                .expect("failed to determine active fork for L1SLOAD in batch");
+            let (anchor_block_number, _) = get_anchor_tx_info_by_fork(fork, anchor_tx)
+                .expect("failed to decode anchor tx info in batch");
+            verify_and_populate_l1sload_proofs(
+                &input.inputs[i].l1_storage_proofs,
+                anchor_block_number,
+                &input.inputs[i].taiko.l1_header,
+                &input.inputs[i].l1_headers,
+            )
+            .expect("L1SLOAD proof verification failed");
+        }
+
         // First, create the MemDb using a mutable reference (no clone needed —
         // create_mem_db only mem::takes `contracts` and storage `slots`).
         let db = create_mem_db(&mut input.inputs[i]).unwrap();
@@ -298,6 +350,7 @@ pub fn calculate_batch_blocks_final_header(input: &mut GuestBatchInput) -> Vec<T
         builder
             .execute_transactions(execute_tx.clone(), false)
             .expect("execute");
+        drop(_l1sload_guard);
         final_blocks.push(
             builder
                 .finalize_block()

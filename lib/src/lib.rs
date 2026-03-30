@@ -20,6 +20,7 @@ pub mod anchor;
 pub mod builder;
 pub mod consts;
 pub mod input;
+pub mod l1_precompiles;
 pub mod libhash;
 pub mod manifest;
 pub mod mem_db;

@@ -36,6 +36,13 @@ pub trait BlockDataProvider: Clone + std::fmt::Debug {
         offset: usize,
         num_storage_proofs: usize,
     ) -> RaikoResult<MerkleProof>;
+
+    /// Get L1 storage proofs for L1SLOAD precompile calls
+    async fn get_l1_storage_proofs(
+        &self,
+        l1_block_number: u64,
+        storage_requests: HashMap<Address, Vec<U256>>,
+    ) -> RaikoResult<MerkleProof>;
 }
 
 pub async fn get_task_data(
