@@ -178,8 +178,6 @@ pub async fn preflight<BDP: BlockDataProvider>(
         &input.taiko.anchor_tx,
     );
 
-    println!("TXS: {:#?}", pool_tx.first().unwrap());
-
     // Optimize data gathering
     execute_txs(&mut builder, pool_tx, prestate).await?;
 
