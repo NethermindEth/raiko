@@ -206,7 +206,7 @@ if [ "$1" == "zisk" ]; then
     unset CC TARGET_CC
     
     # Navigate to ZISK agent directory
-    ZISK_AGENT_DIR="provers/zisk/agent"
+    ZISK_AGENT_DIR="provers/zisk"
     if [ ! -d "$ZISK_AGENT_DIR" ]; then
         echo "Error: ZISK agent directory not found at $ZISK_AGENT_DIR"
         exit 1
@@ -225,14 +225,17 @@ if [ "$1" == "zisk" ]; then
         if [ -z "${TEST}" ]; then
             echo "Building ZISK assets (guest + driver)..."
             
-            # Use the agent's build script for proper dependency management
+            # Use the zisk-builder Rust binary for guest program building
             if [ -n "${GUEST}" ]; then
                 echo "Building ZISK guest programs only..."
-                (cd "$ZISK_AGENT_DIR" && ./build.sh guest)
+                cargo run --manifest-path provers/zisk/builder/Cargo.toml --bin zisk-builder
             else
                 # Build everything: guest programs + driver (agent service is deprecated)
                 echo "Building full ZISK asset set (guest + driver)..."
-                (cd "$ZISK_AGENT_DIR" && ./build.sh all)
+                cargo run --manifest-path provers/zisk/builder/Cargo.toml --bin zisk-builder
+                export CC=clang
+                unset TARGET_CC
+                cargo build --release -p zisk-driver
                 
                 # Build main raiko components with ZISK support
                 echo "Building main Raiko with ZISK agent integration..."
@@ -241,7 +244,7 @@ if [ "$1" == "zisk" ]; then
             
         else
             echo "Building ZISK test components..."
-            (cd "$ZISK_AGENT_DIR" && ./build.sh guest)
+            cargo run --manifest-path provers/zisk/builder/Cargo.toml --bin zisk-builder
             # Test the agent workspace
             (cd "$ZISK_AGENT_DIR" && cargo test --workspace)
         fi
@@ -269,7 +272,7 @@ if [ "$1" == "zisk" ]; then
     echo ""
     echo "=== ZISK Asset Information ==="
     echo "Agent directory: $ZISK_AGENT_DIR"
-    echo "Build script:    $ZISK_AGENT_DIR/build.sh"
+    echo "Builder:         provers/zisk/builder (zisk-builder)"
     echo "Service:         use raiko-agent (default http://localhost:9999/proof)"
     echo ""
 fi

@@ -138,7 +138,7 @@ pub async fn get_guest_data() -> RaikoResult<serde_json::Value> {
     }
     #[cfg(feature = "zisk")]
     {
-        let zisk_data = zisk_agent_driver::ZiskAgentProver::get_guest_data().await?;
+        let zisk_data = zisk_driver::ZiskAgentProver::get_guest_data().await?;
         let zisk_map = zisk_data
             .as_object()
             .cloned()
@@ -193,7 +193,7 @@ pub async fn run_prover(
         }
         ProofType::Zisk => {
             #[cfg(feature = "zisk")]
-            return zisk_agent_driver::ZiskAgentProver
+            return zisk_driver::ZiskAgentProver
                 .run(input, &output, config, None)
                 .await
                 .map_err(|e| e.into());
@@ -264,7 +264,7 @@ pub async fn run_batch_prover(
         }
         ProofType::Zisk => {
             #[cfg(feature = "zisk")]
-            return zisk_agent_driver::ZiskAgentProver
+            return zisk_driver::ZiskAgentProver
                 .batch_run(input, &output, config, None)
                 .await
                 .map_err(|e| e.into());
@@ -335,7 +335,7 @@ pub async fn run_shasta_proposal_prover(
         }
         ProofType::Zisk => {
             #[cfg(feature = "zisk")]
-            return zisk_agent_driver::ZiskAgentProver
+            return zisk_driver::ZiskAgentProver
                 .proposal_run(input.clone(), output, config, store)
                 .await
                 .map_err(|e| e.into());
@@ -414,7 +414,7 @@ pub async fn run_realtime_prover(
         }
         ProofType::Zisk => {
             #[cfg(feature = "zisk")]
-            return zisk_agent_driver::ZiskAgentProver
+            return zisk_driver::ZiskAgentProver
                 .realtime_run(input.clone(), output, config, store)
                 .await
                 .map_err(|e| e.into());
@@ -475,7 +475,7 @@ pub async fn aggregate_proofs(
         }
         ProofType::Zisk => {
             #[cfg(feature = "zisk")]
-            return zisk_agent_driver::ZiskAgentProver
+            return zisk_driver::ZiskAgentProver
                 .aggregate(input.clone(), output, config, None)
                 .await
                 .map_err(|e| e.into());
@@ -547,7 +547,7 @@ pub async fn aggregate_shasta_proposals(
         }
         ProofType::Zisk => {
             #[cfg(feature = "zisk")]
-            return zisk_agent_driver::ZiskAgentProver
+            return zisk_driver::ZiskAgentProver
                 .shasta_aggregate(input.clone(), output, config, None)
                 .await
                 .map_err(|e| e.into());
@@ -608,7 +608,7 @@ pub async fn cancel_proof(
         }
         ProofType::Zisk => {
             #[cfg(feature = "zisk")]
-            return zisk_agent_driver::ZiskAgentProver
+            return zisk_driver::ZiskAgentProver
                 .cancel(proof_key, read)
                 .await
                 .map_err(|e| e.into());

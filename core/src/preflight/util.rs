@@ -1,9 +1,9 @@
 use alethia_reth_primitives::{TaikoBlock, TaikoTxEnvelope};
 use alloy_consensus::{Blob, Transaction};
 use alloy_primitives::{hex, Log as LogStruct, Uint, B256};
-use alloy_rpc_types::{TransactionInput, TransactionRequest};
 use alloy_provider::{Provider, RootProvider};
 use alloy_rpc_types::{BlockId, Filter, Header, Log, Transaction as AlloyRpcTransaction};
+use alloy_rpc_types::{TransactionInput, TransactionRequest};
 use alloy_sol_types::{SolCall, SolEvent};
 use anyhow::{anyhow, bail, ensure, Result};
 use kzg::kzg_types::ZFr;
@@ -43,16 +43,6 @@ use crate::{
     },
     require,
 };
-
-fn taiko_tx_to_request(tx: &TaikoTxEnvelope) -> TransactionRequest {
-    TransactionRequest {
-        to: Some(tx.kind()),
-        input: TransactionInput::new(tx.input().clone()),
-        value: Some(tx.value()),
-        gas: Some(tx.gas_limit()),
-        ..Default::default()
-    }
-}
 
 /// Try to execute transactions using prestate trace data.
 /// If prefetched_prestate is provided, uses it directly (already fetched in parallel).
@@ -115,9 +105,7 @@ where
     }
 
     // If there's still pending state, do a few more iterations to converge
-    info!(
-        "execute_txs: trace had gaps, running additional iterations to converge"
-    );
+    info!("execute_txs: trace had gaps, running additional iterations to converge");
     let max_iterations = 100;
     for num_iterations in 1.. {
         info!("execute_txs: iteration {num_iterations} (post-trace)");

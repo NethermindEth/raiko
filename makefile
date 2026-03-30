@@ -35,7 +35,7 @@ update: ## Run cargo update
 	@cargo update
 	cd ./provers/sp1/guest && cargo update
 	cd ./provers/risc0/guest && cargo update
-	cd ./provers/zisk/agent/guest && cargo update
+	cd ./provers/zisk/guest && cargo update
 
 
 bench: ## Run all proving benchmarks (set TARGET=sp1|zisk|risc0, PROOF_TYPE=all|prove|verify)
@@ -45,4 +45,4 @@ clean: ## Run cargo clean
 	@cargo clean
 	@cd ./provers/sp1/guest && cargo clean
 	@cd ./provers/risc0/guest && cargo clean
-	@cd ./provers/zisk/agent/guest && cargo clean
+	@cd ./provers/zisk/guest && cargo clean
