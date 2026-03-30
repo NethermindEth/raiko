@@ -64,9 +64,7 @@ impl Status {
     }
 }
 
-#[derive(
-    PartialEq, Debug, Clone, Deserialize, Serialize, Eq, RedisValue, Getters,
-)]
+#[derive(PartialEq, Debug, Clone, Deserialize, Serialize, Eq, RedisValue, Getters)]
 /// The status of a request with context
 pub struct StatusWithContext {
     /// The status of the request
@@ -605,6 +603,79 @@ impl RequestKey {
             RequestKey::ShastaAggregation(key) => key.image_id.as_ref(),
             RequestKey::RealTimeGuestInput(_) => None,
             RequestKey::RealTimeProof(key) => key.image_id.as_ref(),
+        }
+    }
+
+    /// Primary sort key for the priority queue. Lower values are dequeued first.
+    pub fn batch_sort_key(&self) -> u64 {
+        match self {
+            RequestKey::SingleProof(ref key) => key.block_number,
+            &RequestKey::GuestInput(ref key) => key.block_number,
+            RequestKey::Aggregation(key) => key
+                .block_numbers()
+                .iter()
+                .min()
+                .expect("Block numbers should be present")
+                .clone(),
+            RequestKey::ShastaAggregation(key) => key
+                .block_numbers()
+                .iter()
+                .min()
+                .expect("Block numbers should be present")
+                .clone(),
+            RequestKey::BatchProof(key) => *key.guest_input_key().batch_id(),
+            RequestKey::BatchGuestInput(key) => *key.batch_id(),
+            RequestKey::ShastaProof(key) => *key.guest_input_key().proposal_id(),
+            RequestKey::ShastaGuestInput(key) => *key.proposal_id(),
+            RequestKey::RealTimeGuestInput(key) => key
+                .l2_block_numbers()
+                .iter()
+                .min()
+                .copied()
+                .expect("Block numbers should be present"),
+            RequestKey::RealTimeProof(key) => key
+                .guest_input_key()
+                .l2_block_numbers()
+                .iter()
+                .min()
+                .copied()
+                .expect("Block numbers should be present"),
+        }
+    }
+
+    /// Secondary sort key: within the same `batch_sort_key`, guest inputs run
+    /// before proofs, and proofs run before aggregations.
+    pub fn stage(&self) -> RequestStage {
+        match self {
+            RequestKey::GuestInput(_)
+            | RequestKey::BatchGuestInput(_)
+            | RequestKey::ShastaGuestInput(_)
+            | RequestKey::RealTimeGuestInput(_) => RequestStage::GuestInput,
+            RequestKey::SingleProof(_)
+            | RequestKey::BatchProof(_)
+            | RequestKey::ShastaProof(_)
+            | RequestKey::RealTimeProof(_) => RequestStage::Proof,
+            RequestKey::Aggregation(_) | RequestKey::ShastaAggregation(_) => {
+                RequestStage::Aggregation
+            }
+        }
+    }
+}
+
+/// Processing stage of a request, used for priority ordering within the same batch_id.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum RequestStage {
+    GuestInput = 0,
+    Proof = 1,
+    Aggregation = 2,
+}
+
+impl std::fmt::Display for RequestStage {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::GuestInput => write!(f, "guest_input"),
+            Self::Proof => write!(f, "proof"),
+            Self::Aggregation => write!(f, "aggregation"),
         }
     }
 }
@@ -1162,13 +1233,18 @@ impl ImageIdReader for ProofType {
             ProofType::Sp1 => "SP1_BATCH_VK_HASH",
             ProofType::Sgx => "SGX_MRENCLAVE",
             ProofType::SgxGeth => "SGXGETH_MRENCLAVE",
+            ProofType::Zisk => "ZISK_BATCH_ID",
             _ => panic!("Unsupported proof type for image ID: {:?}", self),
         }
     }
 
     fn default_value(&self, _request_type: Option<&str>) -> &'static str {
         match self {
-            ProofType::Risc0 | ProofType::Sp1 | ProofType::Sgx | ProofType::SgxGeth => {
+            ProofType::Risc0
+            | ProofType::Sp1
+            | ProofType::Sgx
+            | ProofType::SgxGeth
+            | ProofType::Zisk => {
                 "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
             }
             _ => panic!("Unsupported proof type for default value: {:?}", self),
@@ -1189,6 +1265,8 @@ pub struct ImageId {
     pub sgx_enclave: Option<String>,
     /// SGX Geth enclave MRENCLAVE
     pub sgxgeth_enclave: Option<String>,
+    /// Zisk batch ID
+    pub zisk_batch_id: Option<String>,
 }
 
 impl ImageId {
@@ -1198,10 +1276,12 @@ impl ImageId {
             sp1_batch_vk_hash: None,
             sgx_enclave: None,
             sgxgeth_enclave: None,
+            zisk_batch_id: None,
         }
     }
 
     /// Create an ImageId based on the proof type (always uses batch IDs for data lookup)
+
     pub fn from_proof_type_and_request_type(proof_type: &ProofType, _is_aggregation: bool) -> Self {
         let mut image_id = Self::new();
 
@@ -1224,6 +1304,11 @@ impl ImageId {
             ProofType::SgxGeth => {
                 if let Ok(mrenclave) = proof_type.read_image_id(None) {
                     image_id.sgxgeth_enclave = Some(mrenclave);
+                }
+            }
+            ProofType::Zisk => {
+                if let Ok(id) = proof_type.read_image_id(None) {
+                    image_id.zisk_batch_id = Some(id);
                 }
             }
             _ => {

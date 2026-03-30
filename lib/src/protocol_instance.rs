@@ -12,7 +12,9 @@ use reth_primitives::Header;
 #[cfg(not(feature = "std"))]
 use crate::no_std::*;
 use crate::{
-    anchor::{decode_anchor_pacaya, decode_anchor_realtime, decode_anchor_shasta, ANCHOR_GAS_LIMIT},
+    anchor::{
+        decode_anchor_pacaya, decode_anchor_realtime, decode_anchor_shasta, ANCHOR_GAS_LIMIT,
+    },
     input::{
         ontake::{BlockMetadataV2, BlockProposedV2},
         pacaya::{BatchInfo, BatchMetadata, BlockParams, Transition as PacayaTransition},
@@ -22,8 +24,8 @@ use crate::{
         GuestInput, ShastaRawAggregationGuestInput, Transition,
     },
     libhash::{
-        hash_commitment, hash_proposal, hash_public_input, hash_shasta_subproof_input,
-        hash_signal_slots, hash_two_values,
+        hash_commitment, hash_proposal, hash_public_input, hash_realtime_subproof_input,
+        hash_shasta_subproof_input, hash_signal_slots, hash_two_values,
     },
     primitives::{
         eip4844::{self, commitment_to_version_hash},
@@ -343,17 +345,27 @@ fn verify_blob(
             // Even in PoE mode, the blob must be anchored to the on-chain versioned hash.
             ensure!(*expected_versioned_hash == commitment_to_version_hash(commitment));
 
+            let proof_bytes = blob_proof.as_ref().expect("missing blob proof in PoE mode");
+
             let ct = CycleTracker::start("proof_of_equivalence");
-            let (x, y) = eip4844::proof_of_equivalence(blob_data, &expected_versioned_hash)?;
+            // If the host appended a precomputed y value (32 bytes) after the KZG proof
+            // (48 bytes), use it to skip the expensive blob deserialization and polynomial
+            // evaluation. The KZG proof verification still guarantees y = f(x).
+            let (x, y, kzg_proof) = if proof_bytes.len() >= 80 {
+                let x = eip4844::get_evaluation_point_bytes(blob_data, expected_versioned_hash);
+                let y: [u8; 32] = proof_bytes[48..80].try_into().unwrap();
+                let kzg_proof: [u8; 48] = proof_bytes[..48].try_into().unwrap();
+                (x, y, kzg_proof)
+            } else {
+                let (x, y) = eip4844::proof_of_equivalence(blob_data, &expected_versioned_hash)?;
+                let kzg_proof: [u8; 48] = proof_bytes
+                    .as_slice()
+                    .try_into()
+                    .map_err(|_| anyhow::anyhow!("invalid KZG proof length"))?;
+                (x, y, kzg_proof)
+            };
             ct.end();
-            let verified = eip4844::verify_kzg_proof_impl(
-                *commitment,
-                x,
-                y,
-                blob_proof
-                    .map(|p| TryInto::<[u8; 48]>::try_into(p).unwrap())
-                    .unwrap(),
-            )?;
+            let verified = eip4844::verify_kzg_proof_impl(*commitment, x, y, kzg_proof)?;
             ensure!(verified);
         }
         BlobProofType::KzgVersionedHash => {
@@ -800,15 +812,13 @@ impl ProtocolInstance {
                     );
                 }
 
-                let proposal_hash: B256 = keccak(
-                    event_data.proposal.abi_encode(),
-                )
-                .into();
+                tracing::debug!("Real Time proposal data: {:#?}", event_data.proposal);
+
+                let proposal_hash: B256 = keccak(event_data.proposal.abi_encode()).into();
 
                 // last_finalized_block_hash = parent block hash of the first L2 block
                 // This binds the proof to the correct starting state.
-                let last_finalized_block_hash =
-                    batch_input.inputs[0].parent_header.hash_slow();
+                let last_finalized_block_hash = batch_input.inputs[0].parent_header.hash_slow();
 
                 TransitionFork::RealTime(RealTimeTransitionData {
                     proposal_hash,
@@ -859,6 +869,17 @@ impl ProtocolInstance {
     }
 
     // keccak256(abi.encode(tran, newInstance, prover, metaHash))
+    /// Returns the instance hash with each 4-byte word byte-swapped (BE → LE).
+    /// Use this for zisk proofs where publics are stored as little-endian uint32 words.
+    pub fn instance_hash_le(&self) -> B256 {
+        let hash = self.instance_hash();
+        let mut le_bytes = hash.0;
+        for chunk in le_bytes.chunks_exact_mut(4) {
+            chunk.reverse();
+        }
+        B256::from(le_bytes)
+    }
+
     pub fn instance_hash(&self) -> B256 {
         // packages/protocol/contracts/verifiers/libs/LibPublicInput.sol
         // "VERIFY_PROOF", _chainId, _verifierContract, _tran, _newInstance, _prover, _metaHash
@@ -922,19 +943,10 @@ impl ProtocolInstance {
                 })
             }
             TransitionFork::RealTime(rt) => {
-                // commitmentHash = keccak256(abi.encode(proposalHash, lastFinalizedBlockHash, blockNumber, blockHash, stateRoot))
-                // This is the value passed to verifyProof(0, commitmentHash, proof).
-                keccak(
-                    (
-                        rt.proposal_hash,
-                        rt.last_finalized_block_hash,
-                        rt.checkpoint.blockNumber,
-                        rt.checkpoint.blockHash,
-                        rt.checkpoint.stateRoot,
-                    )
-                        .abi_encode(),
-                )
-                .into()
+                // Domain-separated hash mirroring Shasta pattern:
+                //   inner = keccak256(abi.encode(proposalHash, lastFinalizedBlockHash, blockNumber, blockHash, stateRoot, bytes32(0)))
+                //   outer = hash(VERIFY_PROOF, chain_id, verifier, inner)
+                hash_realtime_subproof_input(self.chain_id, self.verifier_address, &rt)
             }
         }
     }
@@ -949,10 +961,8 @@ fn get_blob_proof_type(
     // due to performance considerations
     match proof_type {
         ProofType::Native => blob_proof_type_hint,
-        ProofType::Sgx | ProofType::SgxGeth | ProofType::Tdx | ProofType::AzureTdx => {
-            BlobProofType::KzgVersionedHash
-        }
-        ProofType::Sp1 | ProofType::Risc0 => BlobProofType::ProofOfEquivalence,
+        ProofType::Sgx | ProofType::SgxGeth | ProofType::Tdx => BlobProofType::KzgVersionedHash,
+        ProofType::Sp1 | ProofType::Risc0 | ProofType::Zisk => BlobProofType::ProofOfEquivalence,
     }
 }
 

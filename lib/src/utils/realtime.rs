@@ -11,9 +11,8 @@ use crate::manifest::DerivationSourceManifest;
 use crate::no_std::*;
 use crate::utils::blobs::{decode_blob_data, zlib_decompress_data};
 use crate::utils::shasta_rules::{
-    clamp_timestamp_lower_bound, validate_force_inc_proposal_manifest,
-    validate_input_block_param, validate_realtime_proposal_manifest,
-    validate_shasta_block_base_fee,
+    clamp_timestamp_lower_bound, validate_force_inc_proposal_manifest, validate_input_block_param,
+    validate_realtime_proposal_manifest, validate_shasta_block_base_fee,
 };
 
 fn make_default_manifest_realtime(
@@ -115,10 +114,7 @@ pub fn generate_transactions_for_realtime_blocks(
             let protocol_manifest =
                 match DerivationSourceManifest::decode(&mut protocol_manifest_bytes.as_ref()) {
                     Ok(manifest)
-                        if validate_realtime_proposal_manifest(
-                            &guest_batch_input,
-                            &manifest,
-                        ) =>
+                        if validate_realtime_proposal_manifest(&guest_batch_input, &manifest) =>
                     {
                         let is_first_realtime_proposal =
                             guest_batch_input.inputs[0].parent_header.number == 0

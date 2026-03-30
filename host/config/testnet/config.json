@@ -3,6 +3,7 @@
     "concurrency_limit": 1,
     "l1_network": "hoodi",
     "cache_path": "/tmp/raiko/",
+    "use_cache": false,
     "prover": "0x70997970C51812dc3A010C7d01b50e0d17dc79C8",
     "graffiti": "8008500000000000000000000000000000000000000000000000000000000000",
     "blob_proof_type": "proof_of_equivalence",
@@ -33,15 +34,19 @@
         "prove": true
     },
     "risc0": {
-        "bonsai": true,
+        "boundless": false,
+        "bonsai": false,
         "snark": true,
         "profile": false,
-        "execution_po2": 20
+        "execution_po2": 22
     },
     "sp1": {
         "recursion": "core",
         "prover": "local",
         "verify": true
+    },
+    "zisk": {
+        "batch_snark": true
     },
     "native": {
         "json_guest_input": null

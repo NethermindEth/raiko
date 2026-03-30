@@ -12,10 +12,10 @@ use alloy_primitives::U256;
 use anyhow::{anyhow, Error, Result};
 use ontake::BlockProposedV2;
 use pacaya::{BatchInfo, BatchProposed};
+use realtime::RealTimeEventData;
 use reth_primitives::Header;
 use serde::{Deserialize, Serialize};
 use serde_with::serde_as;
-use realtime::RealTimeEventData;
 use shasta::ShastaEventData;
 use tracing::error;
 
@@ -66,11 +66,21 @@ pub struct GuestInput {
     pub taiko: TaikoGuestInput,
 }
 
+#[serde_as]
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
 pub struct InputDataSource {
+    #[serde_as(as = "serde_with::Bytes")]
     pub tx_data_from_calldata: Vec<u8>,
+    #[serde_as(as = "Vec<serde_with::Bytes>")]
     pub tx_data_from_blob: Vec<Vec<u8>>,
+    #[serde_as(as = "Option<Vec<serde_with::Bytes>>")]
     pub blob_commitments: Option<Vec<Vec<u8>>>,
+    /// In PoE mode, each entry is the KZG proof (48 bytes). When the host
+    /// precomputes the polynomial evaluation y-value, it appends 32 bytes
+    /// of y after the proof (total 80 bytes). The guest splits them apart:
+    /// proof = blob_proof[..48], y = blob_proof[48..80].
+    /// If only 48 bytes, the guest computes y itself (backwards compatible).
+    #[serde_as(as = "Option<Vec<serde_with::Bytes>>")]
     pub blob_proofs: Option<Vec<Vec<u8>>>,
     pub blob_proof_type: BlobProofType,
     pub is_forced_inclusion: bool,
@@ -111,9 +121,11 @@ pub struct AggregationGuestInput {
 }
 
 /// The raw proof data necessary to verify a proof
+#[serde_as]
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
 pub struct RawProof {
     /// The actual proof
+    #[serde_as(as = "serde_with::Bytes")]
     pub proof: Vec<u8>,
     /// The resulting hash
     pub input: B256,
@@ -158,6 +170,14 @@ pub struct ShastaRisc0AggregationGuestInput {
     pub image_id: [u32; 8],
     pub block_inputs: Vec<B256>,
     pub proof_carry_data_vec: Vec<ProofCarryData>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct ShastaZiskAggregationGuestInput {
+    pub image_id: [u32; 8],
+    pub block_inputs: Vec<B256>,
+    pub proof_carry_data_vec: Vec<ProofCarryData>,
+    pub prover_address: Address,
 }
 
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
@@ -363,12 +383,10 @@ impl BlockProposedFork {
     pub fn proposal_hash(&self) -> B256 {
         match self {
             BlockProposedFork::Shasta(event_data) => hash_proposal(&event_data.proposal),
-            BlockProposedFork::RealTime(event_data) => {
-                crate::primitives::keccak::keccak(
-                    alloy_sol_types::SolValue::abi_encode(&event_data.proposal),
-                )
-                .into()
-            }
+            BlockProposedFork::RealTime(event_data) => crate::primitives::keccak::keccak(
+                alloy_sol_types::SolValue::abi_encode(&event_data.proposal),
+            )
+            .into(),
             _ => B256::ZERO,
         }
     }
@@ -479,12 +497,15 @@ pub struct TaikoGuestInput {
     #[serde_as(as = "serde_bincode_compat::Header")]
     /// header
     pub l1_header: Header,
+    #[serde_as(as = "serde_with::Bytes")]
     pub tx_data: Vec<u8>,
     #[serde_as(as = "Option<BincodeCompactTaikoTxEnvelope<'_>>")]
     pub anchor_tx: Option<TaikoTxEnvelope>,
     pub block_proposed: BlockProposedFork,
     pub prover_data: TaikoProverData,
+    #[serde_as(as = "Option<serde_with::Bytes>")]
     pub blob_commitment: Option<Vec<u8>>,
+    #[serde_as(as = "Option<serde_with::Bytes>")]
     pub blob_proof: Option<Vec<u8>>,
     pub blob_proof_type: BlobProofType,
     // extra data: is force inclusion flag
@@ -588,7 +609,7 @@ mod test {
     #[test]
     fn test_guest_input_se_de() {
         let input = GuestInput {
-            block: Block::default(),
+            block: TaikoBlock::default(),
             chain_spec: ChainSpec::default(),
             parent_header: Header::default(),
             parent_state_trie: MptNode::default(),
@@ -605,7 +626,7 @@ mod test {
     #[test]
     fn test_guest_input_value_sede() {
         let input = GuestInput {
-            block: Block::default(),
+            block: TaikoBlock::default(),
             chain_spec: ChainSpec::default(),
             parent_header: Header::default(),
             parent_state_trie: MptNode::default(),

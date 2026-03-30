@@ -3,6 +3,7 @@ use alloy_consensus::{Blob, Transaction};
 use alloy_primitives::{hex, Log as LogStruct, Uint, B256};
 use alloy_provider::{Provider, RootProvider};
 use alloy_rpc_types::{BlockId, Filter, Header, Log, Transaction as AlloyRpcTransaction};
+use alloy_rpc_types::{TransactionInput, TransactionRequest};
 use alloy_sol_types::{SolCall, SolEvent};
 use anyhow::{anyhow, bail, ensure, Result};
 use kzg::kzg_types::ZFr;
@@ -35,18 +36,125 @@ use tracing::{debug, error, info, instrument, warn};
 
 use crate::{
     interfaces::{RaikoError, RaikoResult},
-    provider::{db::ProviderDb, rpc::RpcBlockDataProvider, BlockDataProvider},
+    provider::{
+        db::ProviderDb,
+        rpc::{PrestateTraceResult, RpcBlockDataProvider},
+        BlockDataProvider,
+    },
     require,
 };
+
+/// Try to execute transactions using prestate trace data.
+/// If prefetched_prestate is provided, uses it directly (already fetched in parallel).
+/// Otherwise, tries to fetch via debug_traceBlockByNumber RPC.
+/// Returns Ok(true) if successful, Ok(false) if trace unavailable (should fall back).
+async fn try_trace_execute<'a, BDP>(
+    builder: &mut RethBlockBuilder<ProviderDb<'a, BDP>>,
+    pool_txs: &[TaikoTxEnvelope],
+    prefetched_prestate: Option<PrestateTraceResult>,
+) -> RaikoResult<bool>
+where
+    BDP: BlockDataProvider,
+{
+    // Use prefetched prestate if available, otherwise try RPC
+    let prestate = if let Some(prestate) = prefetched_prestate {
+        prestate
+    } else {
+        let Some(db) = builder.db.as_mut() else {
+            return Ok(false);
+        };
+        let block_number = db.block_number;
+        let Some(trace_result) = db.provider.trace_block_prestate(block_number + 1).await else {
+            return Ok(false);
+        };
+        match trace_result {
+            Ok(prestate) => prestate,
+            Err(e) => {
+                info!("execute_txs: debug_traceBlockByNumber failed (non-fatal): {e}");
+                return Ok(false);
+            }
+        }
+    };
+
+    // Populate staging_db with all state from the trace
+    let Some(db) = builder.db.as_mut() else {
+        return Ok(false);
+    };
+    db.populate_from_trace(prestate);
+
+    // Execute once non-optimistically
+    info!("execute_txs: trace-based single execution");
+    let Some(db) = builder.db.as_mut() else {
+        return Err(RaikoError::Preflight("No db in builder".to_owned()));
+    };
+    db.optimistic = true;
+    builder
+        .execute_transactions(pool_txs.to_vec(), true)
+        .map_err(|e| {
+            RaikoError::Preflight(format!("Executing transactions in builder failed: {e}"))
+        })?;
+
+    let Some(db) = builder.db.as_mut() else {
+        return Err(RaikoError::Preflight("No db in builder".to_owned()));
+    };
+
+    // Fetch any remaining state the trace might have missed (e.g. BLOCKHASH)
+    if db.fetch_data().await {
+        info!("execute_txs: trace-based execution converged in 1 iteration");
+        return Ok(true);
+    }
+
+    // If there's still pending state, do a few more iterations to converge
+    info!("execute_txs: trace had gaps, running additional iterations to converge");
+    let max_iterations = 100;
+    for num_iterations in 1.. {
+        info!("execute_txs: iteration {num_iterations} (post-trace)");
+        inplace_print(&format!("Executing iteration {num_iterations}..."));
+
+        let Some(db) = builder.db.as_mut() else {
+            return Err(RaikoError::Preflight("No db in builder".to_owned()));
+        };
+        db.optimistic = num_iterations + 1 < max_iterations;
+
+        builder
+            .execute_transactions(pool_txs.to_vec(), num_iterations + 1 < max_iterations)
+            .map_err(|e| {
+                RaikoError::Preflight(format!("Executing transactions in builder failed: {e}"))
+            })?;
+
+        let Some(db) = builder.db.as_mut() else {
+            return Err(RaikoError::Preflight("No db in builder".to_owned()));
+        };
+        if db.fetch_data().await {
+            clear_line();
+            info!(
+                "execute_txs: trace-based execution converged in {} iterations",
+                num_iterations + 1
+            );
+            return Ok(true);
+        }
+    }
+
+    Ok(true)
+}
 
 /// Optimize data gathering by executing the transactions multiple times so data can be requested in batches
 pub async fn execute_txs<'a, BDP>(
     builder: &mut RethBlockBuilder<ProviderDb<'a, BDP>>,
     pool_txs: Vec<TaikoTxEnvelope>,
+    prefetched_prestate: Option<PrestateTraceResult>,
 ) -> RaikoResult<()>
 where
     BDP: BlockDataProvider,
 {
+    // Fast path: try trace-based execution (uses prefetched prestate or fetches via RPC)
+    if try_trace_execute(builder, &pool_txs, prefetched_prestate).await? {
+        return Ok(());
+    }
+
+    info!("execute_txs: trace unavailable, using iterative approach");
+
+    // Fallback: iterative optimistic execution
     let max_iterations = 100;
     info!("execute_txs: start");
     for num_iterations in 0.. {
@@ -609,34 +717,26 @@ async fn prepare_taiko_chain_batch_input_realtime(
     let max_anchor_block_number: u64 = realtime_event_data.proposal.maxAnchorBlockNumber.to();
     let provider_l1 = RpcBlockDataProvider::new(&l1_chain_spec.rpc).await?;
 
-    // 1. Read L1 header at maxAnchorBlockNumber (the header's hash is maxAnchorBlockHash)
-    let l1_blocks = provider_l1
-        .get_blocks(&[(max_anchor_block_number, false)])
-        .await?;
-    let l1_header = l1_blocks
-        .first()
+    // 1. Compute signalSlotsHash
+    realtime_event_data.proposal.signalSlotsHash =
+        hash_signal_slots(&realtime_event_data.signal_slots);
+
+    // 2. Read L1 ancestor headers for anchor linkage (includes maxAnchorBlockNumber)
+    let l1_ancestor_headers =
+        get_max_anchor_headers(&provider_l1, batch_anchor_tx_info, max_anchor_block_number).await?;
+
+    // Extract L1 header at maxAnchorBlockNumber from the ancestor headers (always the last one)
+    let l1_header = l1_ancestor_headers
+        .last()
         .ok_or_else(|| {
             RaikoError::Preflight(format!(
                 "No L1 block at maxAnchorBlockNumber {max_anchor_block_number}"
             ))
         })?
-        .header
         .clone();
 
     // Fill in maxAnchorBlockHash from the fetched L1 header
     realtime_event_data.proposal.maxAnchorBlockHash = l1_header.hash;
-
-    // 2. Compute signalSlotsHash
-    realtime_event_data.proposal.signalSlotsHash =
-        hash_signal_slots(&realtime_event_data.signal_slots);
-
-    // 3. Read L1 ancestor headers for anchor linkage
-    let l1_ancestor_headers = get_max_anchor_headers(
-        &provider_l1,
-        batch_anchor_tx_info,
-        max_anchor_block_number,
-    )
-    .await?;
 
     // 4. Build data sources from DerivationSource[]
     // For RealTime: blobs are supplied directly by the proposer (not yet on L1).
@@ -667,7 +767,7 @@ async fn prepare_taiko_chain_batch_input_realtime(
                 let blob_proof = match blob_proof_type {
                     BlobProofType::KzgVersionedHash => None,
                     BlobProofType::ProofOfEquivalence => {
-                        let (x, _y) = eip4844::proof_of_equivalence(
+                        let (x, y) = eip4844::proof_of_equivalence(
                             &blob_bytes,
                             &commitment_to_version_hash(&commitment),
                         )
@@ -676,11 +776,14 @@ async fn prepare_taiko_chain_batch_input_realtime(
                             &blob_bytes,
                             ZFr::from_bytes(&x).unwrap(),
                         );
-                        Some(
-                            point
-                                .map(|g1| g1.to_bytes().to_vec())
-                                .map_err(|e| anyhow!(e))?,
-                        )
+                        // Append precomputed y (32 bytes) after the KZG proof (48 bytes).
+                        // The guest detects the extended proof (80 bytes) and skips the expensive
+                        // blob deserialization + polynomial evaluation.
+                        let mut proof_with_y = point
+                            .map(|g1| g1.to_bytes().to_vec())
+                            .map_err(|e| anyhow!(e))?;
+                        proof_with_y.extend_from_slice(&y);
+                        Some(proof_with_y)
                     }
                 };
                 buffers.push((blob_bytes, Some(commitment.to_vec()), blob_proof));
@@ -888,11 +991,14 @@ pub async fn get_tx_blob(
             let point = eip4844::calc_kzg_proof_with_point(&blob, ZFr::from_bytes(&x).unwrap());
             debug!("calc_kzg_proof_with_point {point:?}");
 
-            Some(
-                point
-                    .map(|g1| g1.to_bytes().to_vec())
-                    .map_err(|e| anyhow!(e))?,
-            )
+            // Append precomputed y (32 bytes) after the KZG proof (48 bytes).
+            // The guest detects the extended proof (80 bytes) and skips the expensive
+            // blob deserialization + polynomial evaluation.
+            let mut proof_with_y = point
+                .map(|g1| g1.to_bytes().to_vec())
+                .map_err(|e| anyhow!(e))?;
+            proof_with_y.extend_from_slice(&y);
+            Some(proof_with_y)
         }
     };
 
@@ -920,11 +1026,14 @@ pub async fn filter_tx_blob_beacon_with_proof(
             let point = eip4844::calc_kzg_proof_with_point(&blob, ZFr::from_bytes(&x).unwrap());
             debug!("calc_kzg_proof_with_point {point:?}");
 
-            Some(
-                point
-                    .map(|g1| g1.to_bytes().to_vec())
-                    .map_err(|e| anyhow!(e))?,
-            )
+            // Append precomputed y (32 bytes) after the KZG proof (48 bytes).
+            // The guest detects the extended proof (80 bytes) and skips the expensive
+            // blob deserialization + polynomial evaluation.
+            let mut proof_with_y = point
+                .map(|g1| g1.to_bytes().to_vec())
+                .map_err(|e| anyhow!(e))?;
+            proof_with_y.extend_from_slice(&y);
+            Some(proof_with_y)
         }
     };
 
@@ -1432,7 +1541,7 @@ fn calc_blob_versioned_hash(blob_str: &str) -> [u8; 32] {
     let blob = Blob::try_from(blob_bytes.as_slice()).expect("Could not create blob from bytes");
     let commitment = blob_to_kzg_commitment_rust(
         &eip4844::deserialize_blob_rust(&blob).expect("Could not deserialize blob"),
-        &KZG_SETTINGS.clone(),
+        &*KZG_SETTINGS,
     )
     .expect("Could not create kzg commitment from blob");
     commitment_to_version_hash(&commitment.to_bytes()).0
