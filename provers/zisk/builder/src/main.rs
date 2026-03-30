@@ -15,10 +15,7 @@ fn main() -> Result<()> {
     println!("Guest dir: {}", guest_dir.display());
 
     if !guest_dir.join("Cargo.toml").exists() {
-        bail!(
-            "ZISK guest Cargo.toml not found at {}",
-            guest_dir.display()
-        );
+        bail!("ZISK guest Cargo.toml not found at {}", guest_dir.display());
     }
 
     // 1. Find ZISK_RUSTC
@@ -42,8 +39,7 @@ fn main() -> Result<()> {
             bail!("{} ELF not found at {}", elf_name, src.display());
         }
         let dst = elf_dir.join(elf_name);
-        fs::copy(&src, &dst)
-            .with_context(|| format!("Failed to copy {elf_name} ELF"))?;
+        fs::copy(&src, &dst).with_context(|| format!("Failed to copy {elf_name} ELF"))?;
         println!("Copied {elf_name} to {}", dst.display());
     }
 
@@ -79,8 +75,7 @@ fn find_zisk_rustc() -> Result<PathBuf> {
 
     // 3. ~/.zisk/toolchains/*/bin/rustc
     let home = std::env::var("HOME").unwrap_or_else(|_| "/root".to_string());
-    let zisk_dir = std::env::var("ZISK_DIR")
-        .unwrap_or_else(|_| format!("{home}/.zisk"));
+    let zisk_dir = std::env::var("ZISK_DIR").unwrap_or_else(|_| format!("{home}/.zisk"));
     let toolchains_dir = PathBuf::from(&zisk_dir).join("toolchains");
 
     if toolchains_dir.exists() {
@@ -114,7 +109,12 @@ fn detect_riscv_tools() -> (String, Option<String>) {
 
     // 1. SP1 bundled gcc
     if PathBuf::from(&sp1_gcc).exists() {
-        if Command::new(&sp1_gcc).arg("--version").output().map(|o| o.status.success()).unwrap_or(false) {
+        if Command::new(&sp1_gcc)
+            .arg("--version")
+            .output()
+            .map(|o| o.status.success())
+            .unwrap_or(false)
+        {
             if let Ok(out) = Command::new(&sp1_gcc).arg("-print-sysroot").output() {
                 let base = String::from_utf8_lossy(&out.stdout).trim().to_string();
                 let sysroot = format!("{base}/include");
@@ -126,13 +126,20 @@ fn detect_riscv_tools() -> (String, Option<String>) {
     }
 
     // 2. SP1 newlib headers
-    if PathBuf::from(&sp1_include).exists() && fs::read_dir(&sp1_include).map(|mut d| d.next().is_some()).unwrap_or(false) {
+    if PathBuf::from(&sp1_include).exists()
+        && fs::read_dir(&sp1_include)
+            .map(|mut d| d.next().is_some())
+            .unwrap_or(false)
+    {
         println!("Using SP1 newlib headers: {sp1_include}");
         return ("riscv64-unknown-elf-gcc".to_string(), Some(sp1_include));
     }
 
     // 3. System riscv64-unknown-elf-gcc
-    if let Ok(out) = Command::new("riscv64-unknown-elf-gcc").arg("-print-sysroot").output() {
+    if let Ok(out) = Command::new("riscv64-unknown-elf-gcc")
+        .arg("-print-sysroot")
+        .output()
+    {
         if out.status.success() {
             let base = String::from_utf8_lossy(&out.stdout).trim().to_string();
             let sysroot = format!("{base}/include");
@@ -141,7 +148,9 @@ fn detect_riscv_tools() -> (String, Option<String>) {
                 return ("riscv64-unknown-elf-gcc".to_string(), Some(sysroot));
             } else {
                 // sysroot exists but no include dir — fall back to SP1 headers
-                println!("System gcc has no sysroot include, falling back to SP1 headers: {sp1_include}");
+                println!(
+                    "System gcc has no sysroot include, falling back to SP1 headers: {sp1_include}"
+                );
                 return ("riscv64-unknown-elf-gcc".to_string(), Some(sp1_include));
             }
         }
@@ -164,9 +173,8 @@ fn build_guest(
     println!("Building with ZISK rustc for riscv64ima-zisk-zkvm-elf target...");
     println!("RUSTC={}", zisk_rustc.display());
 
-    let cc_flag = format!(
-        "{riscv_gcc} -march=rv64ima -mabi=lp64 -mstrict-align -falign-functions=2"
-    );
+    let cc_flag =
+        format!("{riscv_gcc} -march=rv64ima -mabi=lp64 -mstrict-align -falign-functions=2");
 
     let mut cmd = Command::new("cargo");
     cmd.current_dir(guest_dir);
@@ -176,10 +184,7 @@ fn build_guest(
     cmd.env_remove("TARGET_CC");
 
     if let Some(sr) = sysroot {
-        cmd.env(
-            "CFLAGS_riscv64ima_zisk_zkvm_elf",
-            format!("-isystem {sr}"),
-        );
+        cmd.env("CFLAGS_riscv64ima_zisk_zkvm_elf", format!("-isystem {sr}"));
     }
 
     // Remove host CARGO_* env vars to avoid interference
@@ -202,13 +207,13 @@ fn build_guest(
 /// Compute and print the zisk-batch verification key.
 /// Requires the ZisK proving key to be installed at ZISK_PROVING_KEY or ~/.zisk/provingKey.
 ///
-/// Fast path: reads the cached .verkey.bin file created by a previous prove run.
-/// Slow path: if the cache doesn't exist, builds a minimal EMU prover to perform the ROM
-///            Merkle setup (~12s), which generates and caches the verkey for future runs.
+/// Fast path: reads the cached verkey file from ~/.zisk/cache/ by matching the blake3 hash
+/// of the ELF binary (no native code, pure file I/O).
+/// Slow path: runs `cargo-zisk rom-setup` to populate the cache, then re-reads.
+///
+/// Uses only blake3 (pure Rust) — intentionally avoids zisk-sdk to prevent linking
+/// proofman-starks native C++ which requires AVX-512 and causes SIGILL on non-AVX-512 hosts.
 fn print_batch_vkey(batch_elf_path: &PathBuf) {
-    use zisk_common::ElfBinaryFromFile;
-    use zisk_sdk::get_program_vk_with_proving_key;
-
     let home = std::env::var("HOME").unwrap_or_else(|_| "/root".to_string());
     let proving_key = std::env::var("ZISK_PROVING_KEY")
         .map(PathBuf::from)
@@ -223,35 +228,37 @@ fn print_batch_vkey(batch_elf_path: &PathBuf) {
         return;
     }
 
-    let elf = match ElfBinaryFromFile::new(batch_elf_path, false) {
-        Ok(e) => e,
+    let elf_bytes = match fs::read(batch_elf_path) {
+        Ok(b) => b,
         Err(e) => {
             eprintln!("Warning: failed to read batch ELF for vkey: {e}");
             return;
         }
     };
+    let elf_hash = blake3::hash(&elf_bytes).to_hex().to_string();
 
-    // Fast path: verkey already cached from a previous prove run.
-    match get_program_vk_with_proving_key(&elf, proving_key.clone()) {
-        Ok(vk) => {
-            print_vk_bytes(&vk.vk);
-            return;
-        }
-        Err(e) if e.to_string().contains("ROM merkle setup has not been performed yet") => {
-            println!("ROM cache not found — running setup to compute vkey (this may take ~12s)...");
-        }
-        Err(e) => {
-            eprintln!("Warning: failed to compute zisk-batch vkey: {e}");
-            return;
-        }
+    let cache_dir = PathBuf::from(format!("{home}/.zisk/cache"));
+
+    // Fast path: verkey already cached (e.g. from a previous make guest or prove run).
+    if let Some(verkey_bytes) = read_cached_verkey(&cache_dir, &elf_hash) {
+        print_vk_bytes(&verkey_bytes);
+        return;
     }
 
-    // Slow path: invoke `cargo-zisk rom-setup` to compute and cache the ROM Merkle tree.
-    // Using the installed cargo-zisk binary ensures version compatibility with the proving key.
-    println!("Running: cargo-zisk rom-setup -e {}", batch_elf_path.display());
+    // Slow path: run rom-setup to compute and cache the verkey (~12s first time).
+    println!("ROM cache not found — running setup to compute vkey (this may take ~12s)...");
+    println!(
+        "Running: cargo-zisk rom-setup -e {}",
+        batch_elf_path.display()
+    );
     let status = Command::new("cargo-zisk")
-        .args(["rom-setup", "-e", batch_elf_path.to_str().unwrap_or_default(), "-k",
-               proving_key.to_str().unwrap_or_default()])
+        .args([
+            "rom-setup",
+            "-e",
+            batch_elf_path.to_str().unwrap_or_default(),
+            "-k",
+            proving_key.to_str().unwrap_or_default(),
+        ])
         .status();
 
     match status {
@@ -262,17 +269,37 @@ fn print_batch_vkey(batch_elf_path: &PathBuf) {
         }
         Err(e) => {
             eprintln!("Warning: failed to run cargo-zisk rom-setup: {e}");
-            eprintln!("  Install cargo-zisk or run manually: cargo-zisk rom-setup -e {} -k {}",
-                batch_elf_path.display(), proving_key.display());
+            eprintln!(
+                "  Install cargo-zisk or run manually: cargo-zisk rom-setup -e {} -k {}",
+                batch_elf_path.display(),
+                proving_key.display()
+            );
             return;
         }
     }
 
     // Re-read the cache that rom-setup just populated.
-    match get_program_vk_with_proving_key(&elf, proving_key) {
-        Ok(vk) => print_vk_bytes(&vk.vk),
-        Err(e) => eprintln!("Warning: failed to read vkey after rom-setup: {e}"),
+    match read_cached_verkey(&cache_dir, &elf_hash) {
+        Some(verkey_bytes) => print_vk_bytes(&verkey_bytes),
+        None => eprintln!(
+            "Warning: verkey cache not found under {} after rom-setup",
+            cache_dir.display()
+        ),
     }
+}
+
+/// Find and read a cached verkey file whose name starts with the given ELF hash.
+/// zisk stores verkeys as: {elf_hash}_{pil_hash}_{rows}_{blowup}_{arity}.verkey.bin
+fn read_cached_verkey(cache_dir: &PathBuf, elf_hash: &str) -> Option<Vec<u8>> {
+    let entries = fs::read_dir(cache_dir).ok()?;
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
+        if name.starts_with(elf_hash) && name.ends_with(".verkey.bin") {
+            return fs::read(&path).ok();
+        }
+    }
+    None
 }
 
 /// Byte-swap within each 8-byte (uint64) word and print as hex.
@@ -282,5 +309,5 @@ fn print_vk_bytes(vk: &[u8]) {
     for chunk in swapped.chunks_exact_mut(8) {
         chunk.reverse();
     }
-    println!("zisk-batch vkey: 0x{}", hex::encode(&swapped));
+    println!("zisk-batch vkey: {}", hex::encode(&swapped));
 }

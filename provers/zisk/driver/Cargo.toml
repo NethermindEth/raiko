@@ -29,9 +29,9 @@ bytemuck = "1"
 libc = "0.2"
 
 # Zisk SDK and related dependencies — v0.16.0
-zisk-sdk = { git = "https://github.com/0xPolygonHermez/zisk.git", tag = "v0.16.0" }
-zisk-common = { git = "https://github.com/0xPolygonHermez/zisk.git", tag = "v0.16.0" }
-fields = { git = "https://github.com/0xPolygonHermez/pil2-proofman.git", tag = "v0.16.0" }
+zisk-sdk = { git = "https://github.com/0xPolygonHermez/zisk.git", tag = "v0.16.1" }
+zisk-common = { git = "https://github.com/0xPolygonHermez/zisk.git", tag = "v0.16.1" }
+fields = { git = "https://github.com/0xPolygonHermez/pil2-proofman.git", tag = "v0.16.1" }
 
 [[bin]]
 name = "dump-proof"

@@ -24,10 +24,31 @@ use zisk_sdk::{
     ZiskProver,
 };
 
-const GUEST_ELF_DIR: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../guest/elf");
+/// Locate the directory containing guest ELFs.
+///
+/// Search order:
+///   1. Same directory as the running binary (`<exe_dir>/`).
+///      Works for installed/Docker deployments where ELFs are copied
+///      alongside the binary.
+///   2. Compile-time fallback: `CARGO_MANIFEST_DIR/../guest/elf`
+///      Works for `cargo run` / dev builds where the elf dir sits next to
+///      the driver crate in the source tree.
+fn find_elf_dir() -> PathBuf {
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(bin_dir) = exe.parent() {
+            let candidate = bin_dir.join("zisk-batch");
+            if candidate.exists() {
+                return bin_dir.to_path_buf();
+            }
+        }
+    }
+    PathBuf::from(concat!(env!("CARGO_MANIFEST_DIR"), "/../guest/elf"))
+}
+
+static ELF_DIR: Lazy<PathBuf> = Lazy::new(find_elf_dir);
 
 fn elf_path(elf_name: &str) -> PathBuf {
-    PathBuf::from(GUEST_ELF_DIR).join(elf_name)
+    ELF_DIR.join(elf_name)
 }
 
 // ---------------------------------------------------------------------------

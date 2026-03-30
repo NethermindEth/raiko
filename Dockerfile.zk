@@ -218,8 +218,8 @@ COPY redis-derive redis-derive
 
 # Bring in cached guest ELFs and generated methods (with correct image IDs) from guest-builder
 COPY --from=guest-builder /opt/raiko/provers/sp1/guest/elf /opt/raiko/provers/sp1/guest/elf
-COPY --from=guest-builder /opt/raiko/provers/risc0/driver/src/methods /opt/raiko/provers/risc0/driver/src/methods
-COPY --from=guest-builder /opt/raiko/provers/risc0/guest /opt/raiko/provers/risc0/guest
+#COPY --from=guest-builder /opt/raiko/provers/risc0/driver/src/methods /opt/raiko/provers/risc0/driver/src/methods
+#COPY --from=guest-builder /opt/raiko/provers/risc0/guest /opt/raiko/provers/risc0/guest
 COPY --from=guest-builder /opt/raiko/provers/zisk/guest/elf /opt/raiko/provers/zisk/guest/elf
 
 RUN mkdir -p ~/.cargo/bin
@@ -229,37 +229,53 @@ RUN mkdir -p ~/.cargo/bin
 # ENV NUM_JOBS=${CARGO_BUILD_JOBS}
 # Allow multiple definitions: risc0_groth16_sys and proofman_starks_lib_c both
 # define the same CUDA sort kernel — they're compatible, let the linker pick one.
-ENV RUSTFLAGS="-C link-arg=-Wl,--allow-multiple-definition"
-RUN cargo build --release ${BUILD_FLAGS} --features "sp1,risc0,zisk,cuda"
+# ENV RUSTFLAGS="-C link-arg=-Wl,--allow-multiple-definition"
+# RUN cargo build --release ${BUILD_FLAGS} --features "sp1,risc0,zisk,cuda"
+
+# Build only for zisk
+RUN cargo build --release ${BUILD_FLAGS} --features "zisk"
 
 FROM ubuntu:22.04 AS raiko-zk
 
 COPY --from=builder /usr/local/cuda/lib64/libcudart* /usr/local/cuda/lib64/
+
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+    libssl3 \
+    libsodium23 \
+    libomp5 \
+    libgomp1 \
+    libopenmpi3 \
+    openmpi-bin \
+    openmpi-common \
+    make \
+    gcc \
+    g++ \
+    nasm \
+    libgmp-dev && \
+    apt-get clean && \
+    rm -rf /var/lib/apt/lists/*
 
 ENV NVIDIA_VISIBLE_DEVICES=all \
     NVIDIA_DRIVER_CAPABILITIES=compute,utility \
     LD_LIBRARY_PATH=/usr/local/cuda/lib64
 
 RUN mkdir -p \
-    ./bin \
     /etc/raiko \
     /var/log/raiko \
-    /tmp/risc0-cache \
     /tmp/zisk-proofs
-
-RUN apt-get update && apt-get install -y \
-    ca-certificates \
-    openssl \
-    curl \
-    jq \
-    psmisc \
-    libsodium23 \
-    libomp5 \
-    && rm -rf /var/lib/apt/lists/*
 
 COPY --from=builder /opt/raiko/host/config/config.sgx.json /etc/raiko/
 COPY --from=builder /opt/raiko/host/config/chain_spec_list_default.json /etc/raiko/chain_spec_list_default.json
 COPY --from=builder /opt/raiko/target/release/raiko-host /opt/raiko/bin/
+
+# Copy guest ELFs next to the binary so find_elf_dir() locates them via current_exe()
+COPY --from=builder /opt/raiko/provers/zisk/guest/elf/ /opt/raiko/bin/
+
+# Uncomment when building with --features "sp1,risc0,zisk,cuda"
+#COPY --from=builder /opt/raiko/provers/sp1/guest/elf /opt/raiko/provers/sp1/guest/elf
+#COPY --from=builder /opt/raiko/provers/risc0/guest /opt/raiko/provers/risc0/guest
+#COPY --from=builder /opt/raiko/provers/risc0/driver/src/methods /opt/raiko/provers/risc0/driver/src/methods
 
 WORKDIR /opt/raiko/bin
 COPY ./docker/entrypoint.sh /opt/raiko/bin/

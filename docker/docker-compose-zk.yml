@@ -25,6 +25,7 @@ services:
     restart: unless-stopped
     runtime: nvidia
     privileged: true
+    ipc: host
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - ../host/config:/raiko/config

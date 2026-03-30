@@ -6,7 +6,4 @@ edition = "2021"
 [dependencies]
 anyhow = "1.0"
 hex = "0.4"
-
-# Zisk SDK for vkey computation
-zisk-sdk = { git = "https://github.com/0xPolygonHermez/zisk.git", tag = "v0.16.0" }
-zisk-common = { git = "https://github.com/0xPolygonHermez/zisk.git", tag = "v0.16.0" }
+blake3 = "1"
