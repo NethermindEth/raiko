@@ -144,7 +144,7 @@ async fn realtime_handler(
                 to_v3_status(
                     realtime_request.proof_type,
                     None,
-                    Err("proof not found: expired or never submitted".to_string()),
+                    Err("proof not found: expired or never submitted. Ensure l2_block_hashes matches the original submit request.".to_string()),
                 )
             }
             Err(e) => to_v3_status(realtime_request.proof_type, None, Err(e)),
