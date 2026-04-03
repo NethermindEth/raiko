@@ -155,6 +155,13 @@ async fn realtime_handler(
         return Ok(status);
     }
 
+    // If use_cache is false, evict existing proof to force re-proving.
+    if !realtime_request.use_cache {
+        let _ = actor
+            .pool_remove_request(&proof_request_key.clone().into())
+            .await;
+    }
+
     // Submit proof directly — do_prove_realtime will generate guest input
     // inline if it's not already in prover_args, so no separate guest input
     // stage is needed.

@@ -916,6 +916,10 @@ impl TryFrom<ShastaProofRequestOpt> for ShastaProofRequest {
 
 // === RealTime fork request types ===
 
+fn default_use_cache() -> bool {
+    true
+}
+
 #[serde_as]
 #[derive(Clone, Debug, Serialize, Deserialize, ToSchema)]
 pub struct RealTimeProofRequest {
@@ -950,6 +954,9 @@ pub struct RealTimeProofRequest {
     pub blobs: Vec<String>,
     /// Previous finalized checkpoint
     pub checkpoint: Option<ShastaProposalCheckpoint>,
+    /// If true (default), return cached proof if available. If false, force re-proving.
+    #[serde(default = "default_use_cache")]
+    pub use_cache: bool,
 }
 
 #[serde_as]
@@ -980,6 +987,9 @@ pub struct RealTimeProofRequestOpt {
     #[serde(default)]
     pub blobs: Vec<String>,
     pub checkpoint: Option<ShastaProposalCheckpoint>,
+    /// If true (default), return cached proof if available. If false, force re-proving.
+    #[serde(default = "default_use_cache")]
+    pub use_cache: bool,
 }
 
 impl TryFrom<RealTimeProofRequestOpt> for RealTimeProofRequest {
@@ -1025,6 +1035,7 @@ impl TryFrom<RealTimeProofRequestOpt> for RealTimeProofRequest {
             sources: value.sources,
             blobs: value.blobs,
             checkpoint: value.checkpoint,
+            use_cache: value.use_cache,
         })
     }
 }
