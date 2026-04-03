@@ -1,4 +1,3 @@
-use alloy_primitives::B256;
 use raiko_core::interfaces::RealTimeProofRequest;
 use raiko_reqpool::{
     ImageId, RealTimeInputRequestEntity, RealTimeInputRequestKey, RealTimeProofRequestEntity,
@@ -9,7 +8,6 @@ use raiko_reqpool::{
 fn create_realtime_requests(
     request: &RealTimeProofRequest,
     image_id: &ImageId,
-    l2_block_hashes: Vec<B256>,
 ) -> (
     RequestKey,
     RequestKey,
@@ -19,7 +17,7 @@ fn create_realtime_requests(
     // RealTime: one proposal per request, no batching
     let input_request_key = RequestKey::RealTimeGuestInput(RealTimeInputRequestKey::new(
         request.l2_block_numbers.clone(),
-        l2_block_hashes.clone(),
+        request.l2_block_hashes.clone(),
         request.l1_network.clone(),
         request.network.clone(),
         request.last_finalized_block_hash,
@@ -30,7 +28,7 @@ fn create_realtime_requests(
         RequestKey::RealTimeProof(RealTimeProofRequestKey::new_with_input_key_and_image_id(
             RealTimeInputRequestKey::new(
                 request.l2_block_numbers.clone(),
-                l2_block_hashes,
+                request.l2_block_hashes.clone(),
                 request.l1_network.clone(),
                 request.network.clone(),
                 request.last_finalized_block_hash,
@@ -74,7 +72,6 @@ fn create_realtime_requests(
 pub fn process_realtime_request(
     request: &RealTimeProofRequest,
     image_id: &ImageId,
-    l2_block_hashes: Vec<B256>,
 ) -> (
     RequestKey,
     RequestKey,
@@ -82,7 +79,7 @@ pub fn process_realtime_request(
     raiko_reqpool::RequestEntity,
 ) {
     let (input_key, proof_key, input_entity, proof_entity) =
-        create_realtime_requests(request, image_id, l2_block_hashes);
+        create_realtime_requests(request, image_id);
 
     (
         input_key,

@@ -924,6 +924,9 @@ fn default_use_cache() -> bool {
 #[derive(Clone, Debug, Serialize, Deserialize, ToSchema)]
 pub struct RealTimeProofRequest {
     pub l2_block_numbers: Vec<u64>,
+    /// Block hashes corresponding to l2_block_numbers, used as part of the cache key.
+    #[serde(default)]
+    pub l2_block_hashes: Vec<B256>,
     pub proof_type: ProofType,
 
     pub network: String,
@@ -964,6 +967,8 @@ pub struct RealTimeProofRequest {
 pub struct RealTimeProofRequestOpt {
     // Required fields
     pub l2_block_numbers: Vec<u64>,
+    #[serde(default)]
+    pub l2_block_hashes: Vec<B256>,
     pub proof_type: String,
 
     // Optional fields, if not provided, the default values will be used
@@ -998,6 +1003,7 @@ impl TryFrom<RealTimeProofRequestOpt> for RealTimeProofRequest {
     fn try_from(value: RealTimeProofRequestOpt) -> Result<Self, Self::Error> {
         Ok(Self {
             l2_block_numbers: value.l2_block_numbers,
+            l2_block_hashes: value.l2_block_hashes,
             proof_type: value
                 .proof_type
                 .parse()
