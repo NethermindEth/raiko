@@ -916,17 +916,23 @@ impl TryFrom<ShastaProofRequestOpt> for ShastaProofRequest {
 
 // === RealTime fork request types ===
 
+<<<<<<< HEAD
 fn default_use_cache() -> bool {
     true
 }
 
+=======
+>>>>>>> feat/zisk-real-time
 #[serde_as]
 #[derive(Clone, Debug, Serialize, Deserialize, ToSchema)]
 pub struct RealTimeProofRequest {
     pub l2_block_numbers: Vec<u64>,
+<<<<<<< HEAD
     /// Block hashes corresponding to l2_block_numbers, used as part of the cache key.
     #[serde(default)]
     pub l2_block_hashes: Vec<B256>,
+=======
+>>>>>>> feat/zisk-real-time
     pub proof_type: ProofType,
 
     pub network: String,
@@ -957,8 +963,13 @@ pub struct RealTimeProofRequest {
     pub blobs: Vec<String>,
     /// Previous finalized checkpoint
     pub checkpoint: Option<ShastaProposalCheckpoint>,
+<<<<<<< HEAD
     /// If true (default), return cached proof if available. If false, force re-proving.
     #[serde(default = "default_use_cache")]
+=======
+    /// If true, return cached proof if available. If false (default), always re-prove.
+    #[serde(default)]
+>>>>>>> feat/zisk-real-time
     pub use_cache: bool,
 }
 
@@ -967,8 +978,11 @@ pub struct RealTimeProofRequest {
 pub struct RealTimeProofRequestOpt {
     // Required fields
     pub l2_block_numbers: Vec<u64>,
+<<<<<<< HEAD
     #[serde(default)]
     pub l2_block_hashes: Vec<B256>,
+=======
+>>>>>>> feat/zisk-real-time
     pub proof_type: String,
 
     // Optional fields, if not provided, the default values will be used
@@ -992,8 +1006,13 @@ pub struct RealTimeProofRequestOpt {
     #[serde(default)]
     pub blobs: Vec<String>,
     pub checkpoint: Option<ShastaProposalCheckpoint>,
+<<<<<<< HEAD
     /// If true (default), return cached proof if available. If false, force re-proving.
     #[serde(default = "default_use_cache")]
+=======
+    /// If true, return cached proof if available. If false (default), always re-prove.
+    #[serde(default)]
+>>>>>>> feat/zisk-real-time
     pub use_cache: bool,
 }
 
@@ -1003,7 +1022,10 @@ impl TryFrom<RealTimeProofRequestOpt> for RealTimeProofRequest {
     fn try_from(value: RealTimeProofRequestOpt) -> Result<Self, Self::Error> {
         Ok(Self {
             l2_block_numbers: value.l2_block_numbers,
+<<<<<<< HEAD
             l2_block_hashes: value.l2_block_hashes,
+=======
+>>>>>>> feat/zisk-real-time
             proof_type: value
                 .proof_type
                 .parse()

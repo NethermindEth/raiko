@@ -3,6 +3,7 @@ use alloy_consensus::{Blob, Transaction};
 use alloy_primitives::{hex, Log as LogStruct, Uint, B256};
 use alloy_provider::{Provider, RootProvider};
 use alloy_rpc_types::{BlockId, Filter, Header, Log, Transaction as AlloyRpcTransaction};
+use alloy_rpc_types::{TransactionInput, TransactionRequest};
 use alloy_sol_types::{SolCall, SolEvent};
 use anyhow::{anyhow, bail, ensure, Result};
 use kzg::kzg_types::ZFr;
@@ -93,6 +94,19 @@ where
             RaikoError::Preflight(format!("Executing transactions in builder failed: {e}"))
         })?;
 
+<<<<<<< HEAD
+=======
+    let Some(db) = builder.db.as_mut() else {
+        return Err(RaikoError::Preflight("No db in builder".to_owned()));
+    };
+
+    // Fetch any remaining state the trace might have missed (e.g. BLOCKHASH)
+    if db.fetch_data().await {
+        info!("execute_txs: trace-based execution converged in 1 iteration");
+        return Ok(true);
+    }
+
+>>>>>>> feat/zisk-real-time
     // If there's still pending state, do a few more iterations to converge
     info!("execute_txs: trace had gaps, running additional iterations to converge");
     let max_iterations = 100;

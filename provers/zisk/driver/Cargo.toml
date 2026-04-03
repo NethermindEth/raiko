@@ -5,7 +5,11 @@ edition = "2021"
 description = "ZISK agent HTTP client driver for Raiko integration"
 
 [features]
+<<<<<<< HEAD
 enable = ["gpu"]
+=======
+enable = []
+>>>>>>> feat/zisk-real-time
 gpu = ["zisk-sdk/gpu"]
 
 [dependencies]

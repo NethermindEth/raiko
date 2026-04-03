@@ -22,7 +22,11 @@ use raiko_tasks::TaskStatus;
 use serde_json::Value;
 use utoipa::OpenApi;
 
+<<<<<<< HEAD
 use super::batch::{make_proof_request_key, process_realtime_request};
+=======
+use super::batch::process_realtime_request;
+>>>>>>> feat/zisk-real-time
 
 #[utoipa::path(post, path = "/batch/realtime",
     tag = "Proving",
@@ -124,6 +128,7 @@ async fn realtime_handler(
     // No aggregation for RealTime
     let image_id = ImageId::from_proof_type_and_request_type(&realtime_request.proof_type, false);
 
+<<<<<<< HEAD
     // When sources is empty, this is a status poll — don't submit for proving.
     // The caller sends the first request with full sources+blobs to kick off proving,
     // then polls with empty sources to check progress.
@@ -163,6 +168,27 @@ async fn realtime_handler(
     // inline if it's not already in prover_args, so no separate guest input
     // stage is needed.
     let result = prove(&actor, proof_request_key.into(), proof_request_entity).await;
+=======
+    let (_input_request_key, proof_request_key, _input_request_entity, proof_request_entity) =
+        process_realtime_request(&realtime_request, &image_id);
+
+    // Submit proof directly — do_prove_realtime will generate guest input
+    // inline if it's not already in prover_args, so no separate guest input
+    // stage is needed.
+    let result = prove(&actor, proof_request_key.clone().into(), proof_request_entity).await;
+
+    // If use_cache is false, evict the proof AFTER returning Success to the
+    // caller — so the next request re-proves from scratch instead of serving
+    // the cached result. Evicting before prove() would mean the caller never
+    // sees Success (each poll would re-submit and return Registered).
+    if !realtime_request.use_cache {
+        if matches!(result, Ok(raiko_reqpool::Status::Success { .. })) {
+            if let Err(e) = actor.pool_remove_request(&proof_request_key.into()).await {
+                tracing::warn!("Failed to evict cached proof for re-proving: {e}");
+            }
+        }
+    }
+>>>>>>> feat/zisk-real-time
 
     let status = to_v3_status(realtime_request.proof_type, None, result);
     Ok(status)
