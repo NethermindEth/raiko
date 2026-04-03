@@ -121,11 +121,23 @@ async fn realtime_handler(
         serde_json::to_string(&realtime_request)?,
     );
 
+    // Fetch L2 block hashes from RPC to use as part of the cache key.
+    let mut l2_block_hashes = Vec::with_capacity(realtime_request.l2_block_numbers.len());
+    for &block_number in &realtime_request.l2_block_numbers {
+        let (_, block_hash) = raiko_core::provider::get_task_data(
+            &realtime_request.network,
+            block_number,
+            actor.chain_specs(),
+        )
+        .await?;
+        l2_block_hashes.push(block_hash);
+    }
+
     // No aggregation for RealTime
     let image_id = ImageId::from_proof_type_and_request_type(&realtime_request.proof_type, false);
 
     let (_input_request_key, proof_request_key, _input_request_entity, proof_request_entity) =
-        process_realtime_request(&realtime_request, &image_id);
+        process_realtime_request(&realtime_request, &image_id, l2_block_hashes);
 
     // When sources is empty, this is a status poll — don't submit for proving.
     // The caller sends the first request with full sources+blobs to kick off proving,
