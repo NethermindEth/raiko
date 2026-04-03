@@ -67,6 +67,23 @@ fn create_realtime_requests(
     )
 }
 
+/// Build only the proof request key for status lookups (polling).
+pub fn make_proof_request_key(request: &RealTimeProofRequest, image_id: &ImageId) -> RequestKey {
+    let actual_prover_address = request.prover.to_string();
+    RequestKey::RealTimeProof(RealTimeProofRequestKey::new_with_input_key_and_image_id(
+        RealTimeInputRequestKey::new(
+            request.l2_block_numbers.clone(),
+            request.l2_block_hashes.clone(),
+            request.l1_network.clone(),
+            request.network.clone(),
+            request.last_finalized_block_hash,
+        ),
+        request.proof_type,
+        actual_prover_address,
+        image_id.clone(),
+    ))
+}
+
 /// Process a RealTime request and return the necessary data for the handler.
 /// Unlike Shasta, there is exactly one proposal per request (no batching).
 pub fn process_realtime_request(

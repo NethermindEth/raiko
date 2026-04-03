@@ -236,4 +236,63 @@ mod tests {
             assert_eq!(actual, Ok(format!("val{}", i)));
         }
     }
+
+    #[test]
+    fn test_memory_pool_ttl_expiry() {
+        let mut pool = memory_pool("test_memory_pool_ttl_expiry");
+        let mut conn = pool.conn().expect("memory conn");
+
+        let key = "ttl_key".to_string();
+        let val = "ttl_val".to_string();
+        conn.set_ex(key.clone(), val.clone(), 1).expect("set_ex");
+
+        // Value should be accessible before TTL expires
+        let actual: RedisResult<String> = conn.get(&key);
+        assert_eq!(actual, Ok(val));
+
+        // Wait for TTL to expire
+        std::thread::sleep(Duration::from_secs(2));
+
+        // Value should be gone after TTL
+        let actual: RedisResult<String> = conn.get(&key);
+        assert!(actual.is_err());
+    }
+
+    #[test]
+    fn test_memory_pool_ttl_zero_no_expiry() {
+        let mut pool = memory_pool("test_memory_pool_ttl_zero");
+        let mut conn = pool.conn().expect("memory conn");
+
+        let key = "no_expiry".to_string();
+        let val = "persistent".to_string();
+        conn.set_ex(key.clone(), val.clone(), 0).expect("set_ex");
+
+        std::thread::sleep(Duration::from_secs(2));
+
+        // ttl=0 means no expiry — value should still be accessible
+        let actual: RedisResult<String> = conn.get(&key);
+        assert_eq!(actual, Ok(val));
+    }
+
+    #[test]
+    fn test_memory_pool_keys_filters_expired() {
+        let mut pool = memory_pool("test_memory_pool_keys_expired");
+        let mut conn = pool.conn().expect("memory conn");
+
+        conn.set_ex("live".to_string(), "val1".to_string(), 0)
+            .expect("set_ex");
+        conn.set_ex("expiring".to_string(), "val2".to_string(), 1)
+            .expect("set_ex");
+
+        // Both keys should be present before expiry
+        let keys: Vec<String> = conn.keys("*").expect("keys");
+        assert_eq!(keys.len(), 2);
+
+        std::thread::sleep(Duration::from_secs(2));
+
+        // Only the live key should remain
+        let keys: Vec<String> = conn.keys("*").expect("keys");
+        assert_eq!(keys.len(), 1);
+        assert!(keys.contains(&"live".to_string()));
+    }
 }

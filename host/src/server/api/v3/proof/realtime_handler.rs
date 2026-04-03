@@ -22,7 +22,7 @@ use raiko_tasks::TaskStatus;
 use serde_json::Value;
 use utoipa::OpenApi;
 
-use super::batch::process_realtime_request;
+use super::batch::{make_proof_request_key, process_realtime_request};
 
 #[utoipa::path(post, path = "/batch/realtime",
     tag = "Proving",
@@ -128,11 +128,8 @@ async fn realtime_handler(
     // The caller sends the first request with full sources+blobs to kick off proving,
     // then polls with empty sources to check progress.
     if realtime_request.sources.is_empty() {
-        // Build only the key needed for status lookup, skip full entity construction.
-        let (_input_request_key, proof_request_key, _input_request_entity, _) =
-            process_realtime_request(&realtime_request, &image_id);
-
-        let result = actor.pool_get_status(&proof_request_key.into()).await;
+        let proof_request_key = make_proof_request_key(&realtime_request, &image_id);
+        let result = actor.pool_get_status(&proof_request_key).await;
         let status = match result {
             Ok(Some(status_with_context)) => to_v3_status(
                 realtime_request.proof_type,
