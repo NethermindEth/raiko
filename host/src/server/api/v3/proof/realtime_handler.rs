@@ -127,22 +127,43 @@ async fn realtime_handler(
     let (_input_request_key, proof_request_key, _input_request_entity, proof_request_entity) =
         process_realtime_request(&realtime_request, &image_id);
 
+    // When sources is empty, this is a status poll — don't submit for proving.
+    // The caller sends the first request with full sources+blobs to kick off proving,
+    // then polls with empty sources to check progress.
+    let is_poll = realtime_request.sources.is_empty();
+
+    if is_poll {
+        let result = actor
+            .pool_get_status(&proof_request_key.clone().into())
+            .await;
+        let status = match result {
+            Ok(Some(status_with_context)) => to_v3_status(
+                realtime_request.proof_type,
+                None,
+                Ok(status_with_context.into_status()),
+            ),
+            Ok(None) => {
+                // No status found — proof expired via Redis TTL or never submitted
+                to_v3_status(
+                    realtime_request.proof_type,
+                    None,
+                    Ok(raiko_reqpool::Status::Registered),
+                )
+            }
+            Err(e) => to_v3_status(realtime_request.proof_type, None, Err(e)),
+        };
+        return Ok(status);
+    }
+
     // Submit proof directly — do_prove_realtime will generate guest input
     // inline if it's not already in prover_args, so no separate guest input
     // stage is needed.
-    let result = prove(&actor, proof_request_key.clone().into(), proof_request_entity).await;
-
-    // If use_cache is false, evict the proof AFTER returning Success to the
-    // caller — so the next request re-proves from scratch instead of serving
-    // the cached result. Evicting before prove() would mean the caller never
-    // sees Success (each poll would re-submit and return Registered).
-    if !realtime_request.use_cache {
-        if matches!(result, Ok(raiko_reqpool::Status::Success { .. })) {
-            if let Err(e) = actor.pool_remove_request(&proof_request_key.into()).await {
-                tracing::warn!("Failed to evict cached proof for re-proving: {e}");
-            }
-        }
-    }
+    let result = prove(
+        &actor,
+        proof_request_key.clone().into(),
+        proof_request_entity,
+    )
+    .await;
 
     let status = to_v3_status(realtime_request.proof_type, None, result);
     Ok(status)
