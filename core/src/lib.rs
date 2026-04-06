@@ -1,8 +1,6 @@
-use std::{collections::HashMap, hint::black_box};
+use std::hint::black_box;
 
 use alethia_reth_primitives::{TaikoBlock, TaikoTxEnvelope};
-use alloy_primitives::Address;
-use alloy_rpc_types::EIP1186AccountProofResponse;
 use interfaces::{cancel_proof, run_batch_prover, run_prover};
 use raiko_lib::{
     builder::{create_mem_db, RethBlockBuilder},
@@ -31,8 +29,6 @@ pub mod mock_prover;
 pub mod preflight;
 pub mod prover;
 pub mod provider;
-
-pub type MerkleProof = HashMap<Address, EIP1186AccountProofResponse>;
 
 pub struct Raiko {
     pub l1_chain_spec: ChainSpec,
