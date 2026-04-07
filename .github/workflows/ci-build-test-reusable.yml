@@ -42,6 +42,17 @@ jobs:
       - name: Install cargo-binstall
         uses: cargo-bins/cargo-binstall@v1.6.4
 
+      - name: Setup sccache
+        if: inputs.version_name == 'risc0'
+        uses: mozilla-actions/sccache-action@v0.0.7
+
+      - name: Cache risc0
+        if: inputs.version_name == 'risc0'
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: rust-cache-${{ runner.os }}-${{ runner.arch }}
+          cache-directories: ~/.cache/risc0
+
       - name: Install ${{ inputs.version_name }}
         run: make install
 
