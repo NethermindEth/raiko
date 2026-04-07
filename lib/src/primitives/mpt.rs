@@ -28,7 +28,7 @@ use anyhow::{ensure, Context, Result};
 use rlp::{Decodable, DecoderError, Prototype, Rlp};
 use serde::{Deserialize, Serialize};
 use thiserror::Error as ThisError;
-use tracing::debug;
+use tracing::{debug, warn};
 
 pub type StorageEntry = (MptNode, Vec<U256>);
 
@@ -1178,7 +1178,7 @@ fn collect_accounts_from_trie(
 
                     storage.insert(address, (storage_trie, slots));
                 } else {
-                    debug!("no address preimage for trie leaf hash {hash}");
+                    warn!("no address preimage for trie leaf hash {hash}");
                 }
             }
         }
@@ -1222,7 +1222,10 @@ fn collect_slots_from_trie(
     slots: &mut Vec<U256>,
 ) {
     match node.as_data() {
-        MptNodeData::Null | MptNodeData::Digest(_) => {}
+        MptNodeData::Null => {}
+        MptNodeData::Digest(digest) => {
+            warn!("unresolved storage trie digest node {digest} — slots under this subtree will be missing");
+        }
         MptNodeData::Leaf(prefix, _) => {
             let mut full_path = path.to_vec();
             full_path.extend(prefix_nibs(prefix));

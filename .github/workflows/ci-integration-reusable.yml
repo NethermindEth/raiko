@@ -42,11 +42,11 @@ jobs:
 
       - name: Setup sccache
         if: inputs.version_name == 'risc0'
-        uses: mozilla-actions/sccache-action@v0.0.7
+        uses: mozilla-actions/sccache-action@054db53350805f83040bf3e6e9b8cf5a139aa7c9 # v0.0.7
 
       - name: Cache risc0
         if: inputs.version_name == 'risc0'
-        uses: Swatinem/rust-cache@v2
+        uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
         with:
           key: rust-cache-${{ runner.os }}-${{ runner.arch }}
           cache-directories: ~/.cache/risc0
