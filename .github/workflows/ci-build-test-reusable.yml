@@ -39,6 +39,9 @@ jobs:
           toolchain: ${{ inputs.version_toolchain }}
           profile: minimal
 
+      - name: Install protoc
+        run: sudo apt-get install -y protobuf-compiler
+
       - name: Install cargo-binstall
         uses: cargo-bins/cargo-binstall@v1.6.4
 
