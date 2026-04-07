@@ -772,7 +772,7 @@ pub fn create_mem_db(input: &mut GuestInput) -> Result<MemDb> {
             );
             let bytes: Bytes = contracts
                 .get(&code_hash)
-                .context(format!(
+                .with_context(|| format!(
                     "Missing bytecode for code_hash {code_hash} of account {address}. \
                      Witness returned {} contract codes. Available hashes: {:?}",
                     contracts.len(),
