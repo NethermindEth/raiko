@@ -4,6 +4,7 @@ use crate::{
     provider::BlockDataProvider,
 };
 use alethia_reth_primitives::TaikoTxEnvelope;
+use futures::future::join_all;
 use raiko_lib::{
     consts::ChainSpec,
     input::{
@@ -302,29 +303,38 @@ pub async fn batch_preflight<BDP: BlockDataProvider>(
         });
     }
 
-    // Step 2: Fetch witnesses using the passed-in provider
-    let mut witnesses = Vec::with_capacity(base_inputs.len());
-    for input in &base_inputs {
-        let block_number = input.block.header.number;
-        let witness = provider
-            .execution_witness(block_number)
-            .await
-            .ok_or_else(|| {
-                RaikoError::Preflight(format!(
-                    "execution witness not supported for block {block_number}"
-                ))
-            })?
-            .map_err(|e| {
-                RaikoError::Preflight(format!(
-                    "execution witness failed for block {block_number}: {e}"
-                ))
-            })?;
-        witnesses.push(witness);
-    }
+    // Step 2: Fetch all witnesses concurrently
+    let witness_block_numbers: Vec<u64> = base_inputs
+        .iter()
+        .map(|input| input.block.header.number)
+        .collect();
+    let witness_futures: Vec<_> = witness_block_numbers
+        .iter()
+        .map(|&block_number| {
+            let provider = &provider;
+            async move {
+                provider
+                    .execution_witness(block_number)
+                    .await
+                    .ok_or_else(|| {
+                        RaikoError::Preflight(format!(
+                            "execution witness not supported for block {block_number}"
+                        ))
+                    })?
+                    .map_err(|e| {
+                        RaikoError::Preflight(format!(
+                            "execution witness failed for block {block_number}: {e}"
+                        ))
+                    })
+            }
+        })
+        .collect();
+    let witnesses: Vec<RaikoResult<_>> = join_all(witness_futures).await;
 
     // Step 3: Apply witness data to each input
     let mut final_inputs: Vec<GuestInput> = Vec::with_capacity(base_inputs.len());
-    for (input, witness) in base_inputs.into_iter().zip(witnesses) {
+    for (input, witness_result) in base_inputs.into_iter().zip(witnesses) {
+        let witness = witness_result?;
         let block_number = input.block.header.number;
         info!("batch_preflight: block {block_number} using execution witness");
 
