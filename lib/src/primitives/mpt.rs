@@ -1083,7 +1083,10 @@ pub fn witness_to_tries(
                 slot_preimages.insert(hash, slot);
             }
             _ => {
-                debug!("witness_to_tries: skipping key with unexpected length {}", key.len());
+                debug!(
+                    "witness_to_tries: skipping key with unexpected length {}",
+                    key.len()
+                );
             }
         }
     }

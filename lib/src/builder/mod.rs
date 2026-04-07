@@ -817,6 +817,18 @@ pub fn create_mem_db(input: &mut GuestInput) -> Result<MemDb> {
     block_hashes.insert(input.parent_header.number, input.parent_header.hash_slow());
     let mut prev = &input.parent_header;
     for current in &input.ancestor_headers {
+        // The witness includes the parent block header for state root verification;
+        // skip it since we already have it as input.parent_header.
+        if current.number == input.parent_header.number {
+            continue;
+        }
+        if current.number > input.parent_header.number {
+            bail!(
+                "Invalid chain: ancestor header {} is newer than parent {}",
+                current.number,
+                input.parent_header.number
+            );
+        }
         let current_hash = current.hash_slow();
         if prev.parent_hash != current_hash {
             bail!(
@@ -825,9 +837,7 @@ pub fn create_mem_db(input: &mut GuestInput) -> Result<MemDb> {
                 prev.number
             );
         }
-        if input.parent_header.number < current.number
-            || input.parent_header.number - current.number >= MAX_BLOCK_HASH_AGE
-        {
+        if input.parent_header.number - current.number >= MAX_BLOCK_HASH_AGE {
             bail!(
                 "Invalid chain: {} is not one of the {MAX_BLOCK_HASH_AGE} most recent blocks",
                 current.number,

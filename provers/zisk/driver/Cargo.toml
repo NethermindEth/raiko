@@ -5,8 +5,9 @@ edition = "2021"
 description = "ZISK agent HTTP client driver for Raiko integration"
 
 [features]
-enable = ["gpu"]
+enable = []
 gpu = ["zisk-sdk/gpu"]
+cuda = ["gpu"]
 
 [dependencies]
 # Workspace dependencies (from main raiko workspace)
