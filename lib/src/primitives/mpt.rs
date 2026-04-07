@@ -24,7 +24,7 @@ use alloy_primitives::{b256, Address, TxNumber, B256, U256};
 use alloy_rlp::Encodable;
 use alloy_rlp_derive::{RlpDecodable, RlpEncodable, RlpMaxEncodedLen};
 
-use anyhow::{Context, Result};
+use anyhow::{ensure, Context, Result};
 use rlp::{Decodable, DecoderError, Prototype, Rlp};
 use serde::{Deserialize, Serialize};
 use thiserror::Error as ThisError;
@@ -1078,6 +1078,8 @@ pub fn witness_to_tries(
                 address_preimages.insert(hash, address);
             }
             32 => {
+                // Witness keys are raw storage slot values (big-endian U256).
+                // The trie path is keccak256(raw_slot), so we hash to get the lookup key.
                 let slot = U256::from_be_bytes::<32>(key.as_ref().try_into().unwrap());
                 let hash = keccak(key.as_ref()).into();
                 slot_preimages.insert(hash, slot);
@@ -1101,9 +1103,10 @@ pub fn witness_to_tries(
     let state_root_node = node_from_digest(state_root);
     let state_trie = resolve_nodes(&state_root_node, &node_store);
 
-    debug!(
-        "witness_to_tries: resolved state trie, hash matches: {}",
+    ensure!(
         state_trie.hash() == state_root,
+        "State trie root mismatch: expected {state_root}, got {}",
+        state_trie.hash()
     );
 
     // Step 4: Walk state trie leaves to extract accounts and build storage tries
@@ -1174,6 +1177,8 @@ fn collect_accounts_from_trie(
                     collect_slots_from_trie(&storage_trie, &[], slot_preimages, &mut slots);
 
                     storage.insert(address, (storage_trie, slots));
+                } else {
+                    debug!("no address preimage for trie leaf hash {hash}");
                 }
             }
         }

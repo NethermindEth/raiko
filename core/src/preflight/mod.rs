@@ -1,10 +1,9 @@
 use crate::{
     interfaces::{RaikoError, RaikoResult},
     preflight::util::get_grandparent_timestamp,
-    provider::{rpc::RpcBlockDataProvider, BlockDataProvider},
+    provider::BlockDataProvider,
 };
 use alethia_reth_primitives::TaikoTxEnvelope;
-use futures::future::join_all;
 use raiko_lib::{
     consts::ChainSpec,
     input::{
@@ -250,10 +249,12 @@ pub async fn batch_preflight<BDP: BlockDataProvider>(
     assert_eq!(block_parent_pairs.len(), pool_txs_list.len());
 
     // Step 1: Build all GuestInputs sequentially (cheap, no I/O — just grandparent_timestamp tracking)
-    let first_block_number = block_parent_pairs
-        .first()
-        .map(|(block, _)| block.header.number)
-        .unwrap_or(0);
+    if block_parent_pairs.is_empty() {
+        return Err(RaikoError::Preflight(
+            "No blocks to prove in batch".to_owned(),
+        ));
+    }
+    let first_block_number = block_parent_pairs[0].0.header.number;
     let mut grandparent_timestamp =
         get_grandparent_timestamp(&provider, first_block_number).await?;
 
@@ -301,36 +302,29 @@ pub async fn batch_preflight<BDP: BlockDataProvider>(
         });
     }
 
-    // Step 2: Fetch all witnesses concurrently
-    let provider = RpcBlockDataProvider::new(&taiko_chain_spec.rpc).await?;
-    let witness_futures: Vec<_> = base_inputs
-        .iter()
-        .map(|input| {
-            let provider = provider.clone();
-            let block_number = input.block.header.number;
-            async move {
-                BlockDataProvider::execution_witness(&provider, block_number)
-                    .await
-                    .ok_or_else(|| {
-                        RaikoError::Preflight(format!(
-                            "execution witness not supported for block {block_number}"
-                        ))
-                    })?
-                    .map_err(|e| {
-                        RaikoError::Preflight(format!(
-                            "execution witness failed for block {block_number}: {e}"
-                        ))
-                    })
-            }
-        })
-        .collect();
-
-    let witnesses = join_all(witness_futures).await;
+    // Step 2: Fetch witnesses using the passed-in provider
+    let mut witnesses = Vec::with_capacity(base_inputs.len());
+    for input in &base_inputs {
+        let block_number = input.block.header.number;
+        let witness = provider
+            .execution_witness(block_number)
+            .await
+            .ok_or_else(|| {
+                RaikoError::Preflight(format!(
+                    "execution witness not supported for block {block_number}"
+                ))
+            })?
+            .map_err(|e| {
+                RaikoError::Preflight(format!(
+                    "execution witness failed for block {block_number}: {e}"
+                ))
+            })?;
+        witnesses.push(witness);
+    }
 
     // Step 3: Apply witness data to each input
     let mut final_inputs: Vec<GuestInput> = Vec::with_capacity(base_inputs.len());
-    for (input, witness_result) in base_inputs.into_iter().zip(witnesses) {
-        let witness = witness_result?;
+    for (input, witness) in base_inputs.into_iter().zip(witnesses) {
         let block_number = input.block.header.number;
         info!("batch_preflight: block {block_number} using execution witness");
 
