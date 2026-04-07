@@ -41,7 +41,7 @@ jobs:
           profile: minimal
 
       - name: Setup sccache
-        if: ${{ inputs.version_name }} == risc0
+        if: inputs.version_name == 'risc0'
         uses: risc0/risc0/.github/actions/sccache@release-0.19
 
       - name: Install ${{ inputs.version_name }}
