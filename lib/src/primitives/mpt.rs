@@ -1222,10 +1222,7 @@ fn collect_slots_from_trie(
     slots: &mut Vec<U256>,
 ) {
     match node.as_data() {
-        MptNodeData::Null => {}
-        MptNodeData::Digest(digest) => {
-            warn!("unresolved storage trie digest node {digest} — slots under this subtree will be missing");
-        }
+        MptNodeData::Null | MptNodeData::Digest(_) => {}
         MptNodeData::Leaf(prefix, _) => {
             let mut full_path = path.to_vec();
             full_path.extend(prefix_nibs(prefix));
