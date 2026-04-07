@@ -1,8 +1,7 @@
-use alloy_primitives::Bytes;
 use alloy_provider::RootProvider;
 use alloy_rpc_client::{ClientBuilder, RpcClient};
 use alloy_rpc_types::{Block, BlockNumberOrTag};
-use serde::{Deserialize, Serialize};
+pub use alloy_rpc_types_debug::ExecutionWitness;
 use std::{future::Future, time::Duration};
 use tokio::time::sleep;
 use tracing::{debug, info, trace};
@@ -126,20 +125,6 @@ impl RpcBlockDataProvider {
 
         Ok(witness)
     }
-}
-
-/// Execution witness returned by debug_executionWitness.
-/// Contains all data needed for stateless block re-execution.
-#[derive(Debug, Clone, Deserialize, Serialize)]
-pub struct ExecutionWitness {
-    /// Raw MPT trie node preimages (state trie + storage tries).
-    pub state: Vec<Bytes>,
-    /// Contract bytecodes accessed during execution.
-    pub codes: Vec<Bytes>,
-    /// Unhashed keccak preimages: original addresses (20 bytes) and storage slots (32 bytes).
-    pub keys: Vec<Bytes>,
-    /// RLP-encoded block headers needed for BLOCKHASH verification.
-    pub headers: Vec<Bytes>,
 }
 
 async fn retry_in_case_of_error<F, Fut, T>(

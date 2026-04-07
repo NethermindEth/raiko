@@ -34,7 +34,7 @@ use alloy_primitives::Address;
 use alloy_primitives::Bytes;
 use alloy_primitives::B256;
 use alloy_primitives::U256;
-use anyhow::{bail, ensure, Result};
+use anyhow::{bail, ensure, Context, Result};
 use block_executor::TaikoWithOptimisticBlockExecutor;
 use reth_consensus::{Consensus, HeaderValidator};
 use reth_ethereum_consensus::validate_block_post_execution;
@@ -700,10 +700,29 @@ pub fn create_mem_db(input: &mut GuestInput) -> Result<MemDb> {
     }
 
     // hash all the contract code
-    let contracts: HashMap<B256, Bytes> = mem::take(&mut input.contracts)
+    let raw_contracts = mem::take(&mut input.contracts);
+    debug!(
+        "create_mem_db: received {} raw contract codes from witness",
+        raw_contracts.len()
+    );
+    let contracts: HashMap<B256, Bytes> = raw_contracts
         .into_iter()
-        .map(|bytes| (keccak(&bytes).into(), bytes))
+        .enumerate()
+        .map(|(i, bytes)| {
+            let hash: B256 = keccak(&bytes).into();
+            debug!(
+                "create_mem_db: contract[{}] len={} hash={}",
+                i,
+                bytes.len(),
+                hash
+            );
+            (hash, bytes)
+        })
         .collect();
+    debug!(
+        "create_mem_db: built contracts map with {} entries (by code_hash)",
+        contracts.len()
+    );
 
     let mut account_touched = 0;
     let mut storage_touched = 0;
@@ -721,6 +740,16 @@ pub fn create_mem_db(input: &mut GuestInput) -> Result<MemDb> {
             .parent_state_trie
             .get_rlp::<StateAccount>(&keccak(address))?
             .unwrap_or_default();
+
+        debug!(
+            "create_mem_db: account {} nonce={} balance={} code_hash={} storage_root={}",
+            address,
+            state_account.nonce,
+            state_account.balance,
+            state_account.code_hash,
+            state_account.storage_root,
+        );
+
         // Verify storage trie root
         if storage_trie.hash() != state_account.storage_root {
             bail!(
@@ -735,9 +764,20 @@ pub fn create_mem_db(input: &mut GuestInput) -> Result<MemDb> {
         let bytecode = if code_hash.0 == KECCAK_EMPTY.0 {
             Bytecode::new()
         } else {
+            debug!(
+                "create_mem_db: account {} needs bytecode for code_hash={}, have it: {}",
+                address,
+                code_hash,
+                contracts.contains_key(&code_hash),
+            );
             let bytes: Bytes = contracts
                 .get(&code_hash)
-                .expect(&format!("Contract {code_hash} of {address} exists"))
+                .context(format!(
+                    "Missing bytecode for code_hash {code_hash} of account {address}. \
+                     Witness returned {} contract codes. Available hashes: {:?}",
+                    contracts.len(),
+                    contracts.keys().collect::<Vec<_>>(),
+                ))?
                 .clone();
             Bytecode::new_raw(bytes)
         };
