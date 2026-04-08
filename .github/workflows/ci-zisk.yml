@@ -38,7 +38,7 @@ jobs:
           profile: minimal
 
       - name: Install system dependencies
-        run: sudo apt-get install -y nasm libomp-dev libopenmpi-dev protobuf-compiler nlohmann-json3-dev libsodium-dev
+        run: sudo apt-get install -y nasm libomp-dev libopenmpi-dev protobuf-compiler nlohmann-json3-dev libsodium-dev gcc-riscv64-unknown-elf
 
       - name: Install cargo-binstall
         uses: cargo-bins/cargo-binstall@be2934e283ac6e66ff78587cad1f2422e8162fc9 # v1.6.4
