@@ -40,7 +40,6 @@ fi
 
 mkdir -p "$base_dir/config"
 mkdir -p "$base_dir/secrets"
-cp ../host/config/config.sgx.json "$base_dir/config/"
 
 #prepare version docker compose
 original_file="docker-compose-${network}.yml"
@@ -55,11 +54,9 @@ if ! docker pull us-docker.pkg.dev/evmchain/images/raiko:${version}; then
   exit 1
 fi
 
-echo "✅ Prepare deployment down:"
+echo "✅ Prepare deployment done:"
 echo "Please export ${network^^}_HOME=./${deploy_name}"
-echo "Run: \n"
-echo "${network^^}_HOME=./${deploy_name} docker compose -f ${release_file} --env-file .env.${network}.remote-sgx up init-self-register"
-echo "then run: \n"
-echo "${network^^}_HOME=./${deploy_name} docker compose -f ${release_file} --env-file .env.${network}.remote-sgx up ${network}-raiko-sgx-server -d"
+echo "Run:"
+echo "${network^^}_HOME=./${deploy_name} docker compose -f ${release_file} --env-file .env.${network} up -d"
 
 #tree "$network/$version"

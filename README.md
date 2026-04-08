@@ -1,6 +1,6 @@
 # raiko
 
-Taiko's multi-prover for Taiko & Ethereum blocks. Currently supports Risc0, SP1, and SGX.
+Taiko's multi-prover for Taiko & Ethereum blocks. Currently supports Risc0, SP1, TDX, and Zisk.
 
 ## Usage
 
@@ -36,7 +36,7 @@ Note that you have to run `make build` first before running zkVM provers, otherw
 TARGET=sp1 make run
 ```
 
-Just for development with the native prover which runs through the block execution without producing any ZK/SGX proof:
+Just for development with the native prover which runs through the block execution without producing any ZK/TEE proof:
 
 ```shell
 cargo run
@@ -126,27 +126,6 @@ TARGET=sp1 make test
 
 Some optimized configurations tailored to the host can be found [here](docs/README_SP1.md).
 
-### SGX
-
-To install, build, and run in one step:
-
-```shell
-export TARGET=sgx
-make install && make build && make run
-```
-
-To build and run test related SGX provers:
-
-```shell
-TARGET=sgx make test
-```
-
-If your CPU doesn't support SGX, you can still run the SGX code through gramine like it would on an SGX machine:
-
-```shell
-MOCK=1 TARGET=sgx make run
-```
-
 ### TDX
 
 To install, build, and run in one step:
@@ -164,7 +143,6 @@ TARGET=tdx make test
 
 ## Misc docs
 
-- [Docker & Remote Attestation Support](docs/README_Docker_and_RA.md)
 - [Metrics](docs/README_Metrics.md)
 
 ## Execution Trace

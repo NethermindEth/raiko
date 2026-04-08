@@ -1,24 +1,18 @@
 #!/usr/bin/env bash
 
-# Script to automatically update RISC0 image IDs, SP1 VK hashes, Zisk image IDs, SGX MRENCLAVE, and SGXGETH MRENCLAVE in .env file
-# by reading from build output or extracting MRENCLAVE directly
+# Script to automatically update RISC0 image IDs, SP1 VK hashes, and Zisk image IDs in .env file
+# by reading from build output
 #
 # Usage:
 #   ./script/update_imageid.sh risc0 [output_file]    # Update RISC0 image IDs from file or temp
 #   ./script/update_imageid.sh sp1 [output_file]      # Update SP1 VK hashes from file or temp
 #   ./script/update_imageid.sh zisk                   # Set default Zisk image IDs
-#   ./script/update_imageid.sh sgx_direct <image>     # Extract SGX MRENCLAVE by calling gramine tools directly on container
-#   ./script/update_imageid.sh sgxgeth_direct <image> # Extract SGXGETH MRENCLAVE from container (reads from pre-generated file)
-#   ./script/update_imageid.sh update_sgx_mrenclave <value>     # Update SGX MRENCLAVE with provided value
-#   ./script/update_imageid.sh update_sgxgeth_mrenclave <value> # Update SGXGETH MRENCLAVE with provided value
 #
-# This script is automatically called by build.sh after building RISC0 or SP1 provers,
-# or can be used to extract MRENCLAVE values directly from Docker containers.
+# This script is automatically called by build.sh after building RISC0 or SP1 provers.
 #
 # If no output_file is provided for RISC0/SP1 modes, it will look for temp files:
 #   /tmp/risc0_build_output.txt for RISC0
 #   /tmp/sp1_build_output.txt for SP1
-# For MRENCLAVE extraction, it calls tools directly on Docker containers.
 
 set -e
 
@@ -138,133 +132,6 @@ set_zisk_default_ids() {
     print_status "Using default Zisk image IDs:"
     print_status "  Aggregation: $ZISK_AGGREGATION_ID"
     print_status "  Batch: $ZISK_BATCH_ID"
-}
-
-# Function to check if Gramine tools are available
-check_gramine_tools() {
-    if ! command -v gramine-manifest &> /dev/null; then
-        return 1
-    fi
-    if ! command -v gramine-sgx-sign &> /dev/null; then
-        return 1
-    fi
-    if ! command -v gramine-sgx-sigstruct-view &> /dev/null; then
-        return 1
-    fi
-    return 0
-}
-
-# Function to check if EGO tools are available
-check_ego_tools() {
-    if ! command -v ego &> /dev/null; then
-        return 1
-    fi
-    return 0
-}
-
-
-
-# Function to update .env file with MRENCLAVE value
-update_env_mrenclave() {
-    local MRENCLAVE=$1
-    local ENV_FILE=".env"
-    
-    # Check if file exists, create if not
-    if [ ! -f "$ENV_FILE" ]; then
-        print_status "Creating .env file..."
-        touch "$ENV_FILE"
-    fi
-    
-    # Update or add SGX_MRENCLAVE in the file
-    if grep -q "^SGX_MRENCLAVE=" "$ENV_FILE"; then
-        # Update existing entry
-        sed -i "s/^SGX_MRENCLAVE=.*/SGX_MRENCLAVE=$MRENCLAVE/" "$ENV_FILE"
-        print_status "Updated SGX_MRENCLAVE in $ENV_FILE: $MRENCLAVE"
-    else
-        # Add new entry
-        echo "SGX_MRENCLAVE=$MRENCLAVE" >> "$ENV_FILE"
-        print_status "Added SGX_MRENCLAVE to $ENV_FILE: $MRENCLAVE"
-    fi
-}
-
-
-# Function to extract SGX MRENCLAVE by calling gramine tools directly on container
-extract_sgx_mrenclave_direct() {
-    local image_name="$1"
-    print_status "Extracting SGX MRENCLAVE by running gramine tools directly on container..."
-
-    # Check if Docker is available
-    if ! command -v docker &> /dev/null; then
-        print_error "Docker command not found"
-        return 1
-    fi
-
-    # Run gramine-sgx-sigstruct-view directly on the container
-    local mrenclave_output
-    mrenclave_output=$(docker run --rm --entrypoint gramine-sgx-sigstruct-view "$image_name" /opt/raiko/bin/sgx-guest.sig 2>/dev/null | grep "mr_enclave:" | grep -o '[a-fA-F0-9]\{64\}' | head -1)
-
-    if [ -n "$mrenclave_output" ] && [ ${#mrenclave_output} -eq 64 ]; then
-        print_status "Extracted SGX_MRENCLAVE: $mrenclave_output"
-        update_env_mrenclave "$mrenclave_output"
-    else
-        print_error "Failed to extract SGX MRENCLAVE from container"
-        return 1
-    fi
-}
-
-# Function to extract SGXGETH MRENCLAVE from container
-extract_sgxgeth_mrenclave_direct() {
-    local image_name="$1"
-    print_status "Extracting SGXGETH MRENCLAVE from container..."
-
-    # Check if Docker is available
-    if ! command -v docker &> /dev/null; then
-        print_error "Docker command not found"
-        return 1
-    fi
-
-    # Extract SGXGETH MRENCLAVE from the container
-    local mrenclave_output
-    # First try to run ego command (in case it's available in the container)
-    mrenclave_output=$(docker run --rm --entrypoint ego "$image_name" uniqueid /opt/raiko/bin/gaiko 2>/dev/null | grep -o '[a-fA-F0-9]\{64\}' | head -1)
-
-    # If ego command is not available (typical in runtime container), read from the saved uniqueid log file
-    # This file was generated during the build stage and copied to the runtime container
-    if [ -z "$mrenclave_output" ]; then
-        mrenclave_output=$(docker run --rm --entrypoint cat "$image_name" /tmp/gaiko_uniqueid.log 2>/dev/null | grep -o '[a-fA-F0-9]\{64\}' | head -1)
-    fi
-
-    if [ -n "$mrenclave_output" ] && [ ${#mrenclave_output} -eq 64 ]; then
-        print_status "Extracted SGXGETH_MRENCLAVE: $mrenclave_output"
-        update_env_sgxgeth_mrenclave "$mrenclave_output"
-    else
-        print_error "Failed to extract SGXGETH MRENCLAVE from container"
-        return 1
-    fi
-}
-
-
-# Function to update .env file with SGXGETH_MRENCLAVE value
-update_env_sgxgeth_mrenclave() {
-    local MRENCLAVE=$1
-    local ENV_FILE=".env"
-    
-    # Check if file exists, create if not
-    if [ ! -f "$ENV_FILE" ]; then
-        print_status "Creating .env file..."
-        touch "$ENV_FILE"
-    fi
-    
-    # Update or add SGXGETH_MRENCLAVE in the file
-    if grep -q "^SGXGETH_MRENCLAVE=" "$ENV_FILE"; then
-        # Update existing entry
-        sed -i "s/^SGXGETH_MRENCLAVE=.*/SGXGETH_MRENCLAVE=$MRENCLAVE/" "$ENV_FILE"
-        print_status "Updated SGXGETH_MRENCLAVE in $ENV_FILE: $MRENCLAVE"
-    else
-        # Add new entry
-        echo "SGXGETH_MRENCLAVE=$MRENCLAVE" >> "$ENV_FILE"
-        print_status "Added SGXGETH_MRENCLAVE to $ENV_FILE: $MRENCLAVE"
-    fi
 }
 
 # Function to update .env file
@@ -554,29 +421,13 @@ main() {
             "zisk")
                 mode="zisk"
                 ;;
-            "sgx")
-                mode="sgx"
-            "sgx_direct")
-                mode="sgx_direct"
-                ;;
-            "sgxgeth_direct")
-                mode="sgxgeth_direct"
-                ;;
-            "update_sgx_mrenclave")
-                mode="update_sgx_mrenclave"
-                ;;
-            "update_sgxgeth_mrenclave")
-                mode="update_sgxgeth_mrenclave"
-                ;;
             *)
-                print_error "Unknown mode: $1. Use 'risc0', 'sp1', 'zisk', 'sgx', or 'sgxgeth'"
-                print_error "Unknown mode: $1. Use 'risc0', 'sp1', 'sgx_direct', 'sgxgeth_direct', 'update_sgx_mrenclave', or 'update_sgxgeth_mrenclave'"
+                print_error "Unknown mode: $1. Use 'risc0', 'sp1', or 'zisk'"
                 exit 1
                 ;;
         esac
     else
-        print_error "Mode must be specified. Use 'risc0', 'sp1', 'zisk', 'sgx', or 'sgxgeth'"
-        print_error "Mode must be specified. Use 'risc0', 'sp1', 'sgx_direct', 'sgxgeth_direct', 'update_sgx_mrenclave', or 'update_sgxgeth_mrenclave'"
+        print_error "Mode must be specified. Use 'risc0', 'sp1', or 'zisk'"
         exit 1
     fi
     
@@ -606,78 +457,7 @@ main() {
         print_status "Zisk image IDs set successfully"
     fi
     
-    # Extract SGX MRENCLAVE
-    if [ "$mode" = "sgx" ]; then
-        # If a build log file is provided, extract from it (Docker build scenario)
-        if [ -n "$2" ] && [ -f "$2" ]; then
-            if extract_sgx_mrenclave_from_output "$2"; then
-                print_status "SGX MRENCLAVE extracted successfully"
-            else
-                print_error "Failed to extract SGX MRENCLAVE from build log"
-                exit 1
-            fi
-        else
-            # Local build scenario - try to build and extract locally
-            if extract_sgx_mrenclave; then
-                print_status "SGX MRENCLAVE extracted successfully"
-            else
-                print_error "Failed to extract SGX MRENCLAVE"
-                exit 1
-            fi
-        fi
-    fi
-    
-    # Extract SGXGETH MRENCLAVE from Docker build output
-    if [ "$mode" = "sgxgeth" ]; then
-        if extract_sgxgeth_mrenclave_from_output "$2"; then
-            print_status "SGXGETH MRENCLAVE extracted successfully"
-
-
-    # Extract SGX MRENCLAVE by calling tools directly on container
-    if [ "$mode" = "sgx_direct" ]; then
-        if extract_sgx_mrenclave_direct "$2"; then
-            print_status "SGX MRENCLAVE extracted directly from container"
-        else
-            print_error "Failed to extract SGX MRENCLAVE directly"
-            exit 1
-        fi
-    fi
-
-    # Extract SGXGETH MRENCLAVE by calling tools directly on container
-    if [ "$mode" = "sgxgeth_direct" ]; then
-        if extract_sgxgeth_mrenclave_direct "$2"; then
-            print_status "SGXGETH MRENCLAVE extracted directly from container"
-        else
-            print_error "Failed to extract SGXGETH MRENCLAVE directly"
-            exit 1
-        fi
-    fi
-
-    # Update SGX MRENCLAVE directly
-    if [ "$mode" = "update_sgx_mrenclave" ]; then
-        if [ -n "$2" ]; then
-            update_env_mrenclave "$2"
-            print_status "SGX MRENCLAVE updated to: $2"
-        else
-            print_error "MRENCLAVE value required for update_sgx_mrenclave mode"
-            exit 1
-        fi
-    fi
-
-    # Update SGXGETH MRENCLAVE directly
-    if [ "$mode" = "update_sgxgeth_mrenclave" ]; then
-        if [ -n "$2" ]; then
-            update_env_sgxgeth_mrenclave "$2"
-            print_status "SGXGETH MRENCLAVE updated to: $2"
-        else
-            print_error "MRENCLAVE value required for update_sgxgeth_mrenclave mode"
-            exit 1
-        fi
-    fi
-    
-    # Update .env file (only for risc0, sp1, and zisk modes, sgx and sgxgeth handle their own .env updates)
-    if [ "$mode" != "sgx" ] && [ "$mode" != "sgxgeth" ]; then
-    # Update .env file (only for risc0 and sp1 modes, other modes handle their own .env updates)
+    # Update .env file (only for risc0 and sp1 modes)
     if [ "$mode" = "risc0" ] || [ "$mode" = "sp1" ]; then
         if update_env_file; then
             print_status "Environment file updated successfully"

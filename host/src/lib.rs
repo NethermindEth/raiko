@@ -109,15 +109,6 @@ pub struct Opts {
         help = "e.g. {\"Sp1\":0.1,\"Risc0\":0.2}"
     )]
     pub ballot_zk: String,
-
-    /// Ballot config in json format. If not provided, '{}' will be used.
-    #[arg(
-        long,
-        require_equals = true,
-        default_value = "{}",
-        help = "e.g. {\"Sp1\":0.1,\"Risc0\":0.2}"
-    )]
-    pub ballot_sgx: String,
 }
 
 impl Opts {
@@ -198,14 +189,6 @@ pub fn parse_chain_specs(opts: &Opts) -> SupportedChainSpecs {
 pub fn parse_ballot_zk(opts: &Opts) -> Ballot {
     let probs: BTreeMap<ProofType, (f64, u64)> =
         serde_json::from_str(&opts.ballot_zk).expect("Failed to parse ballot_zk config");
-    let ballot = Ballot::new(probs).expect("Failed to create ballot");
-    ballot.validate().expect("Failed to validate ballot");
-    ballot
-}
-
-pub fn parse_ballot_sgx(opts: &Opts) -> Ballot {
-    let probs: BTreeMap<ProofType, (f64, u64)> =
-        serde_json::from_str(&opts.ballot_sgx).expect("Failed to parse ballot_sgx config");
     let ballot = Ballot::new(probs).expect("Failed to create ballot");
     ballot.validate().expect("Failed to validate ballot");
     ballot

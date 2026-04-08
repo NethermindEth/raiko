@@ -2,9 +2,7 @@
 use chrono::Utc;
 use raiko_host::parse_ballot_zk;
 use raiko_host::server::auth::ApiKeyStore;
-use raiko_host::{
-    interfaces::HostResult, parse_ballot_sgx, parse_chain_specs, parse_opts, server::serve,
-};
+use raiko_host::{interfaces::HostResult, parse_chain_specs, parse_opts, server::serve};
 use raiko_reqpool::RedisPoolConfig;
 use std::fs::create_dir_all;
 use std::fs::OpenOptions;
@@ -24,7 +22,6 @@ async fn main() -> HostResult<()> {
     let opts = parse_opts()?;
     let chain_specs = parse_chain_specs(&opts);
     let ballot_zk = parse_ballot_zk(&opts);
-    let ballot_sgx = parse_ballot_sgx(&opts);
     let default_request_config = opts.proof_request_opt.clone();
     let max_proving_concurrency = opts.concurrency_limit;
     let pool = raiko_reqpool::Pool::open(RedisPoolConfig {
@@ -36,7 +33,6 @@ async fn main() -> HostResult<()> {
     let actor = raiko_reqactor::start_actor(
         pool,
         ballot_zk,
-        ballot_sgx,
         chain_specs.clone(),
         default_request_config.clone(),
         max_proving_concurrency,

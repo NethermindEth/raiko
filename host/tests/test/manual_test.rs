@@ -57,8 +57,6 @@ pub async fn test_manual_prove() {
         blob_proof_type: Some("proof_of_equivalence".to_string()),
         prover_args: ProverSpecificOpts {
             native: None,
-            sgx: None,
-            sgxgeth: None,
             sp1: None,
             risc0: None,
             zisk: None,

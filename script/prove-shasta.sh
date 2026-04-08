@@ -3,7 +3,7 @@
 if [ "$#" -ne 5 ]; then
     echo "Usage: prove-shasta.sh <chain> <proof> <batch_info> <l2 block> <last l2 anchor>"
     echo "  chain: taiko_mainnet, taiko_a7, taiko_dev"
-    echo "  proof: native, risc0[-bonsai], sp1, sgx, sgxgeth, zisk"
+    echo "  proof: native, risc0[-bonsai], sp1, zisk"
     echo "  batch_info: \"[(batch_id, batch_proposal_height)]\""
     echo "Example:"
     echo "  prove-batch.sh ethereum native \"[(1, 2)]\" "
@@ -117,28 +117,6 @@ elif [ "$proof" == "sp1-aggregation" ]; then
 		"verify": false
 	}
   '
-elif [ "$proof" == "sgx" ]; then
-    proofParam='
-    "proof_type": "sgx",
-    "sgx" : {
-        "instance_id": 123,
-        "setup": false,
-        "bootstrap": false,
-        "prove": true,
-        "input_path": null
-    }
-'
-elif [ "$proof" == "sgxgeth" ]; then
-    proofParam='
-    "proof_type": "sgxgeth",
-    "sgxgeth" : {
-        "instance_id": 456,
-        "setup": false,
-        "bootstrap": false,
-        "prove": true,
-        "input_path": null
-    }
-'
 elif [ "$proof" == "risc0" ]; then
     proofParam='
     "proof_type": "risc0",
@@ -168,7 +146,7 @@ elif [ "$proof" == "zisk" ]; then
     "zisk": {}
   '
 else
-    echo "Invalid proof name. Please use 'native', 'risc0[-bonsai]', 'sp1', 'sgxgeth', 'sgx', or 'zisk'."
+    echo "Invalid proof name. Please use 'native', 'risc0[-bonsai]', 'sp1', or 'zisk'."
     exit 1
 fi
 

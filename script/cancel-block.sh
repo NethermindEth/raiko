@@ -48,17 +48,6 @@ elif [ "$proof" == "sp1" ]; then
 	proofParam='
     "proof_type": "sp1"
   '
-elif [ "$proof" == "sgx" ]; then
-	proofParam='
-    "proof_type": "sgx",
-    "sgx" : {
-        "instance_id": 123,
-        "setup": false,
-        "bootstrap": false,
-        "prove": true,
-        "input_path": null
-    }
-    '
 elif [ "$proof" == "risc0" ]; then
 	proofParam='
     "proof_type": "risc0",
@@ -80,7 +69,7 @@ elif [ "$proof" == "risc0-bonsai" ]; then
     }
   '
 else
-	echo "Invalid proof name. Please use 'native', 'risc0[-bonsai]', 'sp1', or 'sgx'."
+	echo "Invalid proof name. Please use 'native', 'risc0[-bonsai]', or 'sp1'."
 	exit 1
 fi
 

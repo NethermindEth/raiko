@@ -52,11 +52,9 @@ impl TestServerBuilder {
 
         let pool = memory_pool(redis_url);
         let ballot_zk = Ballot::default();
-        let ballot_sgx = Ballot::default();
         let actor = start_actor(
             pool,
             ballot_zk,
-            ballot_sgx,
             chain_specs.clone(),
             default_request_config.clone(),
             max_proving_concurrency,

@@ -997,10 +997,6 @@ impl TryFrom<RealTimeProofRequestOpt> for RealTimeProofRequest {
 pub struct ProverSpecificOpts {
     /// Native prover specific options.
     pub native: Option<Value>,
-    /// SGX prover specific options.
-    pub sgx: Option<Value>,
-    /// SgxGeth prover specific options.
-    pub sgxgeth: Option<Value>,
     /// SP1 prover specific options.
     pub sp1: Option<Value>,
     /// RISC0 prover specific options.
@@ -1017,8 +1013,6 @@ impl<S: ::std::hash::BuildHasher + ::std::default::Default> From<ProverSpecificO
     fn from(value: ProverSpecificOpts) -> Self {
         [
             ("native", value.native.clone()),
-            ("sgx", value.sgx.clone()),
-            ("sgxgeth", value.sgxgeth.clone()),
             ("sp1", value.sp1.clone()),
             ("risc0", value.risc0.clone()),
             ("zisk", value.zisk.clone()),
