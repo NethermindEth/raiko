@@ -1,0 +1,50 @@
+name: CI - ZisK
+
+on:
+  workflow_call:
+  pull_request:
+    paths:
+      - "provers/zisk/**"
+      - "!docs/**"
+      - "!**/README.md"
+
+env:
+  CI: 1
+  CARGO_TERM_COLOR: always
+  GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+  INSTALL_KEYS: "false"
+
+jobs:
+  build-test-zisk:
+    if: ${{ github.event.pull_request.draft == false }}
+    name: Build and test zisk
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    env:
+      TARGET: zisk
+      CI: 1
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+          profile: minimal
+
+      - name: Install system dependencies
+        run: sudo apt-get install -y nasm libomp-dev libopenmpi-dev protobuf-compiler
+
+      - name: Install cargo-binstall
+        uses: cargo-bins/cargo-binstall@v1.6.4
+
+      - name: Install zisk
+        run: make install
+
+      - name: Build zisk prover
+        run: make build
+
+      - name: Test zisk prover
+        run: make test
