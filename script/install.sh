@@ -182,28 +182,6 @@ build_zisk_gpu() {
 #     fi
 # fi
 
-# ─── SGX ───────────────────────────────────────────────────────────────────────
-if [ -z "$1" ] || [ "$1" == "sgx" ]; then
-    if command -v gramine-sgx >/dev/null 2>&1; then
-        echo "gramine already installed"
-    else
-        echo "Installing gramine..."
-        sudo curl -fsSLo /etc/apt/keyrings/gramine-keyring-$(lsb_release -sc).gpg \
-            https://packages.gramineproject.io/gramine-keyring-$(lsb_release -sc).gpg
-        echo "deb [arch=amd64 signed-by=/etc/apt/keyrings/gramine-keyring-$(lsb_release -sc).gpg] \
-https://packages.gramineproject.io/ $(lsb_release -sc) main" \
-            | sudo tee /etc/apt/sources.list.d/gramine.list
-        sudo curl -fsSLo /etc/apt/keyrings/intel-sgx-deb.asc \
-            https://download.01.org/intel-sgx/sgx_repo/ubuntu/intel-sgx-deb.key
-        echo "deb [arch=amd64 signed-by=/etc/apt/keyrings/intel-sgx-deb.asc] \
-https://download.01.org/intel-sgx/sgx_repo/ubuntu $(lsb_release -sc) main" \
-            | sudo tee /etc/apt/sources.list.d/intel-sgx.list
-        sudo apt-get update
-        sudo apt-get install -y gramine
-        echo "Gramine installed. REBOOT MAY BE REQUIRED."
-    fi
-fi
-
 # ─── RISC0 ─────────────────────────────────────────────────────────────────────
 if [ -z "$1" ] || [ "$1" == "risc0" ]; then
     if [ -z "$TERM" ] || [ "$TERM" = "dumb" ]; then

@@ -34,22 +34,14 @@ add_conditional_members() {
             MEMBERS='    "provers/zisk/driver",
     "provers/zisk/builder",'
             ;;
-        "sgx")
-            MEMBERS='    "provers/sgx/prover",
-    "provers/sgx/guest", 
-    "provers/sgx/setup",'
-            ;;
         "native"|*)
             # For native or unknown targets, add all members
             MEMBERS='    "provers/sp1/driver",
     "provers/sp1/builder",
     "provers/risc0/driver",
-    "provers/risc0/builder", 
+    "provers/risc0/builder",
     "provers/zisk/driver",
-    "provers/zisk/builder",
-    "provers/sgx/prover",
-    "provers/sgx/guest",
-    "provers/sgx/setup",'
+    "provers/zisk/builder",'
             ;;
     esac
     

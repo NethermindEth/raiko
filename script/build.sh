@@ -9,7 +9,6 @@ CHAIN_SPEC_PATH=${CHAIN_SPEC_PATH:-host/config/devnet/chain_spec_list.json}
 
 #TOOLCHAIN_RISC0=+nightly-2024-12-20
 #TOOLCHAIN_SP1=+nightly-2024-12-20
-#TOOLCHAIN_SGX=+nightly-2024-12-20
 #TOOLCHAIN_ZISK=+nightly-2024-12-20
 #TOOLCHAIN_TDX=+nightly-2024-12-20
 
@@ -79,35 +78,6 @@ if [ -z "$1" ] || [ "$1" == "native" ]; then
         fi
     fi
 fi
-
-# SGX
-if [ "$1" == "sgx" ]; then
-    check_toolchain $TOOLCHAIN_SGX
-    if [ "$MOCK" = "1" ]; then
-        export SGX_DIRECT=1
-        echo "SGX_DIRECT is set to $SGX_DIRECT"
-    fi
-    if [ -n "${CLIPPY}" ]; then
-        cargo ${TOOLCHAIN_SGX} clippy -p raiko-host -p sgx-prover -F "sgx enable" -- -D warnings
-    elif [ -z "${RUN}" ]; then
-        if [ -z "${TEST}" ]; then
-            echo "Building SGX prover"
-            cargo ${TOOLCHAIN_SGX} build ${FLAGS} --features sgx
-        else
-            echo "Building SGX tests"
-            cargo ${TOOLCHAIN_SGX} test ${FLAGS} -p raiko-host -p sgx-prover --features "sgx enable" --no-run
-        fi
-    else
-        if [ -z "${TEST}" ]; then
-            echo "Running SGX prover"
-            cargo ${TOOLCHAIN_SGX} run ${FLAGS} --features sgx -- --config-path=${CONFIG_PATH} --chain-spec-path=${CHAIN_SPEC_PATH}
-        else
-            echo "Running SGX tests"
-            cargo ${TOOLCHAIN_SGX} test ${FLAGS} -p raiko-host -p sgx-prover --features "sgx enable"
-        fi
-    fi
-fi
-
 
 # RISC0
 if [ "$1" == "risc0" ]; then

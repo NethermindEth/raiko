@@ -25,7 +25,6 @@ pub use raiko_reqpool::{
 pub async fn start_actor(
     pool: Pool,
     ballot_zk: Ballot,
-    ballot_sgx: Ballot,
     chain_specs: SupportedChainSpecs,
     default_request_config: ProofRequestOpt,
     max_proving_concurrency: usize,
@@ -37,7 +36,6 @@ pub async fn start_actor(
     let actor = Actor::new(
         pool.clone(),
         ballot_zk,
-        ballot_sgx,
         default_request_config,
         chain_specs.clone(),
         Arc::clone(&queue),

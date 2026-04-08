@@ -5,7 +5,7 @@ use crate::{
         auth::AuthenticatedApiKey,
         handler::prove,
         utils::{
-            draw_shasta_sgx_request, draw_shasta_zk_request, is_sgx_any_request, is_zk_any_request,
+            draw_shasta_zk_request, is_zk_any_request,
             to_v3_status,
         },
     },
@@ -64,33 +64,6 @@ async fn realtime_handler(
             .unwrap_or(0);
 
         match draw_shasta_zk_request(&actor, first_block, max_anchor).await? {
-            Some(proof_type) => {
-                realtime_request_opt["proof_type"] = serde_json::to_value(proof_type).unwrap()
-            }
-            None => {
-                return Ok(Status::Ok {
-                    proof_type: ProofType::Native,
-                    batch_id: None,
-                    data: ProofResponse::Status {
-                        status: TaskStatus::ZKAnyNotDrawn,
-                    },
-                });
-            }
-        }
-    }
-
-    // For sgx_any request, draw sgx proof type.
-    if is_sgx_any_request(&realtime_request_opt) {
-        let first_block = realtime_request_opt["l2_block_numbers"]
-            .as_array()
-            .and_then(|a| a.first())
-            .and_then(|v| v.as_u64())
-            .unwrap_or(0);
-        let max_anchor = realtime_request_opt["max_anchor_block_number"]
-            .as_u64()
-            .unwrap_or(0);
-
-        match draw_shasta_sgx_request(&actor, first_block, max_anchor).await? {
             Some(proof_type) => {
                 realtime_request_opt["proof_type"] = serde_json::to_value(proof_type).unwrap()
             }

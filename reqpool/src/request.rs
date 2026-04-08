@@ -1235,8 +1235,6 @@ impl ImageIdReader for ProofType {
         match self {
             ProofType::Risc0 => "RISC0_BATCH_ID",
             ProofType::Sp1 => "SP1_BATCH_VK_HASH",
-            ProofType::Sgx => "SGX_MRENCLAVE",
-            ProofType::SgxGeth => "SGXGETH_MRENCLAVE",
             ProofType::Zisk => "ZISK_BATCH_ID",
             _ => panic!("Unsupported proof type for image ID: {:?}", self),
         }
@@ -1246,8 +1244,6 @@ impl ImageIdReader for ProofType {
         match self {
             ProofType::Risc0
             | ProofType::Sp1
-            | ProofType::Sgx
-            | ProofType::SgxGeth
             | ProofType::Zisk => {
                 "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
             }
@@ -1265,10 +1261,6 @@ pub struct ImageId {
     pub risc0_batch_id: Option<String>,
     /// SP1 batch VK hash
     pub sp1_batch_vk_hash: Option<String>,
-    /// SGX enclave MRENCLAVE
-    pub sgx_enclave: Option<String>,
-    /// SGX Geth enclave MRENCLAVE
-    pub sgxgeth_enclave: Option<String>,
     /// Zisk batch ID
     pub zisk_batch_id: Option<String>,
 }
@@ -1278,8 +1270,6 @@ impl ImageId {
         Self {
             risc0_batch_id: None,
             sp1_batch_vk_hash: None,
-            sgx_enclave: None,
-            sgxgeth_enclave: None,
             zisk_batch_id: None,
         }
     }
@@ -1298,16 +1288,6 @@ impl ImageId {
             ProofType::Sp1 => {
                 if let Ok(id) = proof_type.read_image_id(None) {
                     image_id.sp1_batch_vk_hash = Some(id);
-                }
-            }
-            ProofType::Sgx => {
-                if let Ok(mrenclave) = proof_type.read_image_id(None) {
-                    image_id.sgx_enclave = Some(mrenclave);
-                }
-            }
-            ProofType::SgxGeth => {
-                if let Ok(mrenclave) = proof_type.read_image_id(None) {
-                    image_id.sgxgeth_enclave = Some(mrenclave);
                 }
             }
             ProofType::Zisk => {

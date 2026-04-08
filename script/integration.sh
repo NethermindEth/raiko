@@ -5,7 +5,6 @@ set -e
 
 TOOLCHAIN_RISC0=+nightly-2024-12-20
 TOOLCHAIN_SP1=+nightly-2024-12-20
-TOOLCHAIN_SGX=+nightly-2024-12-20
 TOOLCHAIN_TDX=+nightly-2024-12-20
 export PROOF_TYPE="$1"
 
@@ -37,15 +36,6 @@ fi
 # NATIVE
 if [ -z "$1" ] || [ "$1" == "native" ]; then
 	cargo test -F integration run_scenarios_sequentially
-fi
-
-# SGX
-if [ "$1" == "sgx" ]; then
-	check_toolchain $TOOLCHAIN_SGX
-	if [ "$MOCK" = "1" ]; then
-		export SGX_DIRECT=1
-	fi
-	cargo ${TOOLCHAIN_SGX} test -F "sgx integration" run_scenarios_sequentially
 fi
 
 # RISC0

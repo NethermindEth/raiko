@@ -24,7 +24,6 @@ use raiko_reqactor::Actor;
 /// Accepts a proof request and cancels a proving task with the specified guest prover.
 /// The guest provers currently available are:
 /// - native - constructs a block and checks for equality
-/// - sgx - uses the sgx environment to construct a block and produce proof of execution
 /// - sp1 - uses the sp1 prover
 /// - risc0 - uses the risc0 prover
 pub async fn cancel_handler(

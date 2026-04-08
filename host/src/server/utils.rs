@@ -108,12 +108,6 @@ pub fn is_zk_any_request(proof_request_opt: &Value) -> bool {
     return proof_type == Some("zk_any");
 }
 
-// A sgx_any request looks like: { "proof_type": "sgx_any" }
-pub fn is_sgx_any_request(proof_request_opt: &Value) -> bool {
-    let proof_type = proof_request_opt["proof_type"].as_str();
-    return proof_type == Some("sgx_any");
-}
-
 pub async fn draw_for_zk_any_request(
     actor: &Actor,
     proof_request_opt: &Value,
@@ -168,60 +162,6 @@ pub async fn draw_for_zk_any_batch_request(
     Ok(actor.draw_zk(&blockhash).await)
 }
 
-pub async fn draw_for_sgx_any_request(
-    actor: &Actor,
-    proof_request_opt: &Value,
-) -> HostResult<Option<ProofType>> {
-    if actor.is_ballot_disabled_sgx().await {
-        return Ok(None);
-    }
-
-    let network = proof_request_opt["network"]
-        .as_str()
-        .ok_or(RaikoError::InvalidRequestConfig(
-            "Missing network".to_string(),
-        ))?;
-    let block_number =
-        proof_request_opt["block_number"]
-            .as_u64()
-            .ok_or(RaikoError::InvalidRequestConfig(
-                "Missing block number".to_string(),
-            ))?;
-    let (_, blockhash) = get_task_data(&network, block_number, actor.chain_specs()).await?;
-    Ok(actor.draw_sgx(&blockhash).await)
-}
-
-pub async fn draw_for_sgx_any_batch_request(
-    actor: &Actor,
-    batch_proof_request_opt: &Value,
-) -> HostResult<Option<ProofType>> {
-    if actor.is_ballot_disabled_sgx().await {
-        return Ok(None);
-    }
-
-    let l1_network =
-        batch_proof_request_opt["l1_network"]
-            .as_str()
-            .ok_or(RaikoError::InvalidRequestConfig(
-                "Missing network".to_string(),
-            ))?;
-    let batches =
-        batch_proof_request_opt["batches"]
-            .as_array()
-            .ok_or(RaikoError::InvalidRequestConfig(
-                "Missing batches".to_string(),
-            ))?;
-    let first_batch = batches.first().ok_or(RaikoError::InvalidRequestConfig(
-        "batches is empty".to_string(),
-    ))?;
-    let l1_inclusion_block_number = first_batch["l1_inclusion_block_number"].as_u64().ok_or(
-        RaikoError::InvalidRequestConfig("Missing l1_inclusion_block_number".to_string()),
-    )?;
-    let (_, blockhash) =
-        get_task_data(&l1_network, l1_inclusion_block_number, actor.chain_specs()).await?;
-    Ok(actor.draw_sgx(&blockhash).await)
-}
-
 pub async fn draw_shasta_zk_request(
     actor: &Actor,
     proposal_id: u64,
@@ -237,17 +177,3 @@ pub async fn draw_shasta_zk_request(
     Ok(actor.draw_zk(&seed_hash).await)
 }
 
-pub async fn draw_shasta_sgx_request(
-    actor: &Actor,
-    proposal_id: u64,
-    l1_inclusion_block_number: u64,
-) -> HostResult<Option<ProofType>> {
-    if actor.is_ballot_disabled_sgx().await {
-        return Ok(None);
-    }
-
-    let seed_hash =
-        keccak(format!("proposal:{}/{}", proposal_id, l1_inclusion_block_number,).as_bytes())
-            .into();
-    Ok(actor.draw_sgx(&seed_hash).await)
-}

@@ -7,7 +7,7 @@ use crate::{
         metrics::{record_shasta_request_in, record_shasta_request_out},
         prove_aggregation,
         utils::{
-            draw_shasta_sgx_request, draw_shasta_zk_request, is_sgx_any_request, is_zk_any_request,
+            draw_shasta_zk_request, is_zk_any_request,
             to_v3_status,
         },
     },
@@ -44,7 +44,6 @@ use super::batch::process_shasta_batch;
 /// Accepts a Shasta batch proof request and creates a proving task with the specified guest prover.
 /// The guest provers currently available are:
 /// - native - constructs a block and checks for equality
-/// - sgx - uses the sgx environment to construct a block and produce proof of execution
 /// - sp1 - uses the sp1 prover
 /// - risc0 - uses the risc0 prover
 async fn shasta_batch_handler(
@@ -77,40 +76,6 @@ async fn shasta_batch_handler(
         };
 
         match draw_shasta_zk_request(&actor, first_batch_id, l1_inclusioin_block).await? {
-            Some(proof_type) => {
-                shasta_request_opt["proof_type"] = serde_json::to_value(proof_type).unwrap()
-            }
-            None => {
-                return Ok(Status::Ok {
-                    proof_type: ProofType::Native,
-                    batch_id: Some(first_batch_id),
-                    data: ProofResponse::Status {
-                        status: TaskStatus::ZKAnyNotDrawn,
-                    },
-                });
-            }
-        }
-    }
-
-    // For sgx_any request, draw sgx proof type based on the block hash.
-    if is_sgx_any_request(&shasta_request_opt) {
-        let (first_batch_id, l1_inclusioin_block) = {
-            let proposals = shasta_request_opt["proposals"].as_array().ok_or(
-                RaikoError::InvalidRequestConfig("Missing proposals".to_string()),
-            )?;
-            let first_batch = proposals.first().ok_or(RaikoError::InvalidRequestConfig(
-                "batches is empty".to_string(),
-            ))?;
-            let first_batch_id = first_batch["proposal_id"]
-                .as_u64()
-                .expect("first_batch_id ok");
-            let l1_inclusioin_block = first_batch["l1_inclusion_block_number"]
-                .as_u64()
-                .expect("check l1_inclusion_block_number");
-            (first_batch_id, l1_inclusioin_block)
-        };
-
-        match draw_shasta_sgx_request(&actor, first_batch_id, l1_inclusioin_block).await? {
             Some(proof_type) => {
                 shasta_request_opt["proof_type"] = serde_json::to_value(proof_type).unwrap()
             }

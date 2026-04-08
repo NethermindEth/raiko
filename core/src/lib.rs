@@ -489,17 +489,6 @@ mod tests {
             },
         );
         prover_args.insert(
-            "sgx".to_string(),
-            json! {
-                {
-                    "instance_id": 121,
-                    "setup": enable_aggregation,
-                    "bootstrap": enable_aggregation,
-                    "prove": true,
-                }
-            },
-        );
-        prover_args.insert(
             "tdx".to_string(),
             json! {
                 {

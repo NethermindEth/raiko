@@ -729,12 +729,6 @@ class BatchMonitor:
             "blob_proof_type": "proof_of_equivalence",
             "aggregate": aggregate,
             "native": {},
-            "sgx": {
-                "instance_id": 1234,
-                "setup": False,
-                "bootstrap": False,
-                "prove": True,
-            },
             "risc0": {
                 "bonsai": False,
                 "snark": True,

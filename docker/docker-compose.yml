@@ -1,44 +1,15 @@
 services:
-  init:
-    build:
-      context: ..
-      dockerfile: Dockerfile
-    image: nethermind.jfrog.io/core-oci-local-staging/raiko-sgx:latest
-    container_name: raiko-init
-    command: --init
-    env_file:
-      - .env
-    devices:
-      - "/dev/sgx_enclave:/dev/sgx_enclave"
-      - "/dev/sgx_provision:/dev/sgx_provision"
-    volumes:
-      - /var/log/raiko:/var/log/raiko
-      - ${HOME}/.config/gramine:/root/.config/gramine
-      - ${HOME}/.config/raiko:/root/.config/raiko
-    environment:
-      - SGX=true
-      - SGXGETH=${SGXGETH}
-    # environment:
-    # you can use your own PCCS host
-    #- PCCS_HOST=host.docker.internal:8081
-    depends_on:
-      - pccs
   raiko:
     build:
       context: ..
       dockerfile: Dockerfile
-    image: nethermind.jfrog.io/core-oci-local-staging/raiko-sgx:latest
+    image: nethermind.jfrog.io/core-oci-local-staging/raiko:latest
     container_name: raiko
     command: --concurrency-limit=1
     env_file:
       - .env
-    devices:
-      - "/dev/sgx_enclave:/dev/sgx_enclave"
-      - "/dev/sgx_provision:/dev/sgx_provision"
     volumes:
       - /var/log/raiko:/var/log/raiko
-      - ${HOME}/.config/gramine:/root/.config/gramine
-      - ${HOME}/.config/raiko:/root/.config/raiko
       - ../host/config:/raiko/config
     ports:
       - "8080:8080"
@@ -46,43 +17,13 @@ services:
       - RAIKO_CONF_DIR=${RAIKO_CONF_DIR:-/raiko/config/devnet}
       - BASE_CONFIG_FILE=${BASE_CONFIG_FILE:-config.json}
       - BASE_CHAINSPEC_FILE=${BASE_CHAINSPEC_FILE:-chain_spec_list.json}
-      - SGX=true
-      - SGXGETH=${SGXGETH}
-      - SGX_MODE=${SGX_MODE:-local}
-      - RAIKO_REMOTE_URL=${RAIKO_REMOTE_URL:-http://raiko-sgx-server:9090}
-      - GAIKO_REMOTE_URL=${GAIKO_REMOTE_URL:-http://raiko-sgx-server:8090}
       - PREFETCH_CHUNK_SIZE=${PREFETCH_CHUNK_SIZE}
-      # Set to 0 (which is the default) to run on real hardware; use 1 for testing
-      - SGX_DIRECT=${SGX_DIRECT}
-      - SGX_ONTAKE_INSTANCE_ID=${SGX_ONTAKE_INSTANCE_ID}
-      - SGX_PACAYA_INSTANCE_ID=${SGX_PACAYA_INSTANCE_ID}
-      - SGXGETH_PACAYA_INSTANCE_ID=${SGXGETH_PACAYA_INSTANCE_ID}
       - REDIS_URL=${REDIS_URL:-redis://redis:6379}
       - RUST_LOG=${RUST_LOG:-info}
-    # you can use your own PCCS host
-    #- PCCS_HOST=host.docker.internal:8081
-    # use the host's network to connect to the PCCS
-    #extra_hosts:
-    #  - "host.docker.internal:host-gateway"
     depends_on:
       - redis
-      - pccs
     profiles:
       - prod-redis
-  pccs:
-    build:
-      context: ..
-      dockerfile: Dockerfile.pccs
-    image: us-docker.pkg.dev/evmchain/images/pccs:latest
-    container_name: pccs
-    env_file:
-      - .env
-    ports:
-      - "8081:8081"
-    volumes:
-      - ${HOME}/.config/sgx-pccs/default.json:/opt/intel/pccs/config/default.json
-      - ${HOME}/.config/sgx-pccs/file.crt:/opt/intel/pccs/ssl_key/file.crt
-      - ${HOME}/.config/sgx-pccs/private.pem:/opt/intel/pccs/ssl_key/private.pem
   redis:
     image: redis
     container_name: redis

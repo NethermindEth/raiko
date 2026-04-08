@@ -4,13 +4,13 @@
 
 ### Request Parameters
 
-- proof_type(string), the type of proof to prove. Allowed values: `zk_any`, `native`, `sgx`, `risc0`, `sp1`. When using `zk_any`, the server will automatically determine the proof type (risc0 or sp1) based on the request parameters.
+- proof_type(string), the type of proof to prove. Allowed values: `zk_any`, `native`, `risc0`, `sp1`, `tdx`. When using `zk_any`, the server will automatically determine the proof type (risc0 or sp1) based on the request parameters.
 
 > NOTE: The support of `zk_any` is introduced in https://github.com/taikoxyz/raiko/pull/454
 
 ### Response Parameters
 
-- proof_type(string), the type of proof that was proven. Allowed values: `native`, `sgx`, `risc0`, `sp1`. When requesting a `zk_any` proof, the server will automatically determine the proof type (risc0 or sp1) based on the request parameters, then return the proof type in the response.
+- proof_type(string), the type of proof that was proven. Allowed values: `native`, `risc0`, `sp1`, `tdx`. When requesting a `zk_any` proof, the server will automatically determine the proof type (risc0 or sp1) based on the request parameters, then return the proof type in the response.
 
 > NOTE: The `proof_type` field in response is introduced in https://github.com/taikoxyz/raiko/pull/454
 
@@ -56,11 +56,10 @@ Submit a batch proof task with requested config, get task status, or get proof v
 - l1_network(string): The L1 network to generate the proof for (e.g., "holesky").
 - graffiti(string): A 32-byte hex string used as graffiti.
 - prover(address): The Ethereum address of the prover.
-- proof_type(string): The type of proof to generate. Allowed values: `native`, `sgx`, `risc0`, `sp1`, "zk_any"
+- proof_type(string): The type of proof to generate. Allowed values: `native`, `risc0`, `sp1`, `tdx`, `zk_any`
 - blob_proof_type(string): The type of blob proof. Allowed values: `kzg_versioned_hash`, `proof_of_equivalence`.
 - prover_args(object, optional): Additional prover-specific parameters:
   - native(object, optional): Native prover specific options.
-  - sgx(object, optional): SGX prover specific options.
   - sp1(object, optional): SP1 prover specific options.
   - risc0(object, optional): RISC0 prover specific options.
 
@@ -86,7 +85,7 @@ curl --location \
            {"batch_id": 213, "l1_inclusion_block_number": 1656}
          ],
          "aggregate": true,
-         "proof_type": "sgx"
+         "proof_type": "risc0"
        }'
 ```
 

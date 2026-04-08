@@ -114,12 +114,6 @@ RUN mkdir -p host/src && echo "fn main() {}" > host/src/main.rs && touch host/sr
     && printf '[package]\nname = "risc0-driver"\nversion = "0.1.0"\nedition = "2021"\n' > provers/risc0/driver/Cargo.toml \
     && mkdir -p provers/sp1/driver/src && touch provers/sp1/driver/src/lib.rs \
     && printf '[package]\nname = "sp1-driver"\nversion = "0.1.0"\nedition = "2021"\n' > provers/sp1/driver/Cargo.toml \
-    && mkdir -p provers/sgx/prover/src && touch provers/sgx/prover/src/lib.rs \
-    && printf '[package]\nname = "sgx-prover"\nversion = "0.1.0"\nedition = "2021"\n' > provers/sgx/prover/Cargo.toml \
-    && mkdir -p provers/sgx/guest/src && touch provers/sgx/guest/src/lib.rs \
-    && printf '[package]\nname = "sgx-guest"\nversion = "0.1.0"\nedition = "2021"\n' > provers/sgx/guest/Cargo.toml \
-    && mkdir -p provers/sgx/setup/src && touch provers/sgx/setup/src/lib.rs \
-    && printf '[package]\nname = "raiko-setup"\nversion = "0.1.0"\nedition = "2021"\n' > provers/sgx/setup/Cargo.toml \
     && mkdir -p provers/tdx/src && touch provers/tdx/src/lib.rs \
     && printf '[package]\nname = "raiko-tdx"\nversion = "0.1.0"\nedition = "2021"\n' > provers/tdx/Cargo.toml \
     && mkdir -p provers/tdx/prover/src && touch provers/tdx/prover/src/lib.rs \
@@ -266,7 +260,6 @@ RUN mkdir -p \
     /var/log/raiko \
     /tmp/zisk-proofs
 
-COPY --from=builder /opt/raiko/host/config/config.sgx.json /etc/raiko/
 COPY --from=builder /opt/raiko/host/config/chain_spec_list_default.json /etc/raiko/chain_spec_list_default.json
 COPY --from=builder /opt/raiko/target/release/raiko-host /opt/raiko/bin/
 

@@ -30,7 +30,6 @@ pub struct Actor {
     pool: Arc<Mutex<Pool>>,
     // In order to support dynamic config via HTTP, we need to use Arc<Mutex<Ballot>>.
     ballot_zk: Arc<Mutex<Ballot>>,
-    ballot_sgx: Arc<Mutex<Ballot>>,
     queue: Arc<Mutex<Queue>>,
     notify: Arc<Notify>,
 }
@@ -39,7 +38,6 @@ impl Actor {
     pub fn new(
         pool: Pool,
         ballot_zk: Ballot,
-        ballot_sgx: Ballot,
         default_request_config: ProofRequestOpt,
         chain_specs: SupportedChainSpecs,
         queue: Arc<Mutex<Queue>>,
@@ -50,7 +48,6 @@ impl Actor {
             chain_specs,
             is_paused: Arc::new(AtomicBool::new(false)),
             ballot_zk: Arc::new(Mutex::new(ballot_zk)),
-            ballot_sgx: Arc::new(Mutex::new(ballot_sgx)),
             pool: Arc::new(Mutex::new(pool)),
             queue,
             notify,
@@ -175,21 +172,9 @@ impl Actor {
         self.ballot_zk.lock().await.clone()
     }
 
-    pub async fn get_ballot_sgx(&self) -> Ballot {
-        self.ballot_sgx.lock().await.clone()
-    }
-
     pub async fn set_ballot_zk(&self, new_ballot: Ballot) {
         let mut ballot_zk = self.ballot_zk.lock().await;
         *ballot_zk = new_ballot;
-    }
-
-    pub async fn set_ballot_sgx(&self, new_ballot: Ballot) {
-        let mut ballot_sgx = self.ballot_sgx.lock().await;
-        *ballot_sgx = new_ballot;
-    }
-    pub async fn is_ballot_disabled_sgx(&self) -> bool {
-        self.ballot_sgx.lock().await.probabilities().is_empty()
     }
 
     pub async fn is_ballot_disabled_zk(&self) -> bool {
@@ -197,10 +182,6 @@ impl Actor {
     }
 
     /// Draw proof types based on the block hash.
-    pub async fn draw_sgx(&self, block_hash: &BlockHash) -> Option<ProofType> {
-        self.ballot_sgx.lock().await.draw_with_poisson(block_hash)
-    }
-
     pub async fn draw_zk(&self, block_hash: &BlockHash) -> Option<ProofType> {
         self.ballot_zk.lock().await.draw_with_poisson(block_hash)
     }
@@ -236,7 +217,6 @@ mod tests {
         };
         let pool = Pool::open(config).unwrap();
         let ballot_zk = Ballot::new(BTreeMap::new()).unwrap();
-        let ballot_sgx = Ballot::new(BTreeMap::new()).unwrap();
         let default_request_config = ProofRequestOpt::default();
         let chain_specs = SupportedChainSpecs::default();
         let queue = Arc::new(Mutex::new(Queue::new(1000)));
@@ -245,7 +225,6 @@ mod tests {
         Actor::new(
             pool,
             ballot_zk,
-            ballot_sgx,
             default_request_config,
             chain_specs,
             queue,
@@ -364,17 +343,17 @@ mod tests {
         let actor = create_test_actor_with_id("test_ballot_operations");
 
         // Test getting ballot
-        let ballot = actor.get_ballot_sgx().await;
+        let ballot = actor.get_ballot_zk().await;
         assert!(ballot.probabilities().is_empty()); // Default ballot should be empty
 
         // Test if ballot is disabled (empty probabilities)
-        assert!(actor.is_ballot_disabled_sgx().await);
+        assert!(actor.is_ballot_disabled_zk().await);
 
         // Test setting a new ballot
         let new_ballot = Ballot::new(BTreeMap::new()).unwrap();
-        actor.set_ballot_sgx(new_ballot.clone()).await;
+        actor.set_ballot_zk(new_ballot.clone()).await;
 
-        let retrieved_ballot = actor.get_ballot_sgx().await;
+        let retrieved_ballot = actor.get_ballot_zk().await;
         // The ballot should be the same as what we set
         assert_eq!(retrieved_ballot.probabilities(), new_ballot.probabilities());
     }
@@ -428,14 +407,14 @@ mod tests {
         ballot_config.insert(ProofType::Sp1, (0.3, 100));
 
         let new_ballot = Ballot::new(ballot_config.clone()).unwrap();
-        actor.set_ballot_sgx(new_ballot).await;
+        actor.set_ballot_zk(new_ballot).await;
 
         // Test that ballot is not disabled
-        assert!(!actor.is_ballot_disabled_sgx().await);
+        assert!(!actor.is_ballot_disabled_zk().await);
 
         // Test drawing with a specific block hash
         let block_hash = BlockHash::from(B256::from([1u8; 32]));
-        let _result = actor.draw_sgx(&block_hash).await;
+        let _result = actor.draw_zk(&block_hash).await;
     }
 
     #[tokio::test]

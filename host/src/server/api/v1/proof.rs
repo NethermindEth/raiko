@@ -11,10 +11,7 @@ use crate::{
     metrics::{inc_current_req, inc_guest_req_count, inc_host_req_count},
     server::{
         api::v1::Status,
-        utils::{
-            draw_for_sgx_any_request, draw_for_zk_any_request, is_sgx_any_request,
-            is_zk_any_request, to_v1_status,
-        },
+        utils::{draw_for_zk_any_request, is_zk_any_request, to_v1_status},
     },
 };
 
@@ -30,7 +27,6 @@ use crate::{
 /// Accepts a proof request and generates a proof with the specified guest prover.
 /// The guest provers currently available are:
 /// - native - constructs a block and checks for equality
-/// - sgx - uses the sgx environment to construct a block and produce proof of execution
 /// - sp1 - uses the sp1 prover
 /// - risc0 - uses the risc0 prover
 async fn proof_handler(
@@ -57,18 +53,6 @@ async fn proof_handler(
         }
     }
 
-    // For sgx_any request, draw sgx proof type based on the block hash.
-    if is_sgx_any_request(&req) {
-        match draw_for_sgx_any_request(&actor, &serde_json::to_value(&config)?).await? {
-            Some(proof_type) => config.proof_type = Some(proof_type.to_string()),
-            None => {
-                return Err(
-                    anyhow::anyhow!("Failed to draw sgx_any proof type for block hash").into(),
-                );
-            }
-        }
-    }
-
     if let Some(ref proof_type) = config.proof_type {
         match proof_type.as_str() {
             "risc0" => {
@@ -78,10 +62,6 @@ async fn proof_handler(
             "sp1" => {
                 #[cfg(not(feature = "sp1"))]
                 return Err(anyhow::anyhow!("SP1 not supported").into());
-            }
-            "sgx" => {
-                #[cfg(not(feature = "sgx"))]
-                return Err(anyhow::anyhow!("SGX not supported").into());
             }
             "tdx" => {
                 #[cfg(not(feature = "tdx"))]

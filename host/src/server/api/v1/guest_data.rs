@@ -8,7 +8,7 @@ use raiko_reqactor::Actor;
     path = "/guest_data",
     tag = "GuestData",
     responses (
-        (status = 200, description = "Returns the guest data of provers, e.g. SGX quote bytes, sp1 program hashes"),
+        (status = 200, description = "Returns the guest data of provers, e.g. sp1 program hashes"),
         (status = 500, description = "Failed to read guest data"),
     )
 )]

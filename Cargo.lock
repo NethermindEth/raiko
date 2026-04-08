@@ -1700,17 +1700,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1505bd5d3d116872e7271a6d4e16d81d0c8570876c8de68093a09ac269d8aac0"
 
 [[package]]
-name = "atty"
-version = "0.2.14"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d9b39be18770d11421cdb1b9947a45dd3f37e93092cbf377614828a319d5fee8"
-dependencies = [
- "hermit-abi 0.1.19",
- "libc",
- "winapi",
-]
-
-[[package]]
 name = "aurora-engine-modexp"
 version = "1.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2262,16 +2251,6 @@ name = "base64"
 version = "0.22.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "72b3254f16251a8381aa12e40e3c4d2f0199f8c6508fbecb9d91f575e0fbb8c6"
-
-[[package]]
-name = "base64-serde"
-version = "0.7.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ba368df5de76a5bea49aaf0cf1b39ccfbbef176924d1ba5db3e4135216cbe3c7"
-dependencies = [
- "base64 0.21.7",
- "serde",
-]
 
 [[package]]
 name = "base64-simd"
@@ -2895,21 +2874,6 @@ dependencies = [
 
 [[package]]
 name = "clap"
-version = "2.34.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a0610544180c38b88101fecf2dd634b174a62eef6946f84dfc6a7127512b381c"
-dependencies = [
- "ansi_term",
- "atty",
- "bitflags 1.3.2",
- "strsim 0.8.0",
- "textwrap",
- "unicode-width 0.1.14",
- "vec_map",
-]
-
-[[package]]
-name = "clap"
 version = "4.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b193af5b67834b676abd72466a96c1024e6a6ad978a1f484bd90b85c94041351"
@@ -2927,7 +2891,7 @@ dependencies = [
  "anstream 1.0.0",
  "anstyle",
  "clap_lex",
- "strsim 0.11.1",
+ "strsim",
 ]
 
 [[package]]
@@ -3038,7 +3002,7 @@ dependencies = [
  "encode_unicode",
  "libc",
  "once_cell",
- "unicode-width 0.2.2",
+ "unicode-width",
  "windows-sys 0.59.0",
 ]
 
@@ -3457,7 +3421,7 @@ dependencies = [
  "ident_case",
  "proc-macro2",
  "quote",
- "strsim 0.11.1",
+ "strsim",
  "syn 2.0.117",
 ]
 
@@ -3472,7 +3436,7 @@ dependencies = [
  "proc-macro2",
  "quote",
  "serde",
- "strsim 0.11.1",
+ "strsim",
  "syn 2.0.117",
 ]
 
@@ -3485,7 +3449,7 @@ dependencies = [
  "ident_case",
  "proc-macro2",
  "quote",
- "strsim 0.11.1",
+ "strsim",
  "syn 2.0.117",
 ]
 
@@ -4041,18 +4005,6 @@ dependencies = [
  "reqwest 0.12.28",
  "thiserror 1.0.69",
  "tokio",
-]
-
-[[package]]
-name = "duct"
-version = "1.1.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7e66e9c0c03d094e1a0ba1be130b849034aa80c3a2ab8ee94316bc809f3fa684"
-dependencies = [
- "libc",
- "os_pipe",
- "shared_child",
- "shared_thread",
 ]
 
 [[package]]
@@ -4780,16 +4732,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "file-lock"
-version = "2.1.11"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "040b48f80a749da50292d0f47a1e2d5bf1d772f52836c07f64bfccc62ba6e664"
-dependencies = [
- "cc",
- "libc",
-]
-
-[[package]]
 name = "find-msvc-tools"
 version = "0.1.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5432,15 +5374,6 @@ dependencies = [
 
 [[package]]
 name = "heck"
-version = "0.3.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6d621efb26863f0e9924c6ac577e8275e5e6b77455db64ffa6c65c904e9e132c"
-dependencies = [
- "unicode-segmentation",
-]
-
-[[package]]
-name = "heck"
 version = "0.4.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "95505c38b4572b2d910cecb0281560f54b440a19336cbbcb27bf6ce6adc6f5a8"
@@ -5450,15 +5383,6 @@ name = "heck"
 version = "0.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2304e00983f87ffb38b55b444b5e3b60a884b5d30c0fca7d82fe33449bbe55ea"
-
-[[package]]
-name = "hermit-abi"
-version = "0.1.19"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "62b467343b94ba476dcb2500d242dadbb39557df889310ac77c5d99100aaac33"
-dependencies = [
- "libc",
-]
 
 [[package]]
 name = "hermit-abi"
@@ -6047,7 +5971,7 @@ dependencies = [
  "console",
  "number_prefix",
  "portable-atomic",
- "unicode-width 0.2.2",
+ "unicode-width",
  "web-time",
 ]
 
@@ -6922,7 +6846,7 @@ name = "mem-common"
 version = "0.16.1"
 source = "git+https://github.com/0xPolygonHermez/zisk.git?tag=v0.16.1#48cf7ccefb5ed62261abf6bfb007b5be8a23c547"
 dependencies = [
- "clap 4.6.0",
+ "clap",
  "fields",
  "num-bigint 0.4.6",
  "num-traits",
@@ -7489,7 +7413,7 @@ version = "1.17.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "91df4bbde75afed763b708b7eee1e8e7651e02d97f6d5dd763e89367e957b23b"
 dependencies = [
- "hermit-abi 0.5.2",
+ "hermit-abi",
  "libc",
 ]
 
@@ -7944,16 +7868,6 @@ name = "option-ext"
 version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "04744f49eae99ab78e0d5c0b603ab218f515ea8cfe5a456d7629ad883a3b6e7d"
-
-[[package]]
-name = "os_pipe"
-version = "1.2.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7d8fae84b431384b68627d0f9b3b1245fcf9f46f6c0e3dc902e9dce64edd1967"
-dependencies = [
- "libc",
- "windows-sys 0.61.2",
-]
 
 [[package]]
 name = "outref"
@@ -9460,7 +9374,7 @@ dependencies = [
  "anyhow",
  "assert_cmd",
  "bincode",
- "clap 4.6.0",
+ "clap",
  "env_logger",
  "ethers-core",
  "eyre",
@@ -9482,7 +9396,6 @@ dependencies = [
  "serde_json",
  "serde_with",
  "serial_test 2.0.0",
- "sgx-prover",
  "sp1-driver",
  "tdx-prover",
  "thiserror 1.0.69",
@@ -9516,7 +9429,7 @@ dependencies = [
  "cap",
  "cfg-if",
  "chrono",
- "clap 4.6.0",
+ "clap",
  "dashmap 5.5.3",
  "dotenv",
  "env_logger",
@@ -9548,7 +9461,6 @@ dependencies = [
  "serde",
  "serde_json",
  "serde_with",
- "sgx-prover",
  "sha2",
  "sp1-driver",
  "tdx-prover",
@@ -9698,57 +9610,6 @@ dependencies = [
  "syn 2.0.117",
  "tokio",
  "tracing",
-]
-
-[[package]]
-name = "raiko-setup"
-version = "0.1.0"
-dependencies = [
- "alloy-consensus",
- "alloy-network",
- "alloy-primitives",
- "alloy-provider",
- "alloy-rlp",
- "alloy-rlp-derive",
- "alloy-rpc-client",
- "alloy-rpc-types",
- "alloy-sol-types",
- "alloy-transport-http",
- "anyhow",
- "assert_cmd",
- "bincode",
- "bytemuck",
- "cap",
- "cfg-if",
- "clap 4.6.0",
- "dirs 5.0.1",
- "env_logger",
- "ethers-core",
- "file-lock",
- "flate2",
- "lazy_static",
- "log",
- "once_cell",
- "prometheus",
- "proptest",
- "raiko-lib",
- "reqwest 0.11.27",
- "reqwest 0.12.28",
- "rlp",
- "rstest",
- "serde",
- "serde_json",
- "serde_with",
- "sgx-prover",
- "sha2",
- "structopt",
- "thiserror 1.0.69",
- "tokio",
- "tower 0.5.3",
- "tracing",
- "tracing-appender",
- "tracing-subscriber 0.3.23",
- "url",
 ]
 
 [[package]]
@@ -10985,7 +10846,7 @@ dependencies = [
  "alloy-eips",
  "alloy-primitives",
  "alloy-rpc-types-engine",
- "clap 4.6.0",
+ "clap",
  "derive_more 2.1.1",
  "dirs-next",
  "eyre",
@@ -11444,7 +11305,7 @@ name = "reth-tracing"
 version = "1.11.0"
 source = "git+https://github.com/paradigmxyz/reth.git?tag=v1.11.0#564ffa586845fa4a8bb066f0c7b015ff36b26c08"
 dependencies = [
- "clap 4.6.0",
+ "clap",
  "eyre",
  "rolling-file",
  "tracing",
@@ -11460,7 +11321,7 @@ name = "reth-tracing-otlp"
 version = "1.11.0"
 source = "git+https://github.com/paradigmxyz/reth.git?tag=v1.11.0#564ffa586845fa4a8bb066f0c7b015ff36b26c08"
 dependencies = [
- "clap 4.6.0",
+ "clap",
  "eyre",
  "opentelemetry 0.31.0",
  "opentelemetry-otlp",
@@ -13246,59 +13107,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "sgx-guest"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "axum",
- "base64 0.22.1",
- "base64-serde",
- "bincode",
- "clap 4.6.0",
- "dirs 5.0.1",
- "hex",
- "raiko-lib",
- "rand 0.8.5",
- "rand_core 0.6.4",
- "secp256k1 0.30.0",
- "serde",
- "serde_json",
- "sha3",
- "thiserror 1.0.69",
- "tokio",
-]
-
-[[package]]
-name = "sgx-prover"
-version = "0.1.0"
-dependencies = [
- "alloy-contract",
- "alloy-provider",
- "alloy-rpc-client",
- "alloy-signer",
- "alloy-signer-local",
- "alloy-sol-types",
- "alloy-transport-http",
- "anyhow",
- "bincode",
- "duct",
- "env_logger",
- "hex",
- "once_cell",
- "pem 3.0.6",
- "raiko-lib",
- "reqwest 0.11.27",
- "reqwest 0.12.28",
- "serde",
- "serde_json",
- "serde_with",
- "tempfile",
- "tokio",
- "tracing",
- "url",
-]
-
-[[package]]
 name = "sha1"
 version = "0.10.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -13356,23 +13164,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "shared_child"
-version = "1.1.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1e362d9935bc50f019969e2f9ecd66786612daae13e8f277be7bfb66e8bed3f7"
-dependencies = [
- "libc",
- "sigchld",
- "windows-sys 0.60.2",
-]
-
-[[package]]
-name = "shared_thread"
-version = "0.2.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "52b86057fcb5423f5018e331ac04623e32d6b5ce85e33300f92c79a1973928b0"
-
-[[package]]
 name = "shell-words"
 version = "1.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -13392,27 +13183,6 @@ name = "shlex"
 version = "1.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0fda2ff0d084019ba4d7c6f371c95d8fd75ce3524c3cb8fb653a3023f6323e64"
-
-[[package]]
-name = "sigchld"
-version = "0.2.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "47106eded3c154e70176fc83df9737335c94ce22f821c32d17ed1db1f83badb1"
-dependencies = [
- "libc",
- "os_pipe",
- "signal-hook",
-]
-
-[[package]]
-name = "signal-hook"
-version = "0.3.18"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d881a16cf4426aa584979d30bd82cb33429027e42122b169753d6ef1085ed6e2"
-dependencies = [
- "libc",
- "signal-hook-registry",
-]
 
 [[package]]
 name = "signal-hook-registry"
@@ -13952,7 +13722,7 @@ name = "sm-frequent-ops"
 version = "0.16.1"
 source = "git+https://github.com/0xPolygonHermez/zisk.git?tag=v0.16.1#48cf7ccefb5ed62261abf6bfb007b5be8a23c547"
 dependencies = [
- "clap 4.6.0",
+ "clap",
  "fields",
  "num-bigint 0.4.6",
  "proofman-common",
@@ -14092,7 +13862,7 @@ dependencies = [
  "anyhow",
  "cargo_metadata 0.18.1",
  "chrono",
- "clap 4.6.0",
+ "clap",
  "dirs 5.0.1",
  "sp1-primitives",
 ]
@@ -14113,7 +13883,7 @@ dependencies = [
  "bincode",
  "bytemuck",
  "cfg-if",
- "clap 4.6.0",
+ "clap",
  "deepsize2",
  "elf",
  "enum-map",
@@ -14393,7 +14163,7 @@ checksum = "c64545387a6b5ee58155d75183223a8f19961e23d76a13a49c16514896e52ff7"
 dependencies = [
  "anyhow",
  "bincode",
- "clap 4.6.0",
+ "clap",
  "dirs 5.0.1",
  "downloader",
  "either",
@@ -14757,39 +14527,9 @@ checksum = "fe895eb47f22e2ddd4dabc02bce419d2e643c8e3b585c78158b349195bc24d82"
 
 [[package]]
 name = "strsim"
-version = "0.8.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8ea5119cdb4c55b55d432abb513a0429384878c15dde60cc77b1c99de1a95a6a"
-
-[[package]]
-name = "strsim"
 version = "0.11.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7da8b5736845d9f2fcb837ea5d9e2628564b3b043a70948a3f0b778838c5fb4f"
-
-[[package]]
-name = "structopt"
-version = "0.3.26"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0c6b5c64445ba8094a6ab0c3cd2ad323e07171012d9c98b0b15651daf1787a10"
-dependencies = [
- "clap 2.34.0",
- "lazy_static",
- "structopt-derive",
-]
-
-[[package]]
-name = "structopt-derive"
-version = "0.4.18"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "dcb5ae327f9cc13b68763b5749770cb9e048a99bd9dfdfa58d0cf05d5f64afe0"
-dependencies = [
- "heck 0.3.3",
- "proc-macro-error",
- "proc-macro2",
- "quote",
- "syn 1.0.109",
-]
 
 [[package]]
 name = "strum"
@@ -15107,15 +14847,6 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 2.0.117",
-]
-
-[[package]]
-name = "textwrap"
-version = "0.11.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d326610f408c7a4eb6f51c37c330e496b08506c9457c9d34287ecc38809fb060"
-dependencies = [
- "unicode-width 0.1.14",
 ]
 
 [[package]]
@@ -16052,12 +15783,6 @@ name = "unicode-segmentation"
 version = "1.12.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f6ccf251212114b54433ec949fd6a7841275f9ada20dddd2f29e9ceea4501493"
-
-[[package]]
-name = "unicode-width"
-version = "0.1.14"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7dd6e30e90baa6f72411720665d41d89b9a3d039dc45b8faea1ddd07f617f6af"
 
 [[package]]
 name = "unicode-width"
@@ -17490,7 +17215,7 @@ source = "git+https://github.com/0xPolygonHermez/zisk.git?tag=v0.16.1#48cf7ccefb
 dependencies = [
  "anyhow",
  "cargo_metadata 0.23.1",
- "clap 4.6.0",
+ "clap",
  "rom-setup",
  "tracing",
  "vergen-git2",
@@ -17644,7 +17369,7 @@ name = "ziskemu"
 version = "0.16.1"
 source = "git+https://github.com/0xPolygonHermez/zisk.git?tag=v0.16.1#48cf7ccefb5ed62261abf6bfb007b5be8a23c547"
 dependencies = [
- "clap 4.6.0",
+ "clap",
  "data-bus",
  "fields",
  "mem-common",

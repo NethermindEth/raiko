@@ -294,7 +294,7 @@ The complete proof request must include:
 ```json
 {
   "l2_block_numbers": [<block_number>],
-  "proof_type": "sgx",
+  "proof_type": "native",
   "max_anchor_block_number": <u64>,
   "last_finalized_block_hash": "0x...",
   "basefee_sharing_pctg": 75,

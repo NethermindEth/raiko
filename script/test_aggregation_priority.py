@@ -8,7 +8,6 @@ Usage Examples:
   python3 test_aggregation_priority.py
 
   # Test with different prover types
-  python3 test_aggregation_priority.py --prove-type sgx
   python3 test_aggregation_priority.py --prove-type risc0
   python3 test_aggregation_priority.py --prove-type sp1
 
@@ -88,7 +87,7 @@ class AggregationPriorityTester:
         self.logger.info(f"Using prover type: {self.prove_type}")
         
         # Validate prover type
-        supported_provers = ["native", "sgx", "risc0", "sp1", "zisk"]
+        supported_provers = ["native", "risc0", "sp1", "zisk"]
         if self.prove_type not in supported_provers:
             self.logger.error(f"Unsupported prover type: {self.prove_type}")
             self.logger.error(f"Supported provers: {supported_provers}")
@@ -179,13 +178,6 @@ class AggregationPriorityTester:
         
         if self.prove_type == "native":
             base_request["native"] = {}
-        elif self.prove_type == "sgx":
-            base_request["sgx"] = {
-                "instance_id": 1234,
-                "setup": False,
-                "bootstrap": False,
-                "prove": True,
-            }
         elif self.prove_type == "risc0":
             base_request["risc0"] = {
                 "bonsai": True,
@@ -204,7 +196,7 @@ class AggregationPriorityTester:
                 "verify": False,
                 "execution_mode": "prove",
             }
-        
+
         return base_request
 
     def create_aggregation_request(self, batch_data: List[Tuple[int, int]]) -> Dict[str, Any]:
@@ -228,13 +220,6 @@ class AggregationPriorityTester:
 
         if self.prove_type == "native":
             base_request["native"] = {}
-        elif self.prove_type == "sgx":
-            base_request["sgx"] = {
-                "instance_id": 1234,
-                "setup": False,
-                "bootstrap": False,
-                "prove": True,
-            }
         elif self.prove_type == "risc0":
             base_request["risc0"] = {
                 "bonsai": True,
@@ -253,7 +238,7 @@ class AggregationPriorityTester:
                 "verify": True,
                 "execution_mode": "prove",
             }
-        
+
         return base_request
 
     async def submit_request(self, payload: Dict[str, Any], request_type: str, request_id: str, sequence_number: int) -> Optional[Dict[str, Any]]:
@@ -688,7 +673,7 @@ async def main():
         "--prove-type",
         type=str,
         default="native",
-        choices=["native", "sgx", "risc0", "sp1", "zisk"],
+        choices=["native", "risc0", "sp1", "zisk"],
         help="Proof type to use for requests"
     )
     

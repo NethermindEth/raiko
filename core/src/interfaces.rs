@@ -115,17 +115,6 @@ pub async fn get_guest_data() -> RaikoResult<serde_json::Value> {
         guest_data_object.extend(risc0_map);
     }
 
-    #[cfg(feature = "sgx")]
-    {
-        let sgx_data = sgx_prover::SgxProver::get_guest_data().await?;
-        let sgx_map = sgx_data
-            .as_object()
-            .cloned()
-            .expect("sgx guest data is not an object");
-
-        guest_data_object.extend(sgx_map);
-    }
-
     #[cfg(feature = "tdx")]
     {
         let tdx_data = tdx_prover::TdxProver::get_guest_data().await?;
@@ -183,12 +172,6 @@ pub async fn run_prover(
             Err(RaikoError::FeatureNotSupportedError(proof_type))
         }
         ProofType::Sgx | ProofType::SgxGeth => {
-            #[cfg(feature = "sgx")]
-            return sgx_prover::SgxProver::new(proof_type)
-                .run(input.clone(), output, config, store)
-                .await
-                .map_err(|e| e.into());
-            #[cfg(not(feature = "sgx"))]
             Err(RaikoError::FeatureNotSupportedError(proof_type))
         }
         ProofType::Zisk => {
@@ -254,12 +237,6 @@ pub async fn run_batch_prover(
             Err(RaikoError::FeatureNotSupportedError(proof_type))
         }
         ProofType::Sgx | ProofType::SgxGeth => {
-            #[cfg(feature = "sgx")]
-            return sgx_prover::SgxProver::new(proof_type)
-                .batch_run(input.clone(), output, config, store)
-                .await
-                .map_err(|e| e.into());
-            #[cfg(not(feature = "sgx"))]
             Err(RaikoError::FeatureNotSupportedError(proof_type))
         }
         ProofType::Zisk => {
@@ -325,12 +302,6 @@ pub async fn run_shasta_proposal_prover(
             Err(RaikoError::FeatureNotSupportedError(proof_type))
         }
         ProofType::Sgx | ProofType::SgxGeth => {
-            #[cfg(feature = "sgx")]
-            return sgx_prover::SgxProver::new(proof_type)
-                .proposal_run(input.clone(), output, config, store)
-                .await
-                .map_err(|e| e.into());
-            #[cfg(not(feature = "sgx"))]
             Err(RaikoError::FeatureNotSupportedError(proof_type))
         }
         ProofType::Zisk => {
@@ -395,12 +366,6 @@ pub async fn run_realtime_prover(
             Err(RaikoError::FeatureNotSupportedError(proof_type))
         }
         ProofType::Sgx | ProofType::SgxGeth => {
-            #[cfg(feature = "sgx")]
-            return sgx_prover::SgxProver::new(proof_type)
-                .realtime_run(input.clone(), output, config, store)
-                .await
-                .map_err(|e| e.into());
-            #[cfg(not(feature = "sgx"))]
             Err(RaikoError::FeatureNotSupportedError(proof_type))
         }
         ProofType::Tdx => {
@@ -465,12 +430,6 @@ pub async fn aggregate_proofs(
             Err(RaikoError::FeatureNotSupportedError(proof_type))
         }
         ProofType::Sgx | ProofType::SgxGeth => {
-            #[cfg(feature = "sgx")]
-            return sgx_prover::SgxProver::new(proof_type)
-                .aggregate(input.clone(), output, config, store)
-                .await
-                .map_err(|e| e.into());
-            #[cfg(not(feature = "sgx"))]
             Err(RaikoError::FeatureNotSupportedError(proof_type))
         }
         ProofType::Zisk => {
@@ -537,12 +496,6 @@ pub async fn aggregate_shasta_proposals(
             Err(RaikoError::FeatureNotSupportedError(proof_type))
         }
         ProofType::Sgx | ProofType::SgxGeth => {
-            #[cfg(feature = "sgx")]
-            return sgx_prover::SgxProver::new(proof_type)
-                .shasta_aggregate(input.clone(), output, config, store)
-                .await
-                .map_err(|e| e.into());
-            #[cfg(not(feature = "sgx"))]
             Err(RaikoError::FeatureNotSupportedError(proof_type))
         }
         ProofType::Zisk => {
@@ -598,12 +551,6 @@ pub async fn cancel_proof(
             Err(RaikoError::FeatureNotSupportedError(proof_type))
         }
         ProofType::Sgx | ProofType::SgxGeth => {
-            #[cfg(feature = "sgx")]
-            return sgx_prover::SgxProver::new(proof_type)
-                .cancel(proof_key, read)
-                .await
-                .map_err(|e| e.into());
-            #[cfg(not(feature = "sgx"))]
             Err(RaikoError::FeatureNotSupportedError(proof_type))
         }
         ProofType::Zisk => {
@@ -1050,10 +997,6 @@ impl TryFrom<RealTimeProofRequestOpt> for RealTimeProofRequest {
 pub struct ProverSpecificOpts {
     /// Native prover specific options.
     pub native: Option<Value>,
-    /// SGX prover specific options.
-    pub sgx: Option<Value>,
-    /// SgxGeth prover specific options.
-    pub sgxgeth: Option<Value>,
     /// SP1 prover specific options.
     pub sp1: Option<Value>,
     /// RISC0 prover specific options.
@@ -1070,8 +1013,6 @@ impl<S: ::std::hash::BuildHasher + ::std::default::Default> From<ProverSpecificO
     fn from(value: ProverSpecificOpts) -> Self {
         [
             ("native", value.native.clone()),
-            ("sgx", value.sgx.clone()),
-            ("sgxgeth", value.sgxgeth.clone()),
             ("sp1", value.sp1.clone()),
             ("risc0", value.risc0.clone()),
             ("zisk", value.zisk.clone()),

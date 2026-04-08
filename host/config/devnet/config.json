@@ -12,23 +12,6 @@
 	"redis_url": "redis://redis-zk:6379",
 	"redis_ttl": 3600,
 	"enable_redis_pool": false,
-	"sgx": {
-		"instance_ids": {
-			"ONTAKE": 0,
-			"PACAYA": 0
-		},
-		"setup": false,
-		"bootstrap": false,
-		"prove": true
-	},
-	"sgxgeth": {
-		"instance_ids": {
-			"PACAYA": 0
-		},
-		"setup": false,
-		"bootstrap": false,
-		"prove": true
-	},
 	"tdx": {
 		"instance_ids": {
 			"ONTAKE": 0,
@@ -58,6 +41,5 @@
 	},
 	"queue_limit": 1000,
 	"api_keys": "",
-	"ballot_zk": "{\"Sp1\":[1, 0]}",
-	"ballot_sgx": "{\"Sgx\":[1, 0]}"
+	"ballot_zk": "{\"Sp1\":[1, 0]}"
 }

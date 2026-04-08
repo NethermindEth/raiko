@@ -7,23 +7,6 @@
     "prover": "0x70997970C51812dc3A010C7d01b50e0d17dc79C8",
     "graffiti": "8008500000000000000000000000000000000000000000000000000000000000",
     "blob_proof_type": "proof_of_equivalence",
-    "sgx": {
-        "instance_ids": {
-            "ONTAKE": 0,
-            "PACAYA": 0
-        },
-        "setup": false,
-        "bootstrap": false,
-        "prove": true
-    },
-    "sgxgeth": {
-        "instance_ids": {
-            "PACAYA": 0
-        },
-        "setup": false,
-        "bootstrap": false,
-        "prove": true
-    },
     "tdx": {
         "instance_ids": {
             "ONTAKE": 0,
@@ -53,6 +36,5 @@
     },
     "queue_limit": 1000,
     "api_keys": "",
-    "ballot_zk": "{\"Sp1\":[1, 0]}",
-    "ballot_sgx": "{\"Sgx\":[1, 0]}"
+    "ballot_zk": "{\"Sp1\":[1, 0]}"
 }

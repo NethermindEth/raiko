@@ -16,14 +16,8 @@ if [[ $PWD != *"raiko" ]]; then
 	fi
 fi
 
-sgx_flags=$1
-if [[ -n "$sgx_flags" ]]; then
-	build_flags="${build_flags} --build-arg EDMM=${sgx_flags}"
-fi
-echo "sgx_flag=$sgx_flag"
-
-if [[ -n $2 ]]; then
-	tag=$2
+if [[ -n $1 ]]; then
+	tag=$1
 else
 	read -p "Do you have specific tag to build? default[latest]: " tag
 	case "$tag" in
@@ -58,7 +52,6 @@ docker buildx build . \
 	--load \
 	--platform linux/amd64 \
 	-t $image_name:latest \
-	$build_flags \
 	--build-arg TARGETPLATFORM=linux/amd64 \
 	--progress=plain \
 	2>&1 | tee log.build.$image_name.$tag
@@ -90,21 +83,6 @@ if [ "$proof_type" = "1" ] || [ "$proof_type" = "zk" ]; then
 	fi
 
 	echo "Local .env file updated with Docker-generated image IDs"
-fi
-
-# Update local .env file with MRENCLAVE values by calling tools directly on container
-if [ "$proof_type" = "0" ] || [ "$proof_type" = "tee" ]; then
-	echo "Extracting MRENCLAVE values by calling tools directly on container..."
-
-	# Extract SGX MRENCLAVE by calling gramine tools directly
-	echo "Extracting SGX MRENCLAVE..."
-	./script/update_imageid.sh sgx_direct "$image_name:latest"
-
-	# Extract SGXGETH MRENCLAVE by calling ego tools directly
-	echo "Extracting SGXGETH MRENCLAVE..."
-	./script/update_imageid.sh sgxgeth_direct "$image_name:latest"
-
-	echo "Local .env file updated with extracted MRENCLAVE values"
 fi
 
 # update latest tag at same time for local docker compose running

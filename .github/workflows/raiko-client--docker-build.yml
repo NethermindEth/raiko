@@ -15,7 +15,6 @@ on:
       - "!docker/**"
       - ".github/workflows/raiko-client--docker-build.yml"
       - "host/config/chain_spec_list_default.json"
-      - "!provers/sgx/**"
       - "!provers/risc0/**"
 
 concurrency:

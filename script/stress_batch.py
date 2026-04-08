@@ -221,12 +221,6 @@ class BatchMonitor:
             "proof_type": self.prove_type,
             "blob_proof_type": "proof_of_equivalence",
             "native": {},
-            "sgx": {
-                "instance_id": 1234,
-                "setup": False,
-                "bootstrap": False,
-                "prove": True,
-            },
             "risc0": {
                 "bonsai": True,
                 "snark": True,

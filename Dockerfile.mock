@@ -60,7 +60,6 @@ RUN apt-get update && apt-get install -y \
     jq \
     && rm -rf /var/lib/apt/lists/*
 
-COPY --from=builder /opt/raiko/host/config/config.sgx.json /etc/raiko/
 COPY --from=builder /opt/raiko/host/config/chain_spec_list_default.json /etc/raiko/chain_spec_list_default.json
 COPY --from=builder /opt/raiko/target/release/raiko-host /opt/raiko/bin/
 
