@@ -80,7 +80,6 @@ async fn proof_handler(
                 return Err(anyhow::anyhow!("SP1 not supported").into());
             }
             "sgx" => {
-                #[cfg(not(feature = "sgx"))]
                 return Err(anyhow::anyhow!("SGX not supported").into());
             }
             "tdx" => {

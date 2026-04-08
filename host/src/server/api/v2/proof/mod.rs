@@ -105,7 +105,6 @@ async fn proof_handler(State(actor): State<Actor>, Json(req): Json<Value>) -> Ho
                 ));
             }
             "sgx" => {
-                #[cfg(not(feature = "sgx"))]
                 return Ok(Status::new_from_task_status(
                     ProofType::from_str(proof_type)?,
                     TaskStatus::AnyhowError("SGX not supported".to_string()),

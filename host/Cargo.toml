@@ -9,7 +9,6 @@ default-run = "raiko-host"
 # provers
 sp1-driver = { path = "../provers/sp1/driver", optional = true }
 risc0-driver = { path = "../provers/risc0/driver", optional = true }
-sgx-prover = { path = "../provers/sgx/prover", optional = true }
 tdx-prover = { path = "../provers/tdx/prover", optional = true }
 
 # raiko
@@ -95,7 +94,6 @@ default = []
 sp1 = ["raiko-core/sp1"]
 risc0 = ["raiko-core/risc0"]
 zisk = ["raiko-core/zisk"]
-sgx = ["raiko-core/sgx"]
 tdx = ["raiko-core/tdx", "dep:tdx-prover"]
 integration = []
 
