@@ -263,7 +263,7 @@ if [ "$1" == "zisk" ]; then
             fi
         else
             echo "Running ZISK integration tests..."
-            cargo ${TOOLCHAIN_ZISK} test ${FLAGS} -p raiko-host -p raiko-core --features "zisk,enable"
+            cargo ${TOOLCHAIN_ZISK} test ${FLAGS} -p raiko-host -p raiko-core --features "zisk"
             (cd "$ZISK_AGENT_DIR" && cargo test --workspace)
         fi
     fi
