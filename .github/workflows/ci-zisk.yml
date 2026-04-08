@@ -41,7 +41,11 @@ jobs:
         uses: cargo-bins/cargo-binstall@v1.6.4
 
       - name: Install zisk
-        run: make install
+        run: |
+          export PATH="$HOME/.zisk/bin:$HOME/.sp1/bin:$PATH"
+          make install
+          echo "$HOME/.zisk/bin" >> "$GITHUB_PATH"
+          echo "$HOME/.sp1/bin" >> "$GITHUB_PATH"
 
       - name: Build zisk prover
         run: make build
