@@ -1136,6 +1136,9 @@ pub struct ProofRequestOpt {
     pub proof_type: Option<String>,
     /// Blob proof type.
     pub blob_proof_type: Option<String>,
+    #[arg(long, require_equals = true)]
+    /// If true (default), return cached proof if available. If false, force re-proving.
+    pub use_cache: Option<bool>,
     #[command(flatten)]
     #[serde(flatten)]
     /// Any additional prover params in JSON format.
@@ -1193,6 +1196,7 @@ impl From<AggregationRequest> for Vec<ProofRequestOpt> {
                     prover: value.prover.clone(),
                     proof_type: value.proof_type.clone(),
                     blob_proof_type: value.blob_proof_type.clone(),
+                    use_cache: None,
                     prover_args: value.prover_args.clone(),
                 },
             )
@@ -1213,6 +1217,7 @@ impl From<AggregationRequest> for ProofRequestOpt {
             prover: value.prover,
             proof_type: value.proof_type,
             blob_proof_type: value.blob_proof_type,
+            use_cache: None,
             prover_args: value.prover_args,
         }
     }

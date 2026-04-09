@@ -123,6 +123,33 @@ pub fn calc_kzg_proof_commitment(blob_bytes: &[u8]) -> Result<KzgGroup, Eip4844E
         .to_bytes())
 }
 
+/// Compute commitment, proof, and y-evaluation in a single pass over the blob.
+///
+/// Equivalent to calling `calc_kzg_proof_commitment` + `proof_of_equivalence` +
+/// `calc_kzg_proof_with_point` separately, but deserializes the blob only once and
+/// avoids the redundant `blob_to_polynomial` + `evaluate_polynomial_in_evaluation_form`
+/// since `compute_kzg_proof_rust` already returns y as its second tuple element.
+///
+/// Returns `(commitment, x, y, proof)`.
+pub fn calc_commitment_and_proof_of_equivalence(
+    blob_bytes: &[u8],
+) -> Result<(KzgGroup, KzgField, KzgField, ZG1), Eip4844Error> {
+    let blob = Blob::try_from(blob_bytes).map_err(|_| Eip4844Error::BlobConversion)?;
+    let blob_fields = deserialize_blob_rust(&blob).map_err(|_| Eip4844Error::DeserializeBlob)?;
+
+    let commitment = blob_to_kzg_commitment_rust(&blob_fields, &*KZG_SETTINGS)
+        .map_err(Eip4844Error::ComputeKzgProof)?
+        .to_bytes();
+
+    let versioned_hash = commitment_to_version_hash(&commitment);
+    let x = get_evaluation_point(blob_bytes, &versioned_hash);
+
+    let (proof, y) = compute_kzg_proof_rust(&blob_fields, &x, &*KZG_SETTINGS)
+        .map_err(Eip4844Error::ComputeKzgProof)?;
+
+    Ok((commitment, x.to_bytes(), y.to_bytes(), proof))
+}
+
 pub fn commitment_to_version_hash(commitment: &[u8; 48]) -> B256 {
     let mut hash = Sha256::digest(commitment);
     hash[0] = VERSIONED_HASH_VERSION_KZG;

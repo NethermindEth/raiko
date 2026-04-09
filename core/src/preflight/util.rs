@@ -565,8 +565,10 @@ async fn prepare_taiko_chain_batch_input_realtime<BDP: BlockDataProvider>(
         hash_signal_slots(&realtime_event_data.signal_slots);
 
     // 2. Read L1 ancestor headers for anchor linkage (includes maxAnchorBlockNumber)
+    debug!("prepare_realtime: fetching L1 ancestor headers up to {max_anchor_block_number}");
     let l1_ancestor_headers =
         get_max_anchor_headers(l1_provider, batch_anchor_tx_info, max_anchor_block_number).await?;
+    debug!("prepare_realtime: L1 ancestor headers fetched ({} headers)", l1_ancestor_headers.len());
 
     // Extract L1 header at maxAnchorBlockNumber from the ancestor headers (always the last one)
     let l1_header = l1_ancestor_headers
@@ -605,28 +607,23 @@ async fn prepare_taiko_chain_batch_input_realtime<BDP: BlockDataProvider>(
                     ));
                 }
                 let blob_bytes = blob_to_bytes(&provided_blobs[blob_idx]);
-                let commitment =
-                    eip4844::calc_kzg_proof_commitment(&blob_bytes).map_err(|e| anyhow!(e))?;
-                let blob_proof = match blob_proof_type {
-                    BlobProofType::KzgVersionedHash => None,
-                    BlobProofType::ProofOfEquivalence => {
-                        let (x, y) = eip4844::proof_of_equivalence(
-                            &blob_bytes,
-                            &commitment_to_version_hash(&commitment),
-                        )
-                        .map_err(|e| anyhow!(e))?;
-                        let point = eip4844::calc_kzg_proof_with_point(
-                            &blob_bytes,
-                            ZFr::from_bytes(&x).unwrap(),
-                        );
-                        // Append precomputed y (32 bytes) after the KZG proof (48 bytes).
-                        // The guest detchtects the extended proof (80 bytes) and skips the expensive
-                        // blob deserialization + polynomial evaluation.
-                        let mut proof_with_y = point
-                            .map(|g1| g1.to_bytes().to_vec())
+                let (commitment, blob_proof) = match blob_proof_type {
+                    BlobProofType::KzgVersionedHash => {
+                        let commitment = eip4844::calc_kzg_proof_commitment(&blob_bytes)
                             .map_err(|e| anyhow!(e))?;
+                        (commitment, None)
+                    }
+                    BlobProofType::ProofOfEquivalence => {
+                        // Single pass: deserialize blob once, compute commitment + proof + y
+                        let (commitment, _x, y, proof) =
+                            eip4844::calc_commitment_and_proof_of_equivalence(&blob_bytes)
+                                .map_err(|e| anyhow!(e))?;
+                        // Append precomputed y (32 bytes) after the KZG proof (48 bytes).
+                        // The guest detects the extended proof (80 bytes) and skips the expensive
+                        // blob deserialization + polynomial evaluation.
+                        let mut proof_with_y = proof.to_bytes().to_vec();
                         proof_with_y.extend_from_slice(&y);
-                        Some(proof_with_y)
+                        (commitment, Some(proof_with_y))
                     }
                 };
                 buffers.push((blob_bytes, Some(commitment.to_vec()), blob_proof));
@@ -1217,28 +1214,6 @@ where
     Ok((block, parent_block.clone()))
 }
 
-/// Get the timestamp of the grandparent block
-pub async fn get_grandparent_timestamp<BDP: BlockDataProvider>(
-    provider: &BDP,
-    first_block_number: u64,
-) -> RaikoResult<Option<u64>> {
-    if first_block_number < 2 {
-        return Ok(None);
-    }
-
-    let grandparent_block_number = first_block_number - 2;
-    let grandparent_blocks = provider
-        .get_blocks(&[(grandparent_block_number, false)])
-        .await?;
-    let grandparent_timestamp = grandparent_blocks
-        .first()
-        .map(|b| b.header.timestamp)
-        .ok_or(RaikoError::Preflight(
-            "No grandparent block for preflight".to_owned(),
-        ))?;
-
-    Ok(Some(grandparent_timestamp))
-}
 
 pub async fn get_batch_blocks_and_parent_data<BDP>(
     provider: &BDP,
@@ -1337,9 +1312,12 @@ where
     let all_init_block_numbers = (min_anchor_height..=original_block_numbers)
         .map(|block_number| (block_number, false))
         .collect::<Vec<_>>();
-    // can filter out the block numbers that are already in the initial_db
-    // but need to handle the block header db as well
+    debug!(
+        "get_max_anchor_headers: fetching {} L1 blocks",
+        all_init_block_numbers.len()
+    );
     let initial_history_blocks = provider.get_blocks(&all_init_block_numbers).await?;
+    debug!("get_max_anchor_headers: L1 blocks fetched");
 
     // assert all anchor in this chain
     for anchor_tx_info in anchor_tx_info_vec {

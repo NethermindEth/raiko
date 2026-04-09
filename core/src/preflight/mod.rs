@@ -1,6 +1,5 @@
 use crate::{
     interfaces::{RaikoError, RaikoResult},
-    preflight::util::get_grandparent_timestamp,
     provider::BlockDataProvider,
 };
 use alethia_reth_primitives::TaikoTxEnvelope;
@@ -13,7 +12,6 @@ use raiko_lib::{
     },
     proof_type::ProofType,
     utils::txs::generate_transactions_for_batch_blocks,
-    Measurement,
 };
 use tracing::{debug, info};
 
@@ -86,9 +84,10 @@ pub async fn preflight<BDP: BlockDataProvider, L1BDP: BlockDataProvider>(
         l1_inclusion_block_number,
     }: PreflightData,
 ) -> RaikoResult<GuestInput> {
-    let measurement = Measurement::start("Fetching block data...", false);
+    debug!("preflight: start for block {block_number}");
 
     let (block, parent_block) = get_block_and_parent_data(&l2_provider, block_number).await?;
+    debug!("preflight: L2 block + parent fetched");
 
     let taiko_guest_input = if taiko_chain_spec.is_taiko() {
         prepare_taiko_chain_input(
@@ -103,19 +102,13 @@ pub async fn preflight<BDP: BlockDataProvider, L1BDP: BlockDataProvider>(
         )
         .await?
     } else {
-        // For Ethereum blocks we just convert the block transactions in a tx_list
-        // so that we don't have to supports separate paths.
         TaikoGuestInput::try_from(block.body.transactions.clone())
             .map_err(|e| RaikoError::Conversion(e.0))?
     };
-    measurement.stop();
-    info!("preflight: guest input done");
+    debug!("preflight: taiko guest input done");
 
     let parent_header: reth_primitives::Header = parent_block.header.inner.clone();
 
-    info!("preflight: parent header done");
-
-    // Create the guest input
     let input = GuestInput {
         block: block.clone(),
         parent_header,
@@ -124,14 +117,11 @@ pub async fn preflight<BDP: BlockDataProvider, L1BDP: BlockDataProvider>(
         ..Default::default()
     };
 
-    // for TDX proofs, we avoid rebuilding the state trie and re-executing the
-    // block as the node execution is trusted
     if proof_type == ProofType::Tdx {
-        info!("preflight: skipping re-execution since TDX proof");
+        debug!("preflight: skipping re-execution since TDX proof");
         return Ok(input);
     }
 
-    // Fetch execution witness from the L2 node
     let witness = l2_provider
         .execution_witness(block_number)
         .await
@@ -139,9 +129,8 @@ pub async fn preflight<BDP: BlockDataProvider, L1BDP: BlockDataProvider>(
             RaikoError::Preflight("execution witness not supported by provider".to_owned())
         })?
         .map_err(|e| RaikoError::Preflight(format!("execution witness failed: {e}")))?;
+    debug!("preflight: execution witness fetched");
 
-    info!("preflight: using execution witness path");
-    let measurement = Measurement::start("Building tries from witness...", true);
     let (parent_state_trie, parent_storage, contracts, ancestor_headers) =
         raiko_lib::primitives::mpt::witness_to_tries(
             input.parent_header.state_root,
@@ -150,18 +139,15 @@ pub async fn preflight<BDP: BlockDataProvider, L1BDP: BlockDataProvider>(
             witness.codes,
             witness.headers,
         )?;
-    measurement.stop();
+    debug!("preflight: witness_to_tries done");
 
-    let input = GuestInput {
+    Ok(GuestInput {
         parent_state_trie,
         parent_storage,
         contracts,
         ancestor_headers,
         ..input
-    };
-
-    info!("preflight: witness-based input done");
-    Ok(input)
+    })
 }
 
 pub async fn batch_preflight<BDP: BlockDataProvider, L1BDP: BlockDataProvider>(
@@ -179,15 +165,15 @@ pub async fn batch_preflight<BDP: BlockDataProvider, L1BDP: BlockDataProvider>(
         proof_type,
     }: BatchPreflightData,
 ) -> RaikoResult<GuestBatchInput> {
-    let measurement = Measurement::start("Fetching block data...", false);
+    debug!("batch_preflight: start for {} blocks", block_numbers.len());
 
     let all_block_parent_pairs =
         get_batch_blocks_and_parent_data(&l2_provider, &block_numbers).await?;
+    debug!("batch_preflight: L2 blocks fetched");
+
     let (l2_grandparent_header, block_parent_pairs) = if block_numbers[0] == 1 {
         (None, all_block_parent_pairs)
     } else {
-        // The first pair's parent is the grandparent (first block's parent's parent)
-        // Extract it and remove the first pair since we don't need it for subsequent processing
         debug!("all_block_parent_pairs: {:?}", all_block_parent_pairs);
         (
             all_block_parent_pairs
@@ -197,27 +183,34 @@ pub async fn batch_preflight<BDP: BlockDataProvider, L1BDP: BlockDataProvider>(
         )
     };
 
-    let l2_block_numbers: Vec<(u64, Option<u64>)> = block_numbers
-        .iter()
-        .map(|&block_number| (block_number, None))
-        .collect::<Vec<(u64, Option<u64>)>>();
+    // Extract grandparent timestamp before l2_grandparent_header is moved below.
+    // Block (first_block - 2) was already fetched by get_batch_blocks_and_parent_data,
+    // so no extra RPC call is needed.
+    let mut grandparent_timestamp: Option<u64> = l2_grandparent_header
+        .as_ref()
+        .map(|h: &reth_primitives::Header| h.timestamp);
+
     info!(
         "batch preflight {} l2_block_numbers: {:?} to {:?}.",
-        l2_block_numbers.len(),
-        l2_block_numbers.first(),
-        l2_block_numbers.last(),
+        block_numbers.len(),
+        block_numbers.first(),
+        block_numbers.last(),
     );
-    let all_prove_blocks = block_parent_pairs
-        .iter()
-        .map(|(block, _)| block.clone())
-        .collect::<Vec<_>>();
+    let (prove_blocks, parent_blocks): (Vec<_>, Vec<_>) = block_parent_pairs.into_iter().unzip();
+
+    if prove_blocks.is_empty() {
+        return Err(RaikoError::Preflight(
+            "No blocks to prove in batch".to_owned(),
+        ));
+    }
+
     let taiko_guest_batch_input = if taiko_chain_spec.is_taiko() {
         prepare_taiko_chain_batch_input(
             &l1_chain_spec,
             &taiko_chain_spec,
             l1_inclusion_block_number,
             batch_id,
-            &all_prove_blocks,
+            &prove_blocks,
             prover_data,
             &blob_proof_type,
             cached_event_data,
@@ -230,45 +223,40 @@ pub async fn batch_preflight<BDP: BlockDataProvider, L1BDP: BlockDataProvider>(
             "Batch preflight is only used for Taiko chains".to_owned(),
         ));
     };
-    measurement.stop();
+    debug!("batch_preflight: L1 taiko input done");
 
-    debug!("proven (block, parent) pairs: {:?}", block_parent_pairs);
+    let minimal_inputs: Vec<GuestInput> = prove_blocks
+        .into_iter()
+        .zip(parent_blocks)
+        .map(|(block, parent_block)| GuestInput {
+            block,
+            parent_header: parent_block.header.try_into().unwrap(),
+            chain_spec: taiko_chain_spec.clone(),
+            ..Default::default()
+        })
+        .collect();
 
-    let mock_guest_batch_input = GuestBatchInput {
-        inputs: block_parent_pairs
-            .iter()
-            .map(|(block, parent_block)| GuestInput {
-                block: block.clone(),
-                parent_header: parent_block.header.clone().try_into().unwrap(),
-                chain_spec: taiko_chain_spec.clone(),
-                ..Default::default()
-            })
-            .collect(),
-        taiko: taiko_guest_batch_input.clone(),
+    let guest_batch_input = GuestBatchInput {
+        inputs: minimal_inputs,
+        taiko: taiko_guest_batch_input,
     };
 
-    // distribute txs to each block
     let pool_txs_list: Vec<(Vec<TaikoTxEnvelope>, bool)> =
-        generate_transactions_for_batch_blocks(&mock_guest_batch_input);
+        generate_transactions_for_batch_blocks(&guest_batch_input);
+    debug!("batch_preflight: tx distribution done");
 
-    assert_eq!(block_parent_pairs.len(), pool_txs_list.len());
+    assert_eq!(guest_batch_input.inputs.len(), pool_txs_list.len());
 
-    // Step 1: Build all GuestInputs sequentially (cheap, no I/O — just grandparent_timestamp tracking)
-    if block_parent_pairs.is_empty() {
-        return Err(RaikoError::Preflight(
-            "No blocks to prove in batch".to_owned(),
-        ));
-    }
-    let first_block_number = block_parent_pairs[0].0.header.number;
-    let mut grandparent_timestamp =
-        get_grandparent_timestamp(&l2_provider, first_block_number).await?;
+    let GuestBatchInput {
+        inputs: minimal_inputs,
+        taiko: taiko_guest_batch_input,
+    } = guest_batch_input;
 
-    let mut base_inputs: Vec<GuestInput> = Vec::with_capacity(block_parent_pairs.len());
-    for ((prove_block, parent_block), (_pool_txs, is_force_inclusion)) in
-        block_parent_pairs.iter().zip(pool_txs_list.iter())
+    let mut base_inputs: Vec<GuestInput> = Vec::with_capacity(minimal_inputs.len());
+    for (input, (_pool_txs, is_force_inclusion)) in
+        minimal_inputs.into_iter().zip(pool_txs_list.iter())
     {
-        let parent_header: reth_primitives::Header = (*parent_block.header).clone();
-        let anchor_tx = prove_block.body.transactions.first().unwrap().clone();
+        let anchor_tx = input.block.body.transactions.first().unwrap().clone();
         let taiko_input = TaikoGuestInput {
             l1_header: taiko_guest_batch_input.l1_header.clone(),
             tx_data: Vec::new(),
@@ -287,34 +275,27 @@ pub async fn batch_preflight<BDP: BlockDataProvider, L1BDP: BlockDataProvider>(
             grandparent_timestamp,
         };
 
-        grandparent_timestamp = Some(parent_header.timestamp);
+        grandparent_timestamp = Some(input.parent_header.timestamp);
 
         base_inputs.push(GuestInput {
-            block: prove_block.clone(),
-            parent_header,
-            chain_spec: taiko_chain_spec.clone(),
             taiko: taiko_input,
-            ..Default::default()
+            ..input
         });
     }
 
-    // For TDX proofs, skip witness fetching entirely
     if proof_type == ProofType::Tdx {
-        info!("batch_preflight: skipping re-execution since TDX proof");
+        debug!("batch_preflight: skipping re-execution since TDX proof");
         return Ok(GuestBatchInput {
             inputs: base_inputs,
             taiko: taiko_guest_batch_input,
         });
     }
 
-    // Step 2: Fetch all witnesses concurrently
-    let witness_block_numbers: Vec<u64> = base_inputs
+    // Fetch all witnesses concurrently
+    let witness_futures: Vec<_> = base_inputs
         .iter()
-        .map(|input| input.block.header.number)
-        .collect();
-    let witness_futures: Vec<_> = witness_block_numbers
-        .iter()
-        .map(|&block_number| {
+        .map(|input| {
+            let block_number = input.block.header.number;
             let l2_provider = &l2_provider;
             async move {
                 l2_provider
@@ -334,13 +315,14 @@ pub async fn batch_preflight<BDP: BlockDataProvider, L1BDP: BlockDataProvider>(
         })
         .collect();
     let witnesses: Vec<RaikoResult<_>> = join_all(witness_futures).await;
+    debug!("batch_preflight: all {} witnesses fetched", witnesses.len());
 
-    // Step 3: Apply witness data to each input
+    // Apply witness data to each input
     let mut final_inputs: Vec<GuestInput> = Vec::with_capacity(base_inputs.len());
     for (input, witness_result) in base_inputs.into_iter().zip(witnesses) {
         let witness = witness_result?;
         let block_number = input.block.header.number;
-        info!("batch_preflight: block {block_number} using execution witness");
+        debug!("batch_preflight: block {block_number} applying witness");
 
         let (parent_state_trie, parent_storage, contracts, ancestor_headers) =
             raiko_lib::primitives::mpt::witness_to_tries(
@@ -350,6 +332,7 @@ pub async fn batch_preflight<BDP: BlockDataProvider, L1BDP: BlockDataProvider>(
                 witness.codes,
                 witness.headers,
             )?;
+        debug!("batch_preflight: block {block_number} witness_to_tries done");
 
         final_inputs.push(GuestInput {
             parent_state_trie,
@@ -360,6 +343,7 @@ pub async fn batch_preflight<BDP: BlockDataProvider, L1BDP: BlockDataProvider>(
         });
     }
 
+    debug!("batch_preflight: all done");
     Ok(GuestBatchInput {
         inputs: final_inputs,
         taiko: taiko_guest_batch_input,

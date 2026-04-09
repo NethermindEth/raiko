@@ -9580,6 +9580,7 @@ dependencies = [
  "raiko-core",
  "raiko-lib",
  "raiko-reqpool",
+ "reqwest 0.12.28",
  "reth-primitives",
  "serde",
  "serde_json",

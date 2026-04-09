@@ -19,6 +19,7 @@ async-channel = "2.3"
 reth-primitives = { workspace = true }
 alloy-primitives = { workspace = true }
 base64 = { workspace = true }
+reqwest_alloy = { workspace = true }
 
 [dev-dependencies]
 env_logger = { workspace = true }
