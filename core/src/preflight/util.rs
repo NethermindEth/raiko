@@ -1,8 +1,7 @@
 use alethia_reth_primitives::{TaikoBlock, TaikoTxEnvelope};
 use alloy_consensus::{Blob, Transaction};
 use alloy_primitives::{hex, Log as LogStruct, Uint, B256};
-use alloy_provider::{Provider, RootProvider};
-use alloy_rpc_types::{BlockId, Filter, Header, Log, Transaction as AlloyRpcTransaction};
+use alloy_rpc_types::{Filter, Header, Log, Transaction as AlloyRpcTransaction};
 use alloy_sol_types::{SolCall, SolEvent};
 use anyhow::{anyhow, bail, ensure, Result};
 use kzg::kzg_types::ZFr;
@@ -32,12 +31,12 @@ use tracing::{debug, error, info, instrument, warn};
 
 use crate::{
     interfaces::{RaikoError, RaikoResult},
-    provider::{rpc::RpcBlockDataProvider, BlockDataProvider},
+    provider::BlockDataProvider,
     require,
 };
 
 /// Prepare the input for a Taiko chain
-pub async fn prepare_taiko_chain_input(
+pub async fn prepare_taiko_chain_input<BDP: BlockDataProvider>(
     l1_chain_spec: &ChainSpec,
     taiko_chain_spec: &ChainSpec,
     block_number: u64,
@@ -45,6 +44,7 @@ pub async fn prepare_taiko_chain_input(
     block: &TaikoBlock,
     prover_data: TaikoProverData,
     blob_proof_type: &BlobProofType,
+    l1_provider: &BDP,
 ) -> RaikoResult<TaikoGuestInput> {
     // Decode the anchor tx to find out which L1 blocks we need to fetch
     let anchor_tx = block
@@ -78,7 +78,6 @@ pub async fn prepare_taiko_chain_input(
 
     // // Get the L1 block in which the L2 block was included so we can fetch the DA data.
     // // Also get the L1 state block header so that we can prove the L1 state root.
-    let provider_l1 = RpcBlockDataProvider::new(&l1_chain_spec.rpc).await?;
 
     info!("current taiko chain fork: {fork:?}");
 
@@ -86,7 +85,7 @@ pub async fn prepare_taiko_chain_input(
         if let Some(l1_block_number) = l1_inclusion_block_number {
             // Get the block proposal data
             get_block_proposed_event_by_height(
-                provider_l1.provider(),
+                l1_provider,
                 taiko_chain_spec.clone(),
                 l1_block_number,
                 block_number,
@@ -96,7 +95,7 @@ pub async fn prepare_taiko_chain_input(
         } else {
             // traversal next 64 blocks to get proposal data
             get_block_proposed_event_by_traversal(
-                provider_l1.provider(),
+                l1_provider,
                 taiko_chain_spec.clone(),
                 anchor_block_height,
                 block_number,
@@ -106,7 +105,7 @@ pub async fn prepare_taiko_chain_input(
         };
 
     let (l1_inclusion_header, l1_state_header) = get_headers(
-        &provider_l1,
+        l1_provider,
         (l1_inclusion_block_number, anchor_block_height),
     )
     .await?;
@@ -153,7 +152,7 @@ pub async fn prepare_taiko_chain_input(
             TaikoSpecId::ONTAKE => {
                 // Get the tx list data directly from the propose block CalldataTxList event
                 let (_, CalldataTxList { txList, .. }) = get_calldata_txlist_event(
-                    provider_l1.provider(),
+                    l1_provider,
                     taiko_chain_spec.clone(),
                     l1_inclusion_block_hash,
                     block_number,
@@ -227,15 +226,15 @@ fn get_anchor_tx_info_by_fork(
 /// but in batch mode, there is no block number in proof request
 /// so we hard code the fork to pacaya here.
 /// return the block numbers of the batch, i.e. [start(lastBlockId - len() + 1), end(lastBlockId)]
-pub async fn parse_l1_batch_proposal_tx_for_pacaya_fork(
-    l1_chain_spec: &ChainSpec,
+pub async fn parse_l1_batch_proposal_tx_for_pacaya_fork<BDP: BlockDataProvider>(
+    _l1_chain_spec: &ChainSpec,
     taiko_chain_spec: &ChainSpec,
     l1_inclusion_block_number: u64,
     batch_id: u64,
+    l1_provider: &BDP,
 ) -> RaikoResult<(Vec<u64>, BlockProposedFork)> {
-    let provider_l1 = RpcBlockDataProvider::new(&l1_chain_spec.rpc).await?;
     let (l1_inclusion_height, _tx, batch_proposed_fork) = get_block_proposed_event_by_height(
-        provider_l1.provider(),
+        l1_provider,
         taiko_chain_spec.clone(),
         l1_inclusion_block_number,
         batch_id,
@@ -266,15 +265,15 @@ pub async fn parse_l1_batch_proposal_tx_for_pacaya_fork(
 /// batch request -> pacaya
 /// proposal request -> shasta
 /// Returns (block_numbers, event_data) for caching and reuse
-pub async fn parse_l1_batch_proposal_tx_for_shasta_fork(
-    l1_chain_spec: &ChainSpec,
+pub async fn parse_l1_batch_proposal_tx_for_shasta_fork<BDP: BlockDataProvider>(
+    _l1_chain_spec: &ChainSpec,
     taiko_chain_spec: &ChainSpec,
     l1_inclusion_block_number: u64,
     proposal_id: u64,
+    l1_provider: &BDP,
 ) -> RaikoResult<(Vec<u64>, BlockProposedFork)> {
-    let provider_l1 = RpcBlockDataProvider::new(&l1_chain_spec.rpc).await?;
     let (l1_inclusion_height, _tx, proposal_fork) = get_block_proposed_event_by_height(
-        provider_l1.provider(),
+        l1_provider,
         taiko_chain_spec.clone(),
         l1_inclusion_block_number,
         proposal_id,
@@ -300,7 +299,7 @@ pub async fn parse_l1_batch_proposal_tx_for_shasta_fork(
 }
 
 /// Prepare Pacaya batch input
-async fn prepare_pacaya_batch_input(
+async fn prepare_pacaya_batch_input<BDP: BlockDataProvider>(
     batch_proposed: raiko_lib::input::pacaya::BatchProposed,
     batch_id: u64,
     l1_inclusion_block_number: u64,
@@ -311,7 +310,7 @@ async fn prepare_pacaya_batch_input(
     taiko_chain_spec: &ChainSpec,
     prover_data: TaikoProverData,
     blob_proof_type: &BlobProofType,
-    provider_l1: &RpcBlockDataProvider,
+    provider_l1: &BDP,
     grandparent_header: Option<reth_primitives::Header>,
 ) -> RaikoResult<TaikoGuestBatchInput> {
     let batch_info = &batch_proposed.info;
@@ -390,7 +389,6 @@ async fn prepare_shasta_batch_input(
     taiko_chain_spec: &ChainSpec,
     prover_data: TaikoProverData,
     blob_proof_type: &BlobProofType,
-    _provider_l1: &RpcBlockDataProvider,
     grandparent_header: Option<reth_primitives::Header>,
 ) -> RaikoResult<TaikoGuestBatchInput> {
     let mut data_sources = Vec::new();
@@ -452,7 +450,7 @@ async fn prepare_shasta_batch_input(
     })
 }
 
-async fn prepare_taiko_chain_batch_input_pacaya(
+async fn prepare_taiko_chain_batch_input_pacaya<BDP: BlockDataProvider>(
     l1_chain_spec: &ChainSpec,
     taiko_chain_spec: &ChainSpec,
     l1_inclusion_block_number: u64,
@@ -462,12 +460,12 @@ async fn prepare_taiko_chain_batch_input_pacaya(
     batch_anchor_tx_info: Vec<(u64, B256)>,
     batch_proposed: raiko_lib::input::pacaya::BatchProposed,
     grandparent_header: Option<reth_primitives::Header>,
+    l1_provider: &BDP,
 ) -> RaikoResult<TaikoGuestBatchInput> {
     let (anchor_block_height, anchor_state_root) = batch_anchor_tx_info[0];
-    let provider_l1 = RpcBlockDataProvider::new(&l1_chain_spec.rpc).await?;
 
     let (l1_inclusion_header, l1_state_header) = get_headers(
-        &provider_l1,
+        l1_provider,
         (l1_inclusion_block_number, anchor_block_height),
     )
     .await?;
@@ -484,13 +482,13 @@ async fn prepare_taiko_chain_batch_input_pacaya(
         taiko_chain_spec,
         prover_data,
         blob_proof_type,
-        &provider_l1,
+        l1_provider,
         grandparent_header,
     )
     .await
 }
 
-async fn prepare_taiko_chain_batch_input_shasta(
+async fn prepare_taiko_chain_batch_input_shasta<BDP: BlockDataProvider>(
     l1_chain_spec: &ChainSpec,
     taiko_chain_spec: &ChainSpec,
     l1_inclusion_block_number: u64,
@@ -500,9 +498,9 @@ async fn prepare_taiko_chain_batch_input_shasta(
     batch_anchor_tx_info: Vec<(u64, B256)>,
     shasta_event_data: raiko_lib::input::shasta::ShastaEventData,
     grandparent_header: Option<reth_primitives::Header>,
+    l1_provider: &BDP,
 ) -> RaikoResult<TaikoGuestBatchInput> {
     let (anchor_block_height, _) = batch_anchor_tx_info[0];
-    let provider_l1 = RpcBlockDataProvider::new(&l1_chain_spec.rpc).await?;
 
     assert!(
         l1_inclusion_block_number > 0,
@@ -511,14 +509,14 @@ async fn prepare_taiko_chain_batch_input_shasta(
     // unlike pacaya that using anchor block as l1_state_header
     // shasta use parent block instead of anchor block because it connect anchor way through parent block
     let (l1_inclusion_header, l1_state_header) = get_headers(
-        &provider_l1,
+        l1_provider,
         (l1_inclusion_block_number, l1_inclusion_block_number - 1),
     )
     .await?;
     assert_eq!(l1_inclusion_header.parent_hash, l1_state_header.hash);
 
     let l1_ancestor_headers = get_max_anchor_headers(
-        &provider_l1,
+        l1_provider,
         batch_anchor_tx_info,
         l1_inclusion_block_number - 1,
     )
@@ -536,7 +534,6 @@ async fn prepare_taiko_chain_batch_input_shasta(
         taiko_chain_spec,
         prover_data,
         blob_proof_type,
-        &provider_l1,
         grandparent_header,
     )
     .await
@@ -551,7 +548,7 @@ async fn prepare_taiko_chain_batch_input_shasta(
 /// 3. Reads L1 ancestor headers for anchor linkage verification
 /// 4. Fetches blob data for each `DerivationSource` in the proposal
 /// 5. Returns a complete `TaikoGuestBatchInput` with `BlockProposedFork::RealTime`
-async fn prepare_taiko_chain_batch_input_realtime(
+async fn prepare_taiko_chain_batch_input_realtime<BDP: BlockDataProvider>(
     l1_chain_spec: &ChainSpec,
     taiko_chain_spec: &ChainSpec,
     prover_data: TaikoProverData,
@@ -559,9 +556,9 @@ async fn prepare_taiko_chain_batch_input_realtime(
     batch_anchor_tx_info: Vec<(u64, B256)>,
     mut realtime_event_data: RealTimeEventData,
     grandparent_header: Option<reth_primitives::Header>,
+    l1_provider: &BDP,
 ) -> RaikoResult<TaikoGuestBatchInput> {
     let max_anchor_block_number: u64 = realtime_event_data.proposal.maxAnchorBlockNumber.to();
-    let provider_l1 = RpcBlockDataProvider::new(&l1_chain_spec.rpc).await?;
 
     // 1. Compute signalSlotsHash
     realtime_event_data.proposal.signalSlotsHash =
@@ -569,7 +566,7 @@ async fn prepare_taiko_chain_batch_input_realtime(
 
     // 2. Read L1 ancestor headers for anchor linkage (includes maxAnchorBlockNumber)
     let l1_ancestor_headers =
-        get_max_anchor_headers(&provider_l1, batch_anchor_tx_info, max_anchor_block_number).await?;
+        get_max_anchor_headers(l1_provider, batch_anchor_tx_info, max_anchor_block_number).await?;
 
     // Extract L1 header at maxAnchorBlockNumber from the ancestor headers (always the last one)
     let l1_header = l1_ancestor_headers
@@ -623,7 +620,7 @@ async fn prepare_taiko_chain_batch_input_realtime(
                             ZFr::from_bytes(&x).unwrap(),
                         );
                         // Append precomputed y (32 bytes) after the KZG proof (48 bytes).
-                        // The guest detects the extended proof (80 bytes) and skips the expensive
+                        // The guest detchtects the extended proof (80 bytes) and skips the expensive
                         // blob deserialization + polynomial evaluation.
                         let mut proof_with_y = point
                             .map(|g1| g1.to_bytes().to_vec())
@@ -683,7 +680,7 @@ async fn prepare_taiko_chain_batch_input_realtime(
 }
 
 /// Prepare the input for a Taiko chain
-pub async fn prepare_taiko_chain_batch_input(
+pub async fn prepare_taiko_chain_batch_input<BDP: BlockDataProvider>(
     l1_chain_spec: &ChainSpec,
     taiko_chain_spec: &ChainSpec,
     l1_inclusion_block_number: u64,
@@ -693,6 +690,7 @@ pub async fn prepare_taiko_chain_batch_input(
     blob_proof_type: &BlobProofType,
     cached_event_data: Option<BlockProposedFork>,
     grandparent_header: Option<reth_primitives::Header>,
+    l1_provider: &BDP,
 ) -> RaikoResult<TaikoGuestBatchInput> {
     // Get the L1 block in which the L2 block was included so we can fetch the DA data.
     // Also get the L1 state block header so that we can prove the L1 state root.
@@ -718,9 +716,8 @@ pub async fn prepare_taiko_chain_batch_input(
         cached_data
     } else {
         debug!("No cached event data, fetching from RPC");
-        let provider_l1 = RpcBlockDataProvider::new(&l1_chain_spec.rpc).await?;
         let (l1_inclusion_height, _, event_data) = get_block_proposed_event_by_height(
-            provider_l1.provider(),
+            l1_provider,
             taiko_chain_spec.clone(),
             l1_inclusion_block_number,
             batch_id,
@@ -747,6 +744,7 @@ pub async fn prepare_taiko_chain_batch_input(
                 batch_anchor_tx_info,
                 batch_proposed,
                 grandparent_header,
+                l1_provider,
             )
             .await
         }
@@ -772,6 +770,7 @@ pub async fn prepare_taiko_chain_batch_input(
                 batch_anchor_tx_info,
                 shasta_event_data,
                 grandparent_header,
+                l1_provider,
             )
             .await
         }
@@ -796,6 +795,7 @@ pub async fn prepare_taiko_chain_batch_input(
                 batch_anchor_tx_info,
                 realtime_event_data,
                 grandparent_header,
+                l1_provider,
             )
             .await
         }
@@ -915,8 +915,8 @@ pub async fn get_batch_tx_data_with_proofs(
     Ok(tx_data)
 }
 
-pub async fn filter_blockchain_event(
-    provider: &RootProvider,
+pub async fn filter_blockchain_event<BDP: BlockDataProvider>(
+    provider: &BDP,
     gen_block_event_filter: impl Fn() -> Filter,
 ) -> Result<Vec<Log>> {
     // Setup the filter to get the relevant events
@@ -925,8 +925,8 @@ pub async fn filter_blockchain_event(
     Ok(provider.get_logs(&filter).await?)
 }
 
-pub async fn get_calldata_txlist_event(
-    provider: &RootProvider,
+pub async fn get_calldata_txlist_event<BDP: BlockDataProvider>(
+    provider: &BDP,
     chain_spec: ChainSpec,
     block_hash: B256,
     l2_block_number: u64,
@@ -961,8 +961,8 @@ pub async fn get_calldata_txlist_event(
             let tx = provider
                 .get_transaction_by_hash(log_tx_hash)
                 .await
-                .expect("couldn't query the propose tx")
-                .expect("Could not find the propose tx");
+                .map_err(|e| anyhow!("couldn't query the propose tx: {e}"))?
+                .ok_or_else(|| anyhow!("Could not find the propose tx"))?;
             return Ok((tx, event.data));
         }
     }
@@ -978,8 +978,8 @@ pub enum EventFilterConditioin {
 }
 
 #[instrument(skip_all)]
-pub async fn filter_block_proposed_event(
-    provider: &RootProvider,
+pub async fn filter_block_proposed_event<BDP: BlockDataProvider>(
+    provider: &BDP,
     chain_spec: ChainSpec,
     filter_condition: EventFilterConditioin,
     block_num_or_batch_id: u64,
@@ -1053,23 +1053,22 @@ pub async fn filter_block_proposed_event(
                     })?;
 
                 let current_block_number = log.block_number.unwrap();
-                let current_block = provider
-                    .get_block(BlockId::number(current_block_number))
-                    .await?;
-                let Some(current_block) = current_block else {
-                    bail!("No current block found for the proposal")
-                };
+                let blocks = provider
+                    .get_blocks(&[
+                        (current_block_number, false),
+                        (current_block_number - 1, false),
+                    ])
+                    .await
+                    .map_err(|e| anyhow!("Failed to fetch blocks: {e}"))?;
+                let current_block = blocks
+                    .first()
+                    .ok_or_else(|| anyhow!("No current block found for the proposal"))?;
                 let timestamp = current_block.header.timestamp;
 
                 let origin_block_number = current_block_number - 1;
-                let origin_block = provider
-                    .get_block_by_number(alloy_rpc_types::BlockNumberOrTag::Number(
-                        origin_block_number,
-                    ))
-                    .await?;
-                let Some(origin_block) = origin_block else {
-                    bail!("No origin block found for the proposal")
-                };
+                let origin_block = blocks
+                    .get(1)
+                    .ok_or_else(|| anyhow!("No origin block found for the proposal"))?;
                 let origin_block_hash = origin_block.header.hash;
                 event_data.proposal.originBlockNumber = Uint::from(origin_block_number);
                 event_data.proposal.originBlockHash = origin_block_hash;
@@ -1098,8 +1097,8 @@ pub async fn filter_block_proposed_event(
             let tx = provider
                 .get_transaction_by_hash(log_tx_hash)
                 .await
-                .expect("couldn't query the propose tx")
-                .expect("Could not find the propose tx");
+                .map_err(|e| anyhow!("couldn't query the propose tx: {e}"))?
+                .ok_or_else(|| anyhow!("Could not find the propose tx"))?;
 
             let block_propose_event = match block_propose_event {
                 BlockProposedFork::Shasta(event_data) => BlockProposedFork::Shasta(event_data),
@@ -1135,8 +1134,8 @@ pub async fn filter_block_proposed_event(
 //     .await
 // }
 
-pub async fn get_block_proposed_event_by_height(
-    provider: &RootProvider,
+pub async fn get_block_proposed_event_by_height<BDP: BlockDataProvider>(
+    provider: &BDP,
     chain_spec: ChainSpec,
     l1_inclusion_block_number: u64,
     block_num_or_batch_id: u64,
@@ -1154,14 +1153,17 @@ pub async fn get_block_proposed_event_by_height(
 
 const MAX_ANCHOR_BLOCK_RANGE: u64 = 96;
 
-pub async fn get_block_proposed_event_by_traversal(
-    provider: &RootProvider,
+pub async fn get_block_proposed_event_by_traversal<BDP: BlockDataProvider>(
+    provider: &BDP,
     chain_spec: ChainSpec,
     l1_anchor_block_number: u64,
     l2_block_number: u64,
     fork: TaikoSpecId,
 ) -> Result<(u64, AlloyRpcTransaction, BlockProposedFork)> {
-    let latest_block_number = provider.get_block_number().await?;
+    let latest_block_number = provider
+        .get_block_number()
+        .await
+        .map_err(|e| anyhow!("Failed to get block number: {e}"))?;
     let range_start = l1_anchor_block_number + 1;
     let range_end = std::cmp::min(
         l1_anchor_block_number + MAX_ANCHOR_BLOCK_RANGE,

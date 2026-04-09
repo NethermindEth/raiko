@@ -1,5 +1,5 @@
 use alloy_primitives::B256;
-use alloy_rpc_types::Block;
+use alloy_rpc_types::{Block, Filter, Log, Transaction as AlloyRpcTransaction};
 use raiko_lib::consts::SupportedChainSpecs;
 
 use crate::{
@@ -18,6 +18,18 @@ pub trait BlockDataProvider: Clone + std::fmt::Debug {
     async fn execution_witness(&self, _block_number: u64) -> Option<RaikoResult<ExecutionWitness>> {
         None
     }
+
+    /// Fetch logs matching the given filter.
+    async fn get_logs(&self, filter: &Filter) -> RaikoResult<Vec<Log>>;
+
+    /// Fetch a transaction by its hash.
+    async fn get_transaction_by_hash(
+        &self,
+        tx_hash: B256,
+    ) -> RaikoResult<Option<AlloyRpcTransaction>>;
+
+    /// Fetch the latest block number.
+    async fn get_block_number(&self) -> RaikoResult<u64>;
 }
 
 pub async fn get_task_data(

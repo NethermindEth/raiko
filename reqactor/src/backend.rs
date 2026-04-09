@@ -334,13 +334,19 @@ pub async fn do_generate_guest_input(
         gpu_number: None,
         last_anchor_block_number: None,
     };
-    let raiko = Raiko::new(l1_chain_spec, taiko_chain_spec.clone(), proof_request);
-    let provider = RpcBlockDataProvider::new(&taiko_chain_spec.rpc.clone())
+    let raiko = Raiko::new(
+        l1_chain_spec.clone(),
+        taiko_chain_spec.clone(),
+        proof_request,
+    )
+    .await
+    .map_err(|err| format!("failed to create raiko: {err:?}"))?;
+    let l2_provider = RpcBlockDataProvider::new(&taiko_chain_spec.rpc)
         .await
         .map_err(|err| format!("failed to create rpc block data provider: {err:?}"))?;
 
     let input = raiko
-        .generate_input(provider)
+        .generate_input(l2_provider)
         .await
         .map_err(|e| format!("failed to generate input: {e:?}"))?;
 
@@ -398,8 +404,14 @@ pub async fn do_prove_single(
         gpu_number,
         last_anchor_block_number: None,
     };
-    let raiko = Raiko::new(l1_chain_spec, taiko_chain_spec.clone(), proof_request);
-    let provider = RpcBlockDataProvider::new(&taiko_chain_spec.rpc.clone())
+    let raiko = Raiko::new(
+        l1_chain_spec.clone(),
+        taiko_chain_spec.clone(),
+        proof_request,
+    )
+    .await
+    .map_err(|err| format!("failed to create raiko: {err:?}"))?;
+    let l2_provider = RpcBlockDataProvider::new(&taiko_chain_spec.rpc)
         .await
         .map_err(|err| format!("failed to create rpc block data provider: {err:?}"))?;
 
@@ -425,7 +437,7 @@ pub async fn do_prove_single(
         } else {
             // 1. Generate the proof input
             raiko
-                .generate_input(provider)
+                .generate_input(l2_provider)
                 .await
                 .map_err(|e| format!("failed to generate input: {e:?}"))?
         };
@@ -514,12 +526,17 @@ async fn new_raiko_for_batch_request(
     let l1_include_block_number = request_entity
         .guest_input_entity()
         .l1_inclusion_block_number();
+    // Create shared L1 provider once — reused by both the parse call and Raiko internals
+    let l1_provider = RpcBlockDataProvider::new(&l1_chain_spec.rpc)
+        .await
+        .map_err(|err| format!("failed to create L1 rpc block data provider: {err:?}"))?;
     // parse the batch proposal tx to get all prove blocks
     let (all_prove_blocks, cached_event_data) = parse_l1_batch_proposal_tx_for_pacaya_fork(
         &l1_chain_spec,
         &taiko_chain_spec,
         *l1_include_block_number,
         *batch_id,
+        &l1_provider,
     )
     .await
     .map_err(|err| format!("Could not parse pacaya L1 batch proposal tx: {err:?}"))?;
@@ -547,15 +564,20 @@ async fn new_raiko_for_batch_request(
         last_anchor_block_number: None,
     };
 
-    Ok(Raiko::new(l1_chain_spec, taiko_chain_spec, proof_request))
+    Ok(Raiko::with_l1_provider(
+        l1_chain_spec,
+        taiko_chain_spec,
+        proof_request,
+        l1_provider,
+    ))
 }
 
 async fn generate_input_for_batch(raiko: &Raiko) -> Result<GuestBatchInput, String> {
-    let provider = RpcBlockDataProvider::new(&raiko.taiko_chain_spec.rpc)
+    let l2_provider = RpcBlockDataProvider::new(&raiko.taiko_chain_spec.rpc)
         .await
-        .expect("Could not create RpcBlockDataProvider");
+        .map_err(|e| format!("Could not create RpcBlockDataProvider: {e:?}"))?;
     let input = raiko
-        .generate_batch_input(provider)
+        .generate_batch_input(l2_provider)
         .await
         .map_err(|e| format!("failed to generate batch input: {e:?}"))?;
     Ok(input)
@@ -675,12 +697,17 @@ async fn new_raiko_for_shasta_proposal_request(
         .guest_input_entity()
         .l1_inclusion_block_number();
 
+    // Create shared L1 provider once — reused by both the parse call and Raiko internals
+    let l1_provider = RpcBlockDataProvider::new(&l1_chain_spec.rpc)
+        .await
+        .map_err(|err| format!("failed to create L1 rpc block data provider: {err:?}"))?;
     // parse & verify proposal event and cache it to avoid duplicate RPC calls
     let (_block_numbers, cached_event_data) = parse_l1_batch_proposal_tx_for_shasta_fork(
         &l1_chain_spec,
         &taiko_chain_spec,
         *l1_include_block_number,
         *proposal_id,
+        &l1_provider,
     )
     .await
     .map_err(|err| format!("Could not parse L1 shasta proposal tx: {err:?}"))?;
@@ -713,7 +740,12 @@ async fn new_raiko_for_shasta_proposal_request(
         gpu_number,
     };
 
-    Ok(Raiko::new(l1_chain_spec, taiko_chain_spec, proof_request))
+    Ok(Raiko::with_l1_provider(
+        l1_chain_spec,
+        taiko_chain_spec,
+        proof_request,
+        l1_provider,
+    ))
 }
 
 pub async fn do_prove_shasta_proposal(
@@ -772,6 +804,10 @@ async fn new_raiko_for_realtime_request(
 
     let entity = request_entity.guest_input_entity();
 
+    let l1_provider = RpcBlockDataProvider::new(&l1_chain_spec.rpc)
+        .await
+        .map_err(|err| format!("failed to create L1 rpc block data provider: {err:?}"))?;
+
     // Build RealTimeEventData from the stored entity fields.
     // maxAnchorBlockHash and signalSlotsHash are left as zero — they are filled in by
     // prepare_taiko_chain_batch_input_realtime during guest-input generation.
@@ -806,7 +842,12 @@ async fn new_raiko_for_realtime_request(
         gpu_number,
     };
 
-    Ok(Raiko::new(l1_chain_spec, taiko_chain_spec, proof_request))
+    Ok(Raiko::with_l1_provider(
+        l1_chain_spec,
+        taiko_chain_spec,
+        proof_request,
+        l1_provider,
+    ))
 }
 
 pub async fn do_generate_realtime_guest_input(

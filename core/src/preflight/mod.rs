@@ -73,8 +73,9 @@ impl PreflightData {
     }
 }
 
-pub async fn preflight<BDP: BlockDataProvider>(
-    provider: BDP,
+pub async fn preflight<BDP: BlockDataProvider, L1BDP: BlockDataProvider>(
+    l2_provider: BDP,
+    l1_provider: &L1BDP,
     PreflightData {
         block_number,
         l1_chain_spec,
@@ -87,7 +88,7 @@ pub async fn preflight<BDP: BlockDataProvider>(
 ) -> RaikoResult<GuestInput> {
     let measurement = Measurement::start("Fetching block data...", false);
 
-    let (block, parent_block) = get_block_and_parent_data(&provider, block_number).await?;
+    let (block, parent_block) = get_block_and_parent_data(&l2_provider, block_number).await?;
 
     let taiko_guest_input = if taiko_chain_spec.is_taiko() {
         prepare_taiko_chain_input(
@@ -98,6 +99,7 @@ pub async fn preflight<BDP: BlockDataProvider>(
             &block,
             prover_data,
             &blob_proof_type,
+            l1_provider,
         )
         .await?
     } else {
@@ -130,7 +132,7 @@ pub async fn preflight<BDP: BlockDataProvider>(
     }
 
     // Fetch execution witness from the L2 node
-    let witness = provider
+    let witness = l2_provider
         .execution_witness(block_number)
         .await
         .ok_or_else(|| {
@@ -162,8 +164,9 @@ pub async fn preflight<BDP: BlockDataProvider>(
     Ok(input)
 }
 
-pub async fn batch_preflight<BDP: BlockDataProvider>(
-    provider: BDP,
+pub async fn batch_preflight<BDP: BlockDataProvider, L1BDP: BlockDataProvider>(
+    l2_provider: BDP,
+    l1_provider: &L1BDP,
     BatchPreflightData {
         batch_id,
         block_numbers,
@@ -179,7 +182,7 @@ pub async fn batch_preflight<BDP: BlockDataProvider>(
     let measurement = Measurement::start("Fetching block data...", false);
 
     let all_block_parent_pairs =
-        get_batch_blocks_and_parent_data(&provider, &block_numbers).await?;
+        get_batch_blocks_and_parent_data(&l2_provider, &block_numbers).await?;
     let (l2_grandparent_header, block_parent_pairs) = if block_numbers[0] == 1 {
         (None, all_block_parent_pairs)
     } else {
@@ -219,6 +222,7 @@ pub async fn batch_preflight<BDP: BlockDataProvider>(
             &blob_proof_type,
             cached_event_data,
             l2_grandparent_header,
+            l1_provider,
         )
         .await?
     } else {
@@ -257,7 +261,7 @@ pub async fn batch_preflight<BDP: BlockDataProvider>(
     }
     let first_block_number = block_parent_pairs[0].0.header.number;
     let mut grandparent_timestamp =
-        get_grandparent_timestamp(&provider, first_block_number).await?;
+        get_grandparent_timestamp(&l2_provider, first_block_number).await?;
 
     let mut base_inputs: Vec<GuestInput> = Vec::with_capacity(block_parent_pairs.len());
     for ((prove_block, parent_block), (_pool_txs, is_force_inclusion)) in
@@ -311,9 +315,9 @@ pub async fn batch_preflight<BDP: BlockDataProvider>(
     let witness_futures: Vec<_> = witness_block_numbers
         .iter()
         .map(|&block_number| {
-            let provider = &provider;
+            let l2_provider = &l2_provider;
             async move {
-                provider
+                l2_provider
                     .execution_witness(block_number)
                     .await
                     .ok_or_else(|| {

@@ -1,6 +1,7 @@
-use alloy_provider::RootProvider;
-use alloy_rpc_client::{ClientBuilder, RpcClient};
-use alloy_rpc_types::{Block, BlockNumberOrTag};
+use alloy_primitives::B256;
+use alloy_provider::{Provider, RootProvider};
+use alloy_rpc_client::RpcClient;
+use alloy_rpc_types::{Block, BlockNumberOrTag, Filter, Log, Transaction as AlloyRpcTransaction};
 pub use alloy_rpc_types_debug::ExecutionWitness;
 use std::{future::Future, time::Duration};
 use tokio::time::sleep;
@@ -18,19 +19,23 @@ pub struct RpcBlockDataProvider {
 }
 
 impl RpcBlockDataProvider {
-    /// async will be used for future preflight optimization
-    pub async fn new(url: &str) -> RaikoResult<Self> {
-        let url =
-            reqwest::Url::parse(url).map_err(|_| RaikoError::RPC("Invalid RPC URL".to_owned()))?;
+    /// Create a provider that reuses an existing HTTP client (sharing its
+    /// connection pool and TLS session cache).
+    pub fn with_client(client: reqwest_alloy::Client, url: &str) -> RaikoResult<Self> {
+        let url = reqwest_alloy::Url::parse(url)
+            .map_err(|_| RaikoError::RPC("Invalid RPC URL".to_owned()))?;
         debug!("provider rpc url: {:?}", url);
+        let rpc_client = RpcClient::new_http_with_client(client, url);
         Ok(Self {
-            provider: RootProvider::new_http(url.clone()),
-            client: ClientBuilder::default().http(url),
+            provider: RootProvider::new(rpc_client.clone()),
+            client: rpc_client,
         })
     }
 
-    pub fn provider(&self) -> &RootProvider {
-        &self.provider
+    /// Convenience constructor — creates a fresh `reqwest::Client` internally.
+    /// Prefer [`with_client`] on hot paths to avoid redundant TLS / pool init.
+    pub async fn new(url: &str) -> RaikoResult<Self> {
+        Self::with_client(reqwest_alloy::Client::new(), url)
     }
 
     async fn construct_and_send_batch(
@@ -99,6 +104,30 @@ impl BlockDataProvider for RpcBlockDataProvider {
 
     async fn execution_witness(&self, block_number: u64) -> Option<RaikoResult<ExecutionWitness>> {
         Some(RpcBlockDataProvider::execution_witness(self, block_number).await)
+    }
+
+    async fn get_logs(&self, filter: &Filter) -> RaikoResult<Vec<Log>> {
+        self.provider
+            .get_logs(filter)
+            .await
+            .map_err(|e| RaikoError::RPC(format!("get_logs failed: {e}")))
+    }
+
+    async fn get_transaction_by_hash(
+        &self,
+        tx_hash: B256,
+    ) -> RaikoResult<Option<AlloyRpcTransaction>> {
+        self.provider
+            .get_transaction_by_hash(tx_hash)
+            .await
+            .map_err(|e| RaikoError::RPC(format!("get_transaction_by_hash failed: {e}")))
+    }
+
+    async fn get_block_number(&self) -> RaikoResult<u64> {
+        self.provider
+            .get_block_number()
+            .await
+            .map_err(|e| RaikoError::RPC(format!("get_block_number failed: {e}")))
     }
 }
 

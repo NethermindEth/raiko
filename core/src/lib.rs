@@ -20,7 +20,7 @@ use crate::{
         ShastaProposalCheckpoint,
     },
     preflight::{batch_preflight, preflight, BatchPreflightData, PreflightData},
-    provider::BlockDataProvider,
+    provider::{rpc::RpcBlockDataProvider, BlockDataProvider},
 };
 
 pub mod interfaces;
@@ -34,18 +34,35 @@ pub struct Raiko {
     pub l1_chain_spec: ChainSpec,
     pub taiko_chain_spec: ChainSpec,
     pub request: ProofRequest,
+    pub l1_provider: RpcBlockDataProvider,
 }
 
 impl Raiko {
-    pub fn new(
+    pub async fn new(
         l1_chain_spec: ChainSpec,
         taiko_chain_spec: ChainSpec,
         request: ProofRequest,
+    ) -> RaikoResult<Self> {
+        let l1_provider = RpcBlockDataProvider::new(&l1_chain_spec.rpc).await?;
+        Ok(Self {
+            l1_chain_spec,
+            taiko_chain_spec,
+            request,
+            l1_provider,
+        })
+    }
+
+    pub fn with_l1_provider(
+        l1_chain_spec: ChainSpec,
+        taiko_chain_spec: ChainSpec,
+        request: ProofRequest,
+        l1_provider: RpcBlockDataProvider,
     ) -> Self {
         Self {
             l1_chain_spec,
             taiko_chain_spec,
             request,
+            l1_provider,
         }
     }
 
@@ -91,24 +108,24 @@ impl Raiko {
 
     pub async fn generate_input<BDP: BlockDataProvider>(
         &self,
-        provider: BDP,
+        l2_provider: BDP,
     ) -> RaikoResult<GuestInput> {
         //TODO: read fork from config
         let preflight_data = self.get_preflight_data();
         info!("Generating input for block {}", self.request.block_number);
-        preflight(provider, preflight_data)
+        preflight(l2_provider, &self.l1_provider, preflight_data)
             .await
             .map_err(Into::<RaikoError>::into)
     }
 
     pub async fn generate_batch_input<BDP: BlockDataProvider>(
         &self,
-        provider: BDP,
+        l2_provider: BDP,
     ) -> RaikoResult<GuestBatchInput> {
         //TODO: read fork from config
         let preflight_data = self.get_batch_preflight_data();
         info!("Generating batch input for batch {}", self.request.batch_id);
-        batch_preflight(provider, preflight_data)
+        batch_preflight(l2_provider, &self.l1_provider, preflight_data)
             .await
             .map_err(Into::<RaikoError>::into)
     }
@@ -506,12 +523,14 @@ mod tests {
         taiko_chain_spec: ChainSpec,
         proof_request: ProofRequest,
     ) -> Proof {
-        let provider = RpcBlockDataProvider::new(&taiko_chain_spec.rpc)
+        let l2_provider = RpcBlockDataProvider::new(&taiko_chain_spec.rpc)
             .await
             .expect("Could not create RpcBlockDataProvider");
-        let raiko = Raiko::new(l1_chain_spec, taiko_chain_spec, proof_request.clone());
+        let raiko = Raiko::new(l1_chain_spec, taiko_chain_spec, proof_request.clone())
+            .await
+            .expect("Could not create Raiko");
         let input = raiko
-            .generate_input(provider)
+            .generate_input(l2_provider)
             .await
             .expect("input generation failed");
         let output = raiko.get_output(&input).expect("output generation failed");
@@ -533,28 +552,33 @@ mod tests {
         taiko_chain_spec: &ChainSpec,
         proof_request: &ProofRequest,
     ) -> Proof {
+        let l1_provider = RpcBlockDataProvider::new(&l1_chain_spec.rpc)
+            .await
+            .expect("Could not create L1 RpcBlockDataProvider");
         let (_block_numbers, _cached_data) = parse_l1_batch_proposal_tx_for_shasta_fork(
             l1_chain_spec,
             taiko_chain_spec,
             proof_request.l1_inclusion_block_number,
             proof_request.batch_id,
+            &l1_provider,
         )
         .await
         .expect("Could not parse L1 shasta proposal tx");
         let all_prove_blocks = proof_request.clone().l2_block_numbers;
         // provider target blocks are all blocks in the batch and the parent block of block[0]
-        let provider = RpcBlockDataProvider::new(&taiko_chain_spec.rpc)
+        let l2_provider = RpcBlockDataProvider::new(&taiko_chain_spec.rpc)
             .await
             .expect("Could not create RpcBlockDataProvider");
         let mut updated_proof_request = proof_request.clone();
         updated_proof_request.l2_block_numbers = all_prove_blocks.clone();
-        let raiko = Raiko::new(
+        let raiko = Raiko::with_l1_provider(
             l1_chain_spec.clone(),
             taiko_chain_spec.clone(),
             updated_proof_request.clone(),
+            l1_provider,
         );
         let input = raiko
-            .generate_batch_input(provider)
+            .generate_batch_input(l2_provider)
             .await
             .expect("input generation failed");
 
@@ -617,27 +641,32 @@ mod tests {
         taiko_chain_spec: ChainSpec,
         proof_request: ProofRequest,
     ) -> Proof {
+        let l1_provider = RpcBlockDataProvider::new(&l1_chain_spec.rpc)
+            .await
+            .expect("Could not create L1 RpcBlockDataProvider");
         let (all_prove_blocks, _) = parse_l1_batch_proposal_tx_for_pacaya_fork(
             &l1_chain_spec,
             &taiko_chain_spec,
             proof_request.l1_inclusion_block_number,
             proof_request.batch_id,
+            &l1_provider,
         )
         .await
         .expect("Could not parse pacaya L1 batch proposal tx");
         // provider target blocks are all blocks in the batch and the parent block of block[0]
-        let provider = RpcBlockDataProvider::new(&taiko_chain_spec.rpc)
+        let l2_provider = RpcBlockDataProvider::new(&taiko_chain_spec.rpc)
             .await
             .expect("Could not create RpcBlockDataProvider");
         let mut updated_proof_request = proof_request.clone();
         updated_proof_request.l2_block_numbers = all_prove_blocks.clone();
-        let raiko = Raiko::new(
+        let raiko = Raiko::with_l1_provider(
             l1_chain_spec.clone(),
             taiko_chain_spec.clone(),
             updated_proof_request.clone(),
+            l1_provider,
         );
         let input = raiko
-            .generate_batch_input(provider)
+            .generate_batch_input(l2_provider)
             .await
             .expect("input generation failed");
         // let filename = format!(
@@ -776,8 +805,8 @@ mod tests {
     }
 
     async fn get_recent_block_num(chain_spec: &ChainSpec) -> u64 {
-        let provider = RpcBlockDataProvider::new(&chain_spec.rpc).await.unwrap();
-        let height = provider.provider.get_block_number().await.unwrap();
+        let l2_provider = RpcBlockDataProvider::new(&chain_spec.rpc).await.unwrap();
+        let height = l2_provider.provider.get_block_number().await.unwrap();
         height - 100
     }
 
