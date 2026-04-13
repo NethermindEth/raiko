@@ -49,6 +49,11 @@ jobs:
             variant: mock
             dockerfile: Dockerfile.mock
             repository: nethermind/surge-raiko-mock
+          - os: ubuntu-latest
+            platform: linux/arm64
+            variant: mock
+            dockerfile: Dockerfile.mock
+            repository: nethermind/surge-raiko-mock
     steps:
       - name: Prepare Environment
         run: |

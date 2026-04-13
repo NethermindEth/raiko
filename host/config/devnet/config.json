@@ -6,40 +6,16 @@
 	"cache_path": "/tmp/raiko/",
 	"prover": "0x70997970C51812dc3A010C7d01b50e0d17dc79C8",
 	"graffiti": "8008500000000000000000000000000000000000000000000000000000000000",
-	"proof_type": "sp1",
+	"proof_type": "zisk",
 	"blob_proof_type": "proof_of_equivalence",
-	"use_cache": false,
+	"use_cache": true,
 	"redis_url": "redis://redis-zk:6379",
 	"redis_ttl": 3600,
 	"enable_redis_pool": false,
-	"tdx": {
-		"instance_ids": {
-			"ONTAKE": 0,
-			"PACAYA": 0,
-			"SHASTA": 0
-		},
-		"bootstrap": false,
-		"prove": true
-	},
 	"zisk": {
 		"batch_snark": true
 	},
-	"risc0": {
-		"boundless": false,
-		"bonsai": false,
-		"snark": true,
-		"profile": false,
-		"execution_po2": 22
-	},
-	"sp1": {
-		"recursion": "core",
-		"prover": "local",
-		"verify": true
-	},
-	"native": {
-		"json_guest_input": null
-	},
 	"queue_limit": 1000,
 	"api_keys": "",
-	"ballot_zk": "{\"Sp1\":[1, 0]}"
+	"ballot_zk": "{}"
 }

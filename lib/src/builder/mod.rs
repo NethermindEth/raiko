@@ -646,8 +646,18 @@ impl RethBlockBuilder<MemDb> {
             // otherwise, compute the updated storage root for that account
             let state_storage = &account.storage;
             let storage_root = {
-                // getting a mutable reference is more efficient than calling remove
-                // every account must have an entry, even newly created accounts
+                // Newly created accounts won't be in parent_storage (the witness only covers
+                // pre-existing state). Insert an empty entry with a warning so the builder
+                // doesn't panic — an empty trie is correct for a brand-new account.
+                if !self.input.parent_storage.contains_key(address) {
+                    tracing::debug!(
+                        "calculate_state_root: address {address} not in witness storage, \
+                         inserting empty trie (likely a new account missing from witness)"
+                    );
+                    self.input
+                        .parent_storage
+                        .insert(*address, Default::default());
+                }
                 let (storage_trie, _) = self
                     .input
                     .parent_storage
@@ -772,12 +782,14 @@ pub fn create_mem_db(input: &mut GuestInput) -> Result<MemDb> {
             );
             let bytes: Bytes = contracts
                 .get(&code_hash)
-                .with_context(|| format!(
-                    "Missing bytecode for code_hash {code_hash} of account {address}. \
+                .with_context(|| {
+                    format!(
+                        "Missing bytecode for code_hash {code_hash} of account {address}. \
                      Witness returned {} contract codes. Available hashes: {:?}",
-                    contracts.len(),
-                    contracts.keys().collect::<Vec<_>>(),
-                ))?
+                        contracts.len(),
+                        contracts.keys().collect::<Vec<_>>(),
+                    )
+                })?
                 .clone();
             Bytecode::new_raw(bytes)
         };
