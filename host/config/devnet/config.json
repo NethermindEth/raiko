@@ -17,5 +17,5 @@
 	},
 	"queue_limit": 1000,
 	"api_keys": "",
-	"ballot_zk": ""
+	"ballot_zk": "{}"
 }
