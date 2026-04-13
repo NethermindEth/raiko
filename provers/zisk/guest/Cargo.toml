@@ -31,7 +31,7 @@ path = "src/shasta_aggregation.rs"
 
 [dependencies]
 # Core Zisk runtime — v0.16.1
-ziskos = { git = "https://github.com/0xPolygonHermez/zisk.git", tag = "v0.16.0" }
+ziskos = { git = "https://github.com/0xPolygonHermez/zisk.git", branch = "fix/plonk-multigpu-0.16.1" }
 
 # Raiko library - all reth/revm/alloy deps come transitively through this
 raiko-lib = { path = "../../../lib", default-features = false, features = [
