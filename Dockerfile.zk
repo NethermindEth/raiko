@@ -123,6 +123,31 @@ RUN mkdir -p host/src && echo "fn main() {}" > host/src/main.rs && touch host/sr
 
 RUN mkdir -p ~/.cargo/bin
 
+# Install cargo-zisk CLI and download the proving key so that make guest can
+# compute the batch vkey.  The proving key is large (~several GB) and is placed
+# at /root/.zisk/provingKey which is where the builder looks by default.
+# ZISK_VERSION should match the version used in script/install.sh.
+ARG ZISK_VERSION=0.16.1
+ENV ZISK_DIR=/root/.zisk
+RUN mkdir -p ${ZISK_DIR}/bin && \
+    curl -fsSL https://raw.githubusercontent.com/0xPolygonHermez/zisk/main/ziskup/ziskup \
+        -o ${ZISK_DIR}/bin/ziskup && \
+    chmod +x ${ZISK_DIR}/bin/ziskup
+
+# Symlink the already-downloaded ZisK Rust toolchain into the directory that
+# `cargo-zisk sdk install-toolchain` would populate.  This makes that step a
+# no-op (it skips download when a toolchain entry already exists), avoiding a
+# redundant multi-GB download during `ziskup --provingkey` below.
+RUN mkdir -p ${ZISK_DIR}/toolchains && \
+    ln -sfn /opt/zisk-toolchain ${ZISK_DIR}/toolchains/zisk-toolchain
+
+# Install cargo-zisk binaries AND download the proving key in one step.
+# ziskup --provingkey always installs the CLI + toolchain first, then the key;
+# the toolchain step is fast because the symlink above satisfies the check.
+# The symlink into CARGO_HOME makes cargo-zisk available on PATH for rom-setup.
+RUN ZISK_DIR=${ZISK_DIR} ${ZISK_DIR}/bin/ziskup --version ${ZISK_VERSION} --provingkey && \
+    ln -sf ${ZISK_DIR}/bin/cargo-zisk /usr/local/cargo/bin/cargo-zisk
+
 #RUN echo "Building risc0 guest ELFs"
 #RUN TARGET=risc0 make guest
 # Verify risc0 guest ELFs were produced
