@@ -1521,7 +1521,7 @@ dependencies = [
 [[package]]
 name = "asm-runner"
 version = "0.16.1"
-source = "git+https://github.com/0xPolygonHermez/zisk.git?tag=v0.16.1#48cf7ccefb5ed62261abf6bfb007b5be8a23c547"
+source = "git+https://github.com/0xPolygonHermez/zisk.git?branch=fix%2Fplonk-multigpu-0.16.1#47dc45703126a3723e3bb2c348f709ee860e5afb"
 dependencies = [
  "anyhow",
  "libc",
@@ -2859,7 +2859,7 @@ dependencies = [
 [[package]]
 name = "circuit"
 version = "0.16.1"
-source = "git+https://github.com/0xPolygonHermez/zisk.git?tag=v0.16.1#48cf7ccefb5ed62261abf6bfb007b5be8a23c547"
+source = "git+https://github.com/0xPolygonHermez/zisk.git?branch=fix%2Fplonk-multigpu-0.16.1#47dc45703126a3723e3bb2c348f709ee860e5afb"
 
 [[package]]
 name = "clang-sys"
@@ -3322,7 +3322,7 @@ dependencies = [
 [[package]]
 name = "curves"
 version = "0.16.1"
-source = "git+https://github.com/0xPolygonHermez/pil2-proofman.git?tag=v0.16.1#971209423e8fa53fa32dc747744d68c65aafa6c7"
+source = "git+https://github.com/0xPolygonHermez/pil2-proofman.git?branch=fix%2Fplonk-multigpu-0.16.1#9677b959d9dffb79da895e93ef46ec5332d725f2"
 dependencies = [
  "fields",
  "num-bigint 0.4.6",
@@ -3601,7 +3601,7 @@ dependencies = [
 [[package]]
 name = "data-bus"
 version = "0.16.1"
-source = "git+https://github.com/0xPolygonHermez/zisk.git?tag=v0.16.1#48cf7ccefb5ed62261abf6bfb007b5be8a23c547"
+source = "git+https://github.com/0xPolygonHermez/zisk.git?branch=fix%2Fplonk-multigpu-0.16.1#47dc45703126a3723e3bb2c348f709ee860e5afb"
 dependencies = [
  "zisk-common",
  "zisk-core",
@@ -4579,7 +4579,7 @@ dependencies = [
 [[package]]
 name = "executor"
 version = "0.16.1"
-source = "git+https://github.com/0xPolygonHermez/zisk.git?tag=v0.16.1#48cf7ccefb5ed62261abf6bfb007b5be8a23c547"
+source = "git+https://github.com/0xPolygonHermez/zisk.git?branch=fix%2Fplonk-multigpu-0.16.1#47dc45703126a3723e3bb2c348f709ee860e5afb"
 dependencies = [
  "anyhow",
  "asm-runner",
@@ -4723,7 +4723,7 @@ checksum = "28dea519a9695b9977216879a3ebfddf92f1c08c05d984f8996aecd6ecdc811d"
 [[package]]
 name = "fields"
 version = "0.16.1"
-source = "git+https://github.com/0xPolygonHermez/pil2-proofman.git?tag=v0.16.1#971209423e8fa53fa32dc747744d68c65aafa6c7"
+source = "git+https://github.com/0xPolygonHermez/pil2-proofman.git?branch=fix%2Fplonk-multigpu-0.16.1#9677b959d9dffb79da895e93ef46ec5332d725f2"
 dependencies = [
  "cfg-if",
  "num-bigint 0.4.6",
@@ -6458,12 +6458,12 @@ checksum = "09edd9e8b54e49e587e4f6295a7d29c3ea94d469cb40ab8ca70b288248a81db2"
 [[package]]
 name = "lib-c"
 version = "0.16.1"
-source = "git+https://github.com/0xPolygonHermez/zisk.git?tag=v0.16.1#48cf7ccefb5ed62261abf6bfb007b5be8a23c547"
+source = "git+https://github.com/0xPolygonHermez/zisk.git?branch=fix%2Fplonk-multigpu-0.16.1#47dc45703126a3723e3bb2c348f709ee860e5afb"
 
 [[package]]
 name = "lib-float"
 version = "0.16.1"
-source = "git+https://github.com/0xPolygonHermez/zisk.git?tag=v0.16.1#48cf7ccefb5ed62261abf6bfb007b5be8a23c547"
+source = "git+https://github.com/0xPolygonHermez/zisk.git?branch=fix%2Fplonk-multigpu-0.16.1#47dc45703126a3723e3bb2c348f709ee860e5afb"
 
 [[package]]
 name = "libc"
@@ -6844,7 +6844,7 @@ dependencies = [
 [[package]]
 name = "mem-common"
 version = "0.16.1"
-source = "git+https://github.com/0xPolygonHermez/zisk.git?tag=v0.16.1#48cf7ccefb5ed62261abf6bfb007b5be8a23c547"
+source = "git+https://github.com/0xPolygonHermez/zisk.git?branch=fix%2Fplonk-multigpu-0.16.1#47dc45703126a3723e3bb2c348f709ee860e5afb"
 dependencies = [
  "clap",
  "fields",
@@ -6864,7 +6864,7 @@ dependencies = [
 [[package]]
 name = "mem-planner-cpp"
 version = "0.16.1"
-source = "git+https://github.com/0xPolygonHermez/zisk.git?tag=v0.16.1#48cf7ccefb5ed62261abf6bfb007b5be8a23c547"
+source = "git+https://github.com/0xPolygonHermez/zisk.git?branch=fix%2Fplonk-multigpu-0.16.1#47dc45703126a3723e3bb2c348f709ee860e5afb"
 dependencies = [
  "mem-common",
  "proofman-common",
@@ -8401,7 +8401,7 @@ dependencies = [
 [[package]]
 name = "pil-std-lib"
 version = "0.16.1"
-source = "git+https://github.com/0xPolygonHermez/pil2-proofman.git?tag=v0.16.1#971209423e8fa53fa32dc747744d68c65aafa6c7"
+source = "git+https://github.com/0xPolygonHermez/pil2-proofman.git?branch=fix%2Fplonk-multigpu-0.16.1#9677b959d9dffb79da895e93ef46ec5332d725f2"
 dependencies = [
  "colored",
  "fields",
@@ -8544,7 +8544,7 @@ dependencies = [
 [[package]]
 name = "precomp-arith-eq"
 version = "0.16.1"
-source = "git+https://github.com/0xPolygonHermez/zisk.git?tag=v0.16.1#48cf7ccefb5ed62261abf6bfb007b5be8a23c547"
+source = "git+https://github.com/0xPolygonHermez/zisk.git?branch=fix%2Fplonk-multigpu-0.16.1#47dc45703126a3723e3bb2c348f709ee860e5afb"
 dependencies = [
  "ark-bn254",
  "ark-ff 0.5.0",
@@ -8581,7 +8581,7 @@ dependencies = [
 [[package]]
 name = "precomp-arith-eq-384"
 version = "0.16.1"
-source = "git+https://github.com/0xPolygonHermez/zisk.git?tag=v0.16.1#48cf7ccefb5ed62261abf6bfb007b5be8a23c547"
+source = "git+https://github.com/0xPolygonHermez/zisk.git?branch=fix%2Fplonk-multigpu-0.16.1#47dc45703126a3723e3bb2c348f709ee860e5afb"
 dependencies = [
  "ark-bls12-381",
  "ark-bn254",
@@ -8618,7 +8618,7 @@ dependencies = [
 [[package]]
 name = "precomp-big-int"
 version = "0.16.1"
-source = "git+https://github.com/0xPolygonHermez/zisk.git?tag=v0.16.1#48cf7ccefb5ed62261abf6bfb007b5be8a23c547"
+source = "git+https://github.com/0xPolygonHermez/zisk.git?branch=fix%2Fplonk-multigpu-0.16.1#47dc45703126a3723e3bb2c348f709ee860e5afb"
 dependencies = [
  "fields",
  "generic-array 0.14.7",
@@ -8640,7 +8640,7 @@ dependencies = [
 [[package]]
 name = "precomp-blake2"
 version = "0.16.1"
-source = "git+https://github.com/0xPolygonHermez/zisk.git?tag=v0.16.1#48cf7ccefb5ed62261abf6bfb007b5be8a23c547"
+source = "git+https://github.com/0xPolygonHermez/zisk.git?branch=fix%2Fplonk-multigpu-0.16.1#47dc45703126a3723e3bb2c348f709ee860e5afb"
 dependencies = [
  "fields",
  "mem-common",
@@ -8660,7 +8660,7 @@ dependencies = [
 [[package]]
 name = "precomp-dma"
 version = "0.16.1"
-source = "git+https://github.com/0xPolygonHermez/zisk.git?tag=v0.16.1#48cf7ccefb5ed62261abf6bfb007b5be8a23c547"
+source = "git+https://github.com/0xPolygonHermez/zisk.git?branch=fix%2Fplonk-multigpu-0.16.1#47dc45703126a3723e3bb2c348f709ee860e5afb"
 dependencies = [
  "fields",
  "generic-array 0.14.7",
@@ -8684,7 +8684,7 @@ dependencies = [
 [[package]]
 name = "precomp-keccakf"
 version = "0.16.1"
-source = "git+https://github.com/0xPolygonHermez/zisk.git?tag=v0.16.1#48cf7ccefb5ed62261abf6bfb007b5be8a23c547"
+source = "git+https://github.com/0xPolygonHermez/zisk.git?branch=fix%2Fplonk-multigpu-0.16.1#47dc45703126a3723e3bb2c348f709ee860e5afb"
 dependencies = [
  "circuit",
  "fields",
@@ -8706,7 +8706,7 @@ dependencies = [
 [[package]]
 name = "precomp-poseidon2"
 version = "0.16.1"
-source = "git+https://github.com/0xPolygonHermez/zisk.git?tag=v0.16.1#48cf7ccefb5ed62261abf6bfb007b5be8a23c547"
+source = "git+https://github.com/0xPolygonHermez/zisk.git?branch=fix%2Fplonk-multigpu-0.16.1#47dc45703126a3723e3bb2c348f709ee860e5afb"
 dependencies = [
  "fields",
  "mem-common",
@@ -8727,7 +8727,7 @@ dependencies = [
 [[package]]
 name = "precomp-sha256f"
 version = "0.16.1"
-source = "git+https://github.com/0xPolygonHermez/zisk.git?tag=v0.16.1#48cf7ccefb5ed62261abf6bfb007b5be8a23c547"
+source = "git+https://github.com/0xPolygonHermez/zisk.git?branch=fix%2Fplonk-multigpu-0.16.1#47dc45703126a3723e3bb2c348f709ee860e5afb"
 dependencies = [
  "fields",
  "mem-common",
@@ -8747,7 +8747,7 @@ dependencies = [
 [[package]]
 name = "precompiles-common"
 version = "0.16.1"
-source = "git+https://github.com/0xPolygonHermez/zisk.git?tag=v0.16.1#48cf7ccefb5ed62261abf6bfb007b5be8a23c547"
+source = "git+https://github.com/0xPolygonHermez/zisk.git?branch=fix%2Fplonk-multigpu-0.16.1#47dc45703126a3723e3bb2c348f709ee860e5afb"
 dependencies = [
  "fields",
  "mem-common",
@@ -8759,7 +8759,7 @@ dependencies = [
 [[package]]
 name = "precompiles-helpers"
 version = "0.16.1"
-source = "git+https://github.com/0xPolygonHermez/zisk.git?tag=v0.16.1#48cf7ccefb5ed62261abf6bfb007b5be8a23c547"
+source = "git+https://github.com/0xPolygonHermez/zisk.git?branch=fix%2Fplonk-multigpu-0.16.1#47dc45703126a3723e3bb2c348f709ee860e5afb"
 dependencies = [
  "ark-bls12-381",
  "ark-bn254",
@@ -8777,7 +8777,7 @@ dependencies = [
 [[package]]
 name = "precompiles-hints"
 version = "0.16.1"
-source = "git+https://github.com/0xPolygonHermez/zisk.git?tag=v0.16.1#48cf7ccefb5ed62261abf6bfb007b5be8a23c547"
+source = "git+https://github.com/0xPolygonHermez/zisk.git?branch=fix%2Fplonk-multigpu-0.16.1#47dc45703126a3723e3bb2c348f709ee860e5afb"
 dependencies = [
  "anyhow",
  "borsh",
@@ -8990,7 +8990,7 @@ dependencies = [
 [[package]]
 name = "proofman"
 version = "0.16.1"
-source = "git+https://github.com/0xPolygonHermez/pil2-proofman.git?tag=v0.16.1#971209423e8fa53fa32dc747744d68c65aafa6c7"
+source = "git+https://github.com/0xPolygonHermez/pil2-proofman.git?branch=fix%2Fplonk-multigpu-0.16.1#9677b959d9dffb79da895e93ef46ec5332d725f2"
 dependencies = [
  "bincode",
  "blake3",
@@ -9025,7 +9025,7 @@ dependencies = [
 [[package]]
 name = "proofman-common"
 version = "0.16.1"
-source = "git+https://github.com/0xPolygonHermez/pil2-proofman.git?tag=v0.16.1#971209423e8fa53fa32dc747744d68c65aafa6c7"
+source = "git+https://github.com/0xPolygonHermez/pil2-proofman.git?branch=fix%2Fplonk-multigpu-0.16.1#9677b959d9dffb79da895e93ef46ec5332d725f2"
 dependencies = [
  "bincode",
  "borsh",
@@ -9057,7 +9057,7 @@ dependencies = [
 [[package]]
 name = "proofman-hints"
 version = "0.16.1"
-source = "git+https://github.com/0xPolygonHermez/pil2-proofman.git?tag=v0.16.1#971209423e8fa53fa32dc747744d68c65aafa6c7"
+source = "git+https://github.com/0xPolygonHermez/pil2-proofman.git?branch=fix%2Fplonk-multigpu-0.16.1#9677b959d9dffb79da895e93ef46ec5332d725f2"
 dependencies = [
  "fields",
  "itoa",
@@ -9070,7 +9070,7 @@ dependencies = [
 [[package]]
 name = "proofman-macros"
 version = "0.16.1"
-source = "git+https://github.com/0xPolygonHermez/pil2-proofman.git?tag=v0.16.1#971209423e8fa53fa32dc747744d68c65aafa6c7"
+source = "git+https://github.com/0xPolygonHermez/pil2-proofman.git?branch=fix%2Fplonk-multigpu-0.16.1#9677b959d9dffb79da895e93ef46ec5332d725f2"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -9080,7 +9080,7 @@ dependencies = [
 [[package]]
 name = "proofman-starks-lib-c"
 version = "0.16.1"
-source = "git+https://github.com/0xPolygonHermez/pil2-proofman.git?tag=v0.16.1#971209423e8fa53fa32dc747744d68c65aafa6c7"
+source = "git+https://github.com/0xPolygonHermez/pil2-proofman.git?branch=fix%2Fplonk-multigpu-0.16.1#9677b959d9dffb79da895e93ef46ec5332d725f2"
 dependencies = [
  "crossbeam-channel",
  "tracing",
@@ -9089,7 +9089,7 @@ dependencies = [
 [[package]]
 name = "proofman-util"
 version = "0.16.1"
-source = "git+https://github.com/0xPolygonHermez/pil2-proofman.git?tag=v0.16.1#971209423e8fa53fa32dc747744d68c65aafa6c7"
+source = "git+https://github.com/0xPolygonHermez/pil2-proofman.git?branch=fix%2Fplonk-multigpu-0.16.1#9677b959d9dffb79da895e93ef46ec5332d725f2"
 dependencies = [
  "bincode",
  "bytemuck",
@@ -9101,7 +9101,7 @@ dependencies = [
 [[package]]
 name = "proofman-verifier"
 version = "0.16.1"
-source = "git+https://github.com/0xPolygonHermez/pil2-proofman.git?tag=v0.16.1#971209423e8fa53fa32dc747744d68c65aafa6c7"
+source = "git+https://github.com/0xPolygonHermez/pil2-proofman.git?branch=fix%2Fplonk-multigpu-0.16.1#9677b959d9dffb79da895e93ef46ec5332d725f2"
 dependencies = [
  "bytemuck",
  "fields",
@@ -12145,7 +12145,7 @@ dependencies = [
 [[package]]
 name = "riscv"
 version = "0.16.1"
-source = "git+https://github.com/0xPolygonHermez/zisk.git?tag=v0.16.1#48cf7ccefb5ed62261abf6bfb007b5be8a23c547"
+source = "git+https://github.com/0xPolygonHermez/zisk.git?branch=fix%2Fplonk-multigpu-0.16.1#47dc45703126a3723e3bb2c348f709ee860e5afb"
 
 [[package]]
 name = "rkyv"
@@ -12227,7 +12227,7 @@ dependencies = [
 [[package]]
 name = "rom-setup"
 version = "0.16.1"
-source = "git+https://github.com/0xPolygonHermez/zisk.git?tag=v0.16.1#48cf7ccefb5ed62261abf6bfb007b5be8a23c547"
+source = "git+https://github.com/0xPolygonHermez/zisk.git?branch=fix%2Fplonk-multigpu-0.16.1#47dc45703126a3723e3bb2c348f709ee860e5afb"
 dependencies = [
  "anyhow",
  "blake3",
@@ -13679,7 +13679,7 @@ dependencies = [
 [[package]]
 name = "sm-arith"
 version = "0.16.1"
-source = "git+https://github.com/0xPolygonHermez/zisk.git?tag=v0.16.1#48cf7ccefb5ed62261abf6bfb007b5be8a23c547"
+source = "git+https://github.com/0xPolygonHermez/zisk.git?branch=fix%2Fplonk-multigpu-0.16.1#47dc45703126a3723e3bb2c348f709ee860e5afb"
 dependencies = [
  "fields",
  "num-bigint 0.4.6",
@@ -13700,7 +13700,7 @@ dependencies = [
 [[package]]
 name = "sm-binary"
 version = "0.16.1"
-source = "git+https://github.com/0xPolygonHermez/zisk.git?tag=v0.16.1#48cf7ccefb5ed62261abf6bfb007b5be8a23c547"
+source = "git+https://github.com/0xPolygonHermez/zisk.git?branch=fix%2Fplonk-multigpu-0.16.1#47dc45703126a3723e3bb2c348f709ee860e5afb"
 dependencies = [
  "fields",
  "num-bigint 0.4.6",
@@ -13720,7 +13720,7 @@ dependencies = [
 [[package]]
 name = "sm-frequent-ops"
 version = "0.16.1"
-source = "git+https://github.com/0xPolygonHermez/zisk.git?tag=v0.16.1#48cf7ccefb5ed62261abf6bfb007b5be8a23c547"
+source = "git+https://github.com/0xPolygonHermez/zisk.git?branch=fix%2Fplonk-multigpu-0.16.1#47dc45703126a3723e3bb2c348f709ee860e5afb"
 dependencies = [
  "clap",
  "fields",
@@ -13736,7 +13736,7 @@ dependencies = [
 [[package]]
 name = "sm-main"
 version = "0.16.1"
-source = "git+https://github.com/0xPolygonHermez/zisk.git?tag=v0.16.1#48cf7ccefb5ed62261abf6bfb007b5be8a23c547"
+source = "git+https://github.com/0xPolygonHermez/zisk.git?branch=fix%2Fplonk-multigpu-0.16.1#47dc45703126a3723e3bb2c348f709ee860e5afb"
 dependencies = [
  "fields",
  "mem-common",
@@ -13756,7 +13756,7 @@ dependencies = [
 [[package]]
 name = "sm-mem"
 version = "0.16.1"
-source = "git+https://github.com/0xPolygonHermez/zisk.git?tag=v0.16.1#48cf7ccefb5ed62261abf6bfb007b5be8a23c547"
+source = "git+https://github.com/0xPolygonHermez/zisk.git?branch=fix%2Fplonk-multigpu-0.16.1#47dc45703126a3723e3bb2c348f709ee860e5afb"
 dependencies = [
  "fields",
  "mem-common",
@@ -13777,7 +13777,7 @@ dependencies = [
 [[package]]
 name = "sm-rom"
 version = "0.16.1"
-source = "git+https://github.com/0xPolygonHermez/zisk.git?tag=v0.16.1#48cf7ccefb5ed62261abf6bfb007b5be8a23c547"
+source = "git+https://github.com/0xPolygonHermez/zisk.git?branch=fix%2Fplonk-multigpu-0.16.1#47dc45703126a3723e3bb2c348f709ee860e5afb"
 dependencies = [
  "asm-runner",
  "fields",
@@ -16954,7 +16954,7 @@ dependencies = [
 [[package]]
 name = "witness"
 version = "0.16.1"
-source = "git+https://github.com/0xPolygonHermez/pil2-proofman.git?tag=v0.16.1#971209423e8fa53fa32dc747744d68c65aafa6c7"
+source = "git+https://github.com/0xPolygonHermez/pil2-proofman.git?branch=fix%2Fplonk-multigpu-0.16.1#9677b959d9dffb79da895e93ef46ec5332d725f2"
 dependencies = [
  "colored",
  "fields",
@@ -17211,7 +17211,7 @@ dependencies = [
 [[package]]
 name = "zisk-build"
 version = "0.16.1"
-source = "git+https://github.com/0xPolygonHermez/zisk.git?tag=v0.16.1#48cf7ccefb5ed62261abf6bfb007b5be8a23c547"
+source = "git+https://github.com/0xPolygonHermez/zisk.git?branch=fix%2Fplonk-multigpu-0.16.1#47dc45703126a3723e3bb2c348f709ee860e5afb"
 dependencies = [
  "anyhow",
  "cargo_metadata 0.23.1",
@@ -17224,7 +17224,7 @@ dependencies = [
 [[package]]
 name = "zisk-common"
 version = "0.16.1"
-source = "git+https://github.com/0xPolygonHermez/zisk.git?tag=v0.16.1#48cf7ccefb5ed62261abf6bfb007b5be8a23c547"
+source = "git+https://github.com/0xPolygonHermez/zisk.git?branch=fix%2Fplonk-multigpu-0.16.1#47dc45703126a3723e3bb2c348f709ee860e5afb"
 dependencies = [
  "anyhow",
  "bincode",
@@ -17249,7 +17249,7 @@ dependencies = [
 [[package]]
 name = "zisk-core"
 version = "0.16.1"
-source = "git+https://github.com/0xPolygonHermez/zisk.git?tag=v0.16.1#48cf7ccefb5ed62261abf6bfb007b5be8a23c547"
+source = "git+https://github.com/0xPolygonHermez/zisk.git?branch=fix%2Fplonk-multigpu-0.16.1#47dc45703126a3723e3bb2c348f709ee860e5afb"
 dependencies = [
  "elf",
  "fields",
@@ -17269,12 +17269,12 @@ dependencies = [
 [[package]]
 name = "zisk-definitions"
 version = "0.16.1"
-source = "git+https://github.com/0xPolygonHermez/zisk.git?tag=v0.16.1#48cf7ccefb5ed62261abf6bfb007b5be8a23c547"
+source = "git+https://github.com/0xPolygonHermez/zisk.git?branch=fix%2Fplonk-multigpu-0.16.1#47dc45703126a3723e3bb2c348f709ee860e5afb"
 
 [[package]]
 name = "zisk-distributed-common"
 version = "0.1.0"
-source = "git+https://github.com/0xPolygonHermez/zisk.git?tag=v0.16.1#48cf7ccefb5ed62261abf6bfb007b5be8a23c547"
+source = "git+https://github.com/0xPolygonHermez/zisk.git?branch=fix%2Fplonk-multigpu-0.16.1#47dc45703126a3723e3bb2c348f709ee860e5afb"
 dependencies = [
  "anyhow",
  "borsh",
@@ -17304,7 +17304,6 @@ dependencies = [
  "hex",
  "libc",
  "once_cell",
- "proofman-common",
  "raiko-lib",
  "reqwest 0.11.27",
  "serde",
@@ -17320,7 +17319,7 @@ dependencies = [
 [[package]]
 name = "zisk-pil"
 version = "0.16.1"
-source = "git+https://github.com/0xPolygonHermez/zisk.git?tag=v0.16.1#48cf7ccefb5ed62261abf6bfb007b5be8a23c547"
+source = "git+https://github.com/0xPolygonHermez/zisk.git?branch=fix%2Fplonk-multigpu-0.16.1#47dc45703126a3723e3bb2c348f709ee860e5afb"
 dependencies = [
  "fields",
  "proofman-common",
@@ -17333,7 +17332,7 @@ dependencies = [
 [[package]]
 name = "zisk-sdk"
 version = "0.16.1"
-source = "git+https://github.com/0xPolygonHermez/zisk.git?tag=v0.16.1#48cf7ccefb5ed62261abf6bfb007b5be8a23c547"
+source = "git+https://github.com/0xPolygonHermez/zisk.git?branch=fix%2Fplonk-multigpu-0.16.1#47dc45703126a3723e3bb2c348f709ee860e5afb"
 dependencies = [
  "anyhow",
  "asm-runner",
@@ -17360,7 +17359,7 @@ dependencies = [
 [[package]]
 name = "zisk-verifier"
 version = "0.16.1"
-source = "git+https://github.com/0xPolygonHermez/zisk.git?tag=v0.16.1#48cf7ccefb5ed62261abf6bfb007b5be8a23c547"
+source = "git+https://github.com/0xPolygonHermez/zisk.git?branch=fix%2Fplonk-multigpu-0.16.1#47dc45703126a3723e3bb2c348f709ee860e5afb"
 dependencies = [
  "proofman-verifier",
 ]
@@ -17368,7 +17367,7 @@ dependencies = [
 [[package]]
 name = "ziskemu"
 version = "0.16.1"
-source = "git+https://github.com/0xPolygonHermez/zisk.git?tag=v0.16.1#48cf7ccefb5ed62261abf6bfb007b5be8a23c547"
+source = "git+https://github.com/0xPolygonHermez/zisk.git?branch=fix%2Fplonk-multigpu-0.16.1#47dc45703126a3723e3bb2c348f709ee860e5afb"
 dependencies = [
  "clap",
  "data-bus",
@@ -17395,7 +17394,7 @@ dependencies = [
 [[package]]
 name = "ziskos-hints"
 version = "0.16.1"
-source = "git+https://github.com/0xPolygonHermez/zisk.git?tag=v0.16.1#48cf7ccefb5ed62261abf6bfb007b5be8a23c547"
+source = "git+https://github.com/0xPolygonHermez/zisk.git?branch=fix%2Fplonk-multigpu-0.16.1#47dc45703126a3723e3bb2c348f709ee860e5afb"
 dependencies = [
  "anyhow",
  "bincode",
