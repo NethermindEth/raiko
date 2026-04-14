@@ -30,6 +30,6 @@ bytemuck = "1"
 libc = "0.2"
 
 # Zisk SDK and related dependencies — v0.16.0 (optional, gated behind "enable")
-zisk-sdk = { git = "https://github.com/0xPolygonHermez/zisk.git", tag = "v0.16.0", optional = true }
-zisk-common = { git = "https://github.com/0xPolygonHermez/zisk.git", tag = "v0.16.0", optional = true }
-fields = { git = "https://github.com/0xPolygonHermez/pil2-proofman.git", tag = "v0.16.0", optional = true }
+zisk-sdk = { git = "https://github.com/0xPolygonHermez/zisk.git", branch = "fix/plonk-multigpu-0.16.1", optional = true }
+zisk-common = { git = "https://github.com/0xPolygonHermez/zisk.git", branch = "fix/plonk-multigpu-0.16.1", optional = true }
+fields = { git = "https://github.com/0xPolygonHermez/pil2-proofman.git", branch = "fix/plonk-multigpu-0.16.1", optional = true }

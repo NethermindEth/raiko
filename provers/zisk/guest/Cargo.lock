@@ -1525,8 +1525,8 @@ dependencies = [
 
 [[package]]
 name = "circuit"
-version = "0.16.0"
-source = "git+https://github.com/0xPolygonHermez/zisk.git?tag=v0.16.0#aacf0a733cbad4be3beb674727804d17cb79f69d"
+version = "0.16.1"
+source = "git+https://github.com/0xPolygonHermez/zisk.git?branch=fix%2Fplonk-multigpu-0.16.1#47dc45703126a3723e3bb2c348f709ee860e5afb"
 
 [[package]]
 name = "clang-sys"
@@ -1797,10 +1797,10 @@ dependencies = [
 
 [[package]]
 name = "curves"
-version = "0.16.0"
-source = "git+https://github.com/0xPolygonHermez/pil2-proofman.git?tag=v0.16.0#d61d40bee66b3c7f02bd4ab8661f9f29ad6730a4"
+version = "0.16.1"
+source = "git+https://github.com/0xPolygonHermez/pil2-proofman.git?branch=fix%2Fplonk-multigpu-0.16.1#9677b959d9dffb79da895e93ef46ec5332d725f2"
 dependencies = [
- "fields 0.16.0 (git+https://github.com/0xPolygonHermez/pil2-proofman.git?tag=v0.16.0)",
+ "fields 0.16.1 (git+https://github.com/0xPolygonHermez/pil2-proofman.git?branch=fix%2Fplonk-multigpu-0.16.1)",
  "num-bigint 0.4.6",
  "num-traits",
 ]
@@ -2299,8 +2299,8 @@ dependencies = [
 
 [[package]]
 name = "fields"
-version = "0.16.0"
-source = "git+https://github.com/0xPolygonHermez/pil2-proofman.git?tag=v0.16.0#d61d40bee66b3c7f02bd4ab8661f9f29ad6730a4"
+version = "0.16.1"
+source = "git+https://github.com/0xPolygonHermez/pil2-proofman.git?tag=v0.16.1#971209423e8fa53fa32dc747744d68c65aafa6c7"
 dependencies = [
  "cfg-if",
  "num-bigint 0.4.6",
@@ -2310,8 +2310,8 @@ dependencies = [
 
 [[package]]
 name = "fields"
-version = "0.16.0"
-source = "git+https://github.com/0xPolygonHermez/pil2-proofman.git?branch=pre-develop-0.16.0#620e7c89f39ee2b608bd0f5d43765dc89728ff67"
+version = "0.16.1"
+source = "git+https://github.com/0xPolygonHermez/pil2-proofman.git?branch=fix%2Fplonk-multigpu-0.16.1#9677b959d9dffb79da895e93ef46ec5332d725f2"
 dependencies = [
  "cfg-if",
  "num-bigint 0.4.6",
@@ -3033,13 +3033,13 @@ checksum = "09edd9e8b54e49e587e4f6295a7d29c3ea94d469cb40ab8ca70b288248a81db2"
 
 [[package]]
 name = "lib-c"
-version = "0.16.0"
-source = "git+https://github.com/0xPolygonHermez/zisk.git?tag=v0.16.0#aacf0a733cbad4be3beb674727804d17cb79f69d"
+version = "0.16.1"
+source = "git+https://github.com/0xPolygonHermez/zisk.git?branch=fix%2Fplonk-multigpu-0.16.1#47dc45703126a3723e3bb2c348f709ee860e5afb"
 
 [[package]]
 name = "lib-float"
-version = "0.16.0"
-source = "git+https://github.com/0xPolygonHermez/zisk.git?tag=v0.16.0#aacf0a733cbad4be3beb674727804d17cb79f69d"
+version = "0.16.1"
+source = "git+https://github.com/0xPolygonHermez/zisk.git?branch=fix%2Fplonk-multigpu-0.16.1#47dc45703126a3723e3bb2c348f709ee860e5afb"
 
 [[package]]
 name = "libc"
@@ -3777,11 +3777,11 @@ dependencies = [
 
 [[package]]
 name = "pil-std-lib"
-version = "0.16.0"
-source = "git+https://github.com/0xPolygonHermez/pil2-proofman.git?tag=v0.16.0#d61d40bee66b3c7f02bd4ab8661f9f29ad6730a4"
+version = "0.16.1"
+source = "git+https://github.com/0xPolygonHermez/pil2-proofman.git?branch=fix%2Fplonk-multigpu-0.16.1#9677b959d9dffb79da895e93ef46ec5332d725f2"
 dependencies = [
  "colored",
- "fields 0.16.0 (git+https://github.com/0xPolygonHermez/pil2-proofman.git?tag=v0.16.0)",
+ "fields 0.16.1 (git+https://github.com/0xPolygonHermez/pil2-proofman.git?branch=fix%2Fplonk-multigpu-0.16.1)",
  "num-bigint 0.4.6",
  "num-traits",
  "proofman-common",
@@ -3875,8 +3875,8 @@ dependencies = [
 
 [[package]]
 name = "precompiles-helpers"
-version = "0.16.0"
-source = "git+https://github.com/0xPolygonHermez/zisk.git?tag=v0.16.0#aacf0a733cbad4be3beb674727804d17cb79f69d"
+version = "0.16.1"
+source = "git+https://github.com/0xPolygonHermez/zisk.git?branch=fix%2Fplonk-multigpu-0.16.1#47dc45703126a3723e3bb2c348f709ee860e5afb"
 dependencies = [
  "ark-bls12-381",
  "ark-bn254",
@@ -3997,8 +3997,8 @@ dependencies = [
 
 [[package]]
 name = "proofman"
-version = "0.16.0"
-source = "git+https://github.com/0xPolygonHermez/pil2-proofman.git?tag=v0.16.0#d61d40bee66b3c7f02bd4ab8661f9f29ad6730a4"
+version = "0.16.1"
+source = "git+https://github.com/0xPolygonHermez/pil2-proofman.git?branch=fix%2Fplonk-multigpu-0.16.1#9677b959d9dffb79da895e93ef46ec5332d725f2"
 dependencies = [
  "bincode",
  "blake3",
@@ -4009,7 +4009,7 @@ dependencies = [
  "crossbeam-channel",
  "csv",
  "curves",
- "fields 0.16.0 (git+https://github.com/0xPolygonHermez/pil2-proofman.git?tag=v0.16.0)",
+ "fields 0.16.1 (git+https://github.com/0xPolygonHermez/pil2-proofman.git?branch=fix%2Fplonk-multigpu-0.16.1)",
  "libloading",
  "mpi",
  "num-bigint 0.4.6",
@@ -4032,8 +4032,8 @@ dependencies = [
 
 [[package]]
 name = "proofman-common"
-version = "0.16.0"
-source = "git+https://github.com/0xPolygonHermez/pil2-proofman.git?tag=v0.16.0#d61d40bee66b3c7f02bd4ab8661f9f29ad6730a4"
+version = "0.16.1"
+source = "git+https://github.com/0xPolygonHermez/pil2-proofman.git?branch=fix%2Fplonk-multigpu-0.16.1#9677b959d9dffb79da895e93ef46ec5332d725f2"
 dependencies = [
  "bincode",
  "borsh",
@@ -4043,8 +4043,9 @@ dependencies = [
  "crossbeam-queue",
  "csv",
  "env",
- "fields 0.16.0 (git+https://github.com/0xPolygonHermez/pil2-proofman.git?tag=v0.16.0)",
+ "fields 0.16.1 (git+https://github.com/0xPolygonHermez/pil2-proofman.git?branch=fix%2Fplonk-multigpu-0.16.1)",
  "lazy_static",
+ "libc",
  "libloading",
  "mpi",
  "num_cpus",
@@ -4063,10 +4064,10 @@ dependencies = [
 
 [[package]]
 name = "proofman-hints"
-version = "0.16.0"
-source = "git+https://github.com/0xPolygonHermez/pil2-proofman.git?tag=v0.16.0#d61d40bee66b3c7f02bd4ab8661f9f29ad6730a4"
+version = "0.16.1"
+source = "git+https://github.com/0xPolygonHermez/pil2-proofman.git?branch=fix%2Fplonk-multigpu-0.16.1#9677b959d9dffb79da895e93ef46ec5332d725f2"
 dependencies = [
- "fields 0.16.0 (git+https://github.com/0xPolygonHermez/pil2-proofman.git?tag=v0.16.0)",
+ "fields 0.16.1 (git+https://github.com/0xPolygonHermez/pil2-proofman.git?branch=fix%2Fplonk-multigpu-0.16.1)",
  "itoa",
  "proofman-common",
  "proofman-starks-lib-c",
@@ -4076,8 +4077,8 @@ dependencies = [
 
 [[package]]
 name = "proofman-macros"
-version = "0.16.0"
-source = "git+https://github.com/0xPolygonHermez/pil2-proofman.git?tag=v0.16.0#d61d40bee66b3c7f02bd4ab8661f9f29ad6730a4"
+version = "0.16.1"
+source = "git+https://github.com/0xPolygonHermez/pil2-proofman.git?branch=fix%2Fplonk-multigpu-0.16.1#9677b959d9dffb79da895e93ef46ec5332d725f2"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -4086,8 +4087,8 @@ dependencies = [
 
 [[package]]
 name = "proofman-starks-lib-c"
-version = "0.16.0"
-source = "git+https://github.com/0xPolygonHermez/pil2-proofman.git?tag=v0.16.0#d61d40bee66b3c7f02bd4ab8661f9f29ad6730a4"
+version = "0.16.1"
+source = "git+https://github.com/0xPolygonHermez/pil2-proofman.git?branch=fix%2Fplonk-multigpu-0.16.1#9677b959d9dffb79da895e93ef46ec5332d725f2"
 dependencies = [
  "crossbeam-channel",
  "tracing",
@@ -4095,8 +4096,8 @@ dependencies = [
 
 [[package]]
 name = "proofman-util"
-version = "0.16.0"
-source = "git+https://github.com/0xPolygonHermez/pil2-proofman.git?tag=v0.16.0#d61d40bee66b3c7f02bd4ab8661f9f29ad6730a4"
+version = "0.16.1"
+source = "git+https://github.com/0xPolygonHermez/pil2-proofman.git?branch=fix%2Fplonk-multigpu-0.16.1#9677b959d9dffb79da895e93ef46ec5332d725f2"
 dependencies = [
  "bincode",
  "bytemuck",
@@ -4107,11 +4108,11 @@ dependencies = [
 
 [[package]]
 name = "proofman-verifier"
-version = "0.16.0"
-source = "git+https://github.com/0xPolygonHermez/pil2-proofman.git?tag=v0.16.0#d61d40bee66b3c7f02bd4ab8661f9f29ad6730a4"
+version = "0.16.1"
+source = "git+https://github.com/0xPolygonHermez/pil2-proofman.git?branch=fix%2Fplonk-multigpu-0.16.1#9677b959d9dffb79da895e93ef46ec5332d725f2"
 dependencies = [
  "bytemuck",
- "fields 0.16.0 (git+https://github.com/0xPolygonHermez/pil2-proofman.git?tag=v0.16.0)",
+ "fields 0.16.1 (git+https://github.com/0xPolygonHermez/pil2-proofman.git?branch=fix%2Fplonk-multigpu-0.16.1)",
  "proofman-util",
  "rayon",
  "tracing",
@@ -5355,8 +5356,8 @@ dependencies = [
 
 [[package]]
 name = "riscv"
-version = "0.16.0"
-source = "git+https://github.com/0xPolygonHermez/zisk.git?tag=v0.16.0#aacf0a733cbad4be3beb674727804d17cb79f69d"
+version = "0.16.1"
+source = "git+https://github.com/0xPolygonHermez/zisk.git?branch=fix%2Fplonk-multigpu-0.16.1#47dc45703126a3723e3bb2c348f709ee860e5afb"
 
 [[package]]
 name = "rkyv"
@@ -7262,11 +7263,11 @@ dependencies = [
 
 [[package]]
 name = "witness"
-version = "0.16.0"
-source = "git+https://github.com/0xPolygonHermez/pil2-proofman.git?tag=v0.16.0#d61d40bee66b3c7f02bd4ab8661f9f29ad6730a4"
+version = "0.16.1"
+source = "git+https://github.com/0xPolygonHermez/pil2-proofman.git?branch=fix%2Fplonk-multigpu-0.16.1#9677b959d9dffb79da895e93ef46ec5332d725f2"
 dependencies = [
  "colored",
- "fields 0.16.0 (git+https://github.com/0xPolygonHermez/pil2-proofman.git?tag=v0.16.0)",
+ "fields 0.16.1 (git+https://github.com/0xPolygonHermez/pil2-proofman.git?branch=fix%2Fplonk-multigpu-0.16.1)",
  "libloading",
  "proofman-common",
  "proofman-util",
@@ -7441,12 +7442,12 @@ dependencies = [
 
 [[package]]
 name = "zisk-common"
-version = "0.16.0"
-source = "git+https://github.com/0xPolygonHermez/zisk.git?tag=v0.16.0#aacf0a733cbad4be3beb674727804d17cb79f69d"
+version = "0.16.1"
+source = "git+https://github.com/0xPolygonHermez/zisk.git?branch=fix%2Fplonk-multigpu-0.16.1#47dc45703126a3723e3bb2c348f709ee860e5afb"
 dependencies = [
  "anyhow",
  "bincode",
- "fields 0.16.0 (git+https://github.com/0xPolygonHermez/pil2-proofman.git?tag=v0.16.0)",
+ "fields 0.16.1 (git+https://github.com/0xPolygonHermez/pil2-proofman.git?branch=fix%2Fplonk-multigpu-0.16.1)",
  "libc",
  "mpi",
  "proofman",
@@ -7466,11 +7467,11 @@ dependencies = [
 
 [[package]]
 name = "zisk-core"
-version = "0.16.0"
-source = "git+https://github.com/0xPolygonHermez/zisk.git?tag=v0.16.0#aacf0a733cbad4be3beb674727804d17cb79f69d"
+version = "0.16.1"
+source = "git+https://github.com/0xPolygonHermez/zisk.git?branch=fix%2Fplonk-multigpu-0.16.1#47dc45703126a3723e3bb2c348f709ee860e5afb"
 dependencies = [
  "elf",
- "fields 0.16.0 (git+https://github.com/0xPolygonHermez/pil2-proofman.git?tag=v0.16.0)",
+ "fields 0.16.1 (git+https://github.com/0xPolygonHermez/pil2-proofman.git?branch=fix%2Fplonk-multigpu-0.16.1)",
  "lib-c",
  "lib-float",
  "paste",
@@ -7486,8 +7487,8 @@ dependencies = [
 
 [[package]]
 name = "zisk-definitions"
-version = "0.16.0"
-source = "git+https://github.com/0xPolygonHermez/zisk.git?tag=v0.16.0#aacf0a733cbad4be3beb674727804d17cb79f69d"
+version = "0.16.1"
+source = "git+https://github.com/0xPolygonHermez/zisk.git?branch=fix%2Fplonk-multigpu-0.16.1#47dc45703126a3723e3bb2c348f709ee860e5afb"
 
 [[package]]
 name = "zisk-guest"
@@ -7503,23 +7504,23 @@ dependencies = [
 
 [[package]]
 name = "zisk-verifier"
-version = "0.16.0"
-source = "git+https://github.com/0xPolygonHermez/zisk.git?tag=v0.16.0#aacf0a733cbad4be3beb674727804d17cb79f69d"
+version = "0.16.1"
+source = "git+https://github.com/0xPolygonHermez/zisk.git?branch=fix%2Fplonk-multigpu-0.16.1#47dc45703126a3723e3bb2c348f709ee860e5afb"
 dependencies = [
  "proofman-verifier",
 ]
 
 [[package]]
 name = "ziskos"
-version = "0.16.0"
-source = "git+https://github.com/0xPolygonHermez/zisk.git?tag=v0.16.0#aacf0a733cbad4be3beb674727804d17cb79f69d"
+version = "0.16.1"
+source = "git+https://github.com/0xPolygonHermez/zisk.git?branch=fix%2Fplonk-multigpu-0.16.1#47dc45703126a3723e3bb2c348f709ee860e5afb"
 dependencies = [
  "anyhow",
  "bincode",
  "bytes",
  "cfg-if",
  "ctor",
- "fields 0.16.0 (git+https://github.com/0xPolygonHermez/pil2-proofman.git?branch=pre-develop-0.16.0)",
+ "fields 0.16.1 (git+https://github.com/0xPolygonHermez/pil2-proofman.git?tag=v0.16.1)",
  "getrandom 0.2.17",
  "lazy_static",
  "lib-c",
@@ -7541,13 +7542,13 @@ dependencies = [
 
 [[package]]
 name = "ziskos-hints"
-version = "0.16.0"
-source = "git+https://github.com/0xPolygonHermez/zisk.git?tag=v0.16.0#aacf0a733cbad4be3beb674727804d17cb79f69d"
+version = "0.16.1"
+source = "git+https://github.com/0xPolygonHermez/zisk.git?branch=fix%2Fplonk-multigpu-0.16.1#47dc45703126a3723e3bb2c348f709ee860e5afb"
 dependencies = [
  "anyhow",
  "bincode",
  "cfg-if",
- "fields 0.16.0 (git+https://github.com/0xPolygonHermez/pil2-proofman.git?tag=v0.16.0)",
+ "fields 0.16.1 (git+https://github.com/0xPolygonHermez/pil2-proofman.git?branch=fix%2Fplonk-multigpu-0.16.1)",
  "getrandom 0.2.17",
  "lazy_static",
  "lib-c",
