@@ -891,7 +891,7 @@ fn lcp(a: &[u8], b: &[u8]) -> usize {
     cmp::min(a.len(), b.len())
 }
 
-fn prefix_nibs(prefix: &[u8]) -> Vec<u8> {
+pub fn prefix_nibs(prefix: &[u8]) -> Vec<u8> {
     let (extension, tail) = prefix.split_first().unwrap();
     // the first bit of the first nibble denotes the parity
     let is_odd = extension & (1 << 4) != 0;
@@ -1137,7 +1137,7 @@ fn add_orphaned_leafs(
 }
 
 /// Creates a new MPT node from a digest.
-fn node_from_digest(digest: B256) -> MptNode {
+pub fn node_from_digest(digest: B256) -> MptNode {
     match digest {
         EMPTY_ROOT | B256::ZERO => MptNode::default(),
         _ => MptNodeData::Digest(digest).into(),
