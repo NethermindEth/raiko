@@ -25,7 +25,8 @@ use raiko_lib::{
     utils::shasta_rules::ANCHOR_MAX_OFFSET,
 };
 
-use raiko_lib::input::L1StorageProof;
+use alethia_reth_evm::precompiles::l1staticcall::L1StaticCallRecord;
+use raiko_lib::input::{ExecutionWitness, L1StaticCallWitness, L1StorageProof};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::iter;
@@ -1511,6 +1512,90 @@ async fn get_and_filter_blob_data_by_blobscan(
     let blob = response.json::<BlobScanData>().await?;
     Ok(blob_to_bytes(&blob.data))
 }
+/// Fetch execution witnesses for L1STATICCALL calls from the L1 NMC node.
+///
+/// For each recorded call, calls debug_executionWitnessCall on L1 to get the
+/// execution witness (MPT trie nodes + bytecodes + keys + headers).
+pub async fn fetch_l1_staticcall_witnesses(
+    l1_rpc_url: &str,
+    calls: &[L1StaticCallRecord],
+) -> RaikoResult<Vec<L1StaticCallWitness>> {
+    let client = reqwest::Client::new();
+    let mut witnesses = Vec::new();
+
+    for (i, call) in calls.iter().enumerate() {
+        info!(
+            "L1STATICCALL: fetching execution witness {}/{} for target={:?}, block={}",
+            i + 1,
+            calls.len(),
+            call.target,
+            call.block_number
+        );
+
+        let call_data_hex = format!("0x{}", hex::encode(&call.calldata));
+        let block_hex = format!("0x{:x}", call.block_number);
+
+        let resp = client
+            .post(l1_rpc_url)
+            .json(&serde_json::json!({
+                "jsonrpc": "2.0",
+                "method": "debug_executionWitnessCall",
+                "params": [
+                    {"to": format!("{:?}", call.target), "data": call_data_hex},
+                    block_hex
+                ],
+                "id": 1
+            }))
+            .send()
+            .await
+            .map_err(|e| {
+                RaikoError::Preflight(format!(
+                    "L1STATICCALL: debug_executionWitnessCall request failed: {e}"
+                ))
+            })?;
+
+        let body: serde_json::Value = resp.json().await.map_err(|e| {
+            RaikoError::Preflight(format!(
+                "L1STATICCALL: failed to parse debug_executionWitnessCall response: {e}"
+            ))
+        })?;
+
+        if let Some(error) = body.get("error") {
+            return Err(RaikoError::Preflight(format!(
+                "L1STATICCALL: debug_executionWitnessCall returned error: {}",
+                error
+            )));
+        }
+
+        let result = body.get("result").ok_or_else(|| {
+            RaikoError::Preflight(
+                "L1STATICCALL: debug_executionWitnessCall response missing 'result'".to_string(),
+            )
+        })?;
+
+        let execution_witness: ExecutionWitness =
+            serde_json::from_value(result.clone()).map_err(|e| {
+                RaikoError::Preflight(format!(
+                    "L1STATICCALL: failed to deserialize ExecutionWitness: {e}"
+                ))
+            })?;
+
+        witnesses.push(L1StaticCallWitness {
+            target_address: call.target,
+            block_number: call.block_number,
+            calldata: alloy_primitives::Bytes::from(call.calldata.clone()),
+            return_data: alloy_primitives::Bytes::from(call.return_data.clone()),
+            execution_witness,
+        });
+    }
+
+    info!(
+        "L1STATICCALL: fetched {} execution witnesses",
+        witnesses.len()
+    );
+    Ok(witnesses)
+}
+
 #[cfg(test)]
 mod test {
     use alloy_rlp::Decodable;

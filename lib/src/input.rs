@@ -51,6 +51,27 @@ pub struct L1StorageProof {
     pub storage_proof: Vec<Bytes>,
 }
 
+/// Execution witness for a single L1STATICCALL — contains everything
+/// needed to statelessly re-execute the call in the ZK guest.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct L1StaticCallWitness {
+    pub target_address: Address,
+    pub block_number: u64,
+    pub calldata: Bytes,
+    pub return_data: Bytes,
+    pub execution_witness: ExecutionWitness,
+}
+
+/// Matches the format from NMC's debug_executionWitnessCall.
+/// Contains all data needed to statelessly re-execute a call.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct ExecutionWitness {
+    pub state: Vec<Bytes>,   // MPT trie node preimages
+    pub codes: Vec<Bytes>,   // Contract bytecodes
+    pub keys: Vec<Bytes>,    // Unhashed addresses and storage slots
+    pub headers: Vec<Bytes>, // RLP-encoded block headers
+}
+
 /// External block input.
 #[serde_as]
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
@@ -83,6 +104,9 @@ pub struct GuestInput {
     #[serde_as(as = "Vec<BincodeCompactHeader>")]
     #[serde(default)]
     pub l1_headers: Vec<Header>,
+    /// L1STATICCALL execution witnesses for ZK guest verification
+    #[serde(default)]
+    pub l1_staticcall_witnesses: Vec<L1StaticCallWitness>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
@@ -551,6 +575,7 @@ mod test {
             taiko: TaikoGuestInput::default(),
             l1_storage_proofs: vec![],
             l1_headers: vec![],
+            l1_staticcall_witnesses: vec![],
         };
         let input_ser = serde_json::to_string(&input).unwrap();
         let input_de: GuestInput = serde_json::from_str(&input_ser).unwrap();
@@ -570,6 +595,7 @@ mod test {
             taiko: TaikoGuestInput::default(),
             l1_storage_proofs: vec![],
             l1_headers: vec![],
+            l1_staticcall_witnesses: vec![],
         };
         let input_ser = serde_json::to_value(&input).unwrap();
         let input_de: GuestInput = serde_json::from_value(input_ser).unwrap();

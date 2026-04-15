@@ -152,7 +152,7 @@ pub fn clear_l1sload_cache() {
 /// `l1_headers` must be ordered oldest→newest, ending just below L1 origin (i.e. the last
 /// header's hash must equal `l1_origin_header.parent_hash` when walking backward).
 /// We walk in reverse, verifying parent_hash linkage at each step.
-fn build_verified_state_root_map(
+pub fn build_verified_state_root_map(
     l1_origin_header: &Header,
     l1_headers: &[Header],
 ) -> Result<HashMap<u64, B256>> {

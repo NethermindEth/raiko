@@ -255,3 +255,13 @@ rkyv = "0.8.11"
 
 [patch.crates-io]
 secp256k1 = { git = "https://github.com/sp1-patches/rust-secp256k1", tag = "patch-0.30.0-sp1-6.0.0" }
+
+# Local overrides for L1STATICCALL development (changes not yet pushed to remote).
+# For Docker builds: push alethia-reth changes first, then remove this section.
+# For local dev: these absolute paths work on the dev machine.
+[patch."https://github.com/NethermindEth/alethia-reth.git"]
+alethia-reth-block = { path = "/home/nurbakyt/code/alethia-reth/crates/block" }
+alethia-reth-chainspec = { path = "/home/nurbakyt/code/alethia-reth/crates/chainspec" }
+alethia-reth-consensus = { path = "/home/nurbakyt/code/alethia-reth/crates/consensus" }
+alethia-reth-evm = { path = "/home/nurbakyt/code/alethia-reth/crates/evm" }
+alethia-reth-primitives = { path = "/home/nurbakyt/code/alethia-reth/crates/primitives" }

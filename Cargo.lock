@@ -120,7 +120,6 @@ dependencies = [
 [[package]]
 name = "alethia-reth-block"
 version = "0.6.0"
-source = "git+https://github.com/NethermindEth/alethia-reth.git?rev=98b32a4693e9fb55b0364e4ae922f3e8149c5c21#98b32a4693e9fb55b0364e4ae922f3e8149c5c21"
 dependencies = [
  "alethia-reth-chainspec",
  "alethia-reth-consensus",
@@ -152,7 +151,6 @@ dependencies = [
 [[package]]
 name = "alethia-reth-chainspec"
 version = "0.6.0"
-source = "git+https://github.com/NethermindEth/alethia-reth.git?rev=98b32a4693e9fb55b0364e4ae922f3e8149c5c21#98b32a4693e9fb55b0364e4ae922f3e8149c5c21"
 dependencies = [
  "alloy-chains",
  "alloy-consensus",
@@ -175,7 +173,6 @@ dependencies = [
 [[package]]
 name = "alethia-reth-consensus"
 version = "0.6.0"
-source = "git+https://github.com/NethermindEth/alethia-reth.git?rev=98b32a4693e9fb55b0364e4ae922f3e8149c5c21#98b32a4693e9fb55b0364e4ae922f3e8149c5c21"
 dependencies = [
  "alethia-reth-chainspec",
  "alethia-reth-evm",
@@ -208,7 +205,6 @@ dependencies = [
 [[package]]
 name = "alethia-reth-evm"
 version = "0.6.0"
-source = "git+https://github.com/NethermindEth/alethia-reth.git?rev=98b32a4693e9fb55b0364e4ae922f3e8149c5c21#98b32a4693e9fb55b0364e4ae922f3e8149c5c21"
 dependencies = [
  "alloy-evm",
  "alloy-primitives",
@@ -224,7 +220,6 @@ dependencies = [
 [[package]]
 name = "alethia-reth-primitives"
 version = "0.6.0"
-source = "git+https://github.com/NethermindEth/alethia-reth.git?rev=98b32a4693e9fb55b0364e4ae922f3e8149c5c21#98b32a4693e9fb55b0364e4ae922f3e8149c5c21"
 dependencies = [
  "alethia-reth-chainspec",
  "alethia-reth-consensus",
@@ -8496,6 +8491,7 @@ dependencies = [
 name = "raiko-core"
 version = "0.1.0"
 dependencies = [
+ "alethia-reth-evm",
  "alethia-reth-primitives",
  "alloy-consensus",
  "alloy-network",
@@ -8515,6 +8511,7 @@ dependencies = [
  "ethers-core",
  "eyre",
  "futures",
+ "hex",
  "kzg",
  "lazy_static",
  "lru 0.13.0",
@@ -8667,6 +8664,7 @@ dependencies = [
  "serde",
  "serde_json",
  "serde_with",
+ "serial_test 2.0.0",
  "sha2",
  "thiserror 1.0.69",
  "thiserror-no-std",

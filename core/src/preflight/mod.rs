@@ -17,7 +17,10 @@ use raiko_lib::{
     },
     l1_precompiles::{
         acquire_l1sload_lock, clear_l1_rpc_fetcher, clear_l1_rpc_served_calls, clear_l1sload_cache,
-        populate_l1sload_cache, set_l1_rpc_fetcher, take_l1_rpc_served_calls,
+        clear_l1_staticcall_cache, clear_l1_staticcall_rpc_fetcher,
+        clear_l1_staticcall_rpc_served_calls, populate_l1sload_cache, set_l1_rpc_fetcher,
+        set_l1_staticcall_rpc_fetcher, take_l1_rpc_served_calls,
+        take_l1_staticcall_rpc_served_calls,
     },
     primitives::mpt::proofs_to_tries,
     proof_type::ProofType,
@@ -27,8 +30,9 @@ use raiko_lib::{
 use tracing::{debug, info};
 
 use util::{
-    execute_txs, fetch_l1_proofs_for_rpc_served_calls, get_batch_blocks_and_parent_data,
-    get_block_and_parent_data, prepare_taiko_chain_batch_input, prepare_taiko_chain_input,
+    execute_txs, fetch_l1_proofs_for_rpc_served_calls, fetch_l1_staticcall_witnesses,
+    get_batch_blocks_and_parent_data, get_block_and_parent_data, prepare_taiko_chain_batch_input,
+    prepare_taiko_chain_input,
 };
 
 pub use util::{
@@ -187,8 +191,9 @@ pub async fn preflight<BDP: BlockDataProvider>(
     );
 
     // Optimize data gathering by executing the transactions multiple times so data can be requested in batches.
-    // L1SLOAD precompile globals are process-wide, so run clear/populate/execute/cleanup under lock.
+    // L1SLOAD/L1STATICCALL precompile globals are process-wide, so run clear/populate/execute/cleanup under lock.
     let mut rpc_served_calls = std::collections::HashSet::new();
+    let mut l1_staticcall_served_calls = Vec::new();
     if input.chain_spec.is_taiko() {
         let _l1sload_guard = acquire_l1sload_lock();
         clear_l1sload_cache();
@@ -214,12 +219,47 @@ pub async fn preflight<BDP: BlockDataProvider>(
             })
         });
 
+        // L1STATICCALL setup
+        clear_l1_staticcall_cache();
+        clear_l1_staticcall_rpc_served_calls();
+        {
+            let l1_rpc_url = l1_chain_spec.rpc.clone();
+            let parsed_url = reqwest::Url::parse(&l1_rpc_url)
+                .map_err(|e| RaikoError::Preflight(format!("invalid L1 RPC URL for L1STATICCALL: {e}")))?;
+            let l1_client = alloy_rpc_client::ClientBuilder::default().http(parsed_url);
+            let handle = tokio::runtime::Handle::current();
+            set_l1_staticcall_rpc_fetcher(move |target, block_number, calldata| {
+                let client = l1_client.clone();
+                tokio::task::block_in_place(|| {
+                    handle.block_on(async {
+                        let call_data_hex = format!("0x{}", hex::encode(calldata));
+                        let block_id = format!("0x{:x}", block_number);
+                        let result: String = client
+                            .request(
+                                "eth_call",
+                                (
+                                    serde_json::json!({"to": format!("{:?}", target), "data": call_data_hex}),
+                                    block_id,
+                                ),
+                            )
+                            .await
+                            .map_err(|e| format!("eth_call failed for L1STATICCALL: {e}"))?;
+                        let result_hex = result.strip_prefix("0x").unwrap_or(&result);
+                        hex::decode(result_hex).map_err(|e| format!("Failed to decode eth_call result: {e}"))
+                    })
+                })
+            });
+        }
+
         let handle = tokio::runtime::Handle::current();
         let exec_result =
             tokio::task::block_in_place(|| handle.block_on(execute_txs(&mut builder, pool_tx)));
 
         rpc_served_calls = take_l1_rpc_served_calls();
         clear_l1_rpc_fetcher();
+
+        l1_staticcall_served_calls = take_l1_staticcall_rpc_served_calls();
+        clear_l1_staticcall_rpc_fetcher();
 
         if let Err(err) = exec_result {
             return Err(err);
@@ -243,6 +283,19 @@ pub async fn preflight<BDP: BlockDataProvider>(
         .await?;
         input.l1_storage_proofs = collection.proofs;
         input.l1_headers = collection.l1_headers;
+    }
+
+    // L1STATICCALL witness collection
+    if input.chain_spec.is_taiko() && !l1_staticcall_served_calls.is_empty() {
+        info!(
+            "Detected {} L1STATICCALL calls via RPC fallback",
+            l1_staticcall_served_calls.len()
+        );
+        input.l1_staticcall_witnesses = fetch_l1_staticcall_witnesses(
+            &l1_chain_spec.rpc,
+            &l1_staticcall_served_calls,
+        )
+        .await?;
     }
 
     let db = if let Some(db) = builder.db.as_mut() {
@@ -526,6 +579,7 @@ pub async fn batch_preflight<BDP: BlockDataProvider>(
                 let mut pool_txs = vec![anchor_tx.clone()];
                 pool_txs.extend_from_slice(&pure_pool_txs);
                 let mut rpc_served_calls = std::collections::HashSet::new();
+                let mut l1_staticcall_served_calls = Vec::new();
                 if taiko_chain_spec.is_taiko() {
                     let _l1sload_guard = acquire_l1sload_lock();
                     clear_l1sload_cache();
@@ -555,12 +609,47 @@ pub async fn batch_preflight<BDP: BlockDataProvider>(
                         })
                     });
 
+                    // L1STATICCALL setup
+                    clear_l1_staticcall_cache();
+                    clear_l1_staticcall_rpc_served_calls();
+                    {
+                        let l1_rpc_url = l1_rpc_url_for_chunk.clone();
+                        let parsed_url = reqwest::Url::parse(&l1_rpc_url)
+                            .map_err(|e| RaikoError::Preflight(format!("invalid L1 RPC URL for L1STATICCALL: {e}")))?;
+                        let l1_client = alloy_rpc_client::ClientBuilder::default().http(parsed_url);
+                        let handle = tokio::runtime::Handle::current();
+                        set_l1_staticcall_rpc_fetcher(move |target, block_number, calldata| {
+                            let client = l1_client.clone();
+                            tokio::task::block_in_place(|| {
+                                handle.block_on(async {
+                                    let call_data_hex = format!("0x{}", hex::encode(calldata));
+                                    let block_id = format!("0x{:x}", block_number);
+                                    let result: String = client
+                                        .request(
+                                            "eth_call",
+                                            (
+                                                serde_json::json!({"to": format!("{:?}", target), "data": call_data_hex}),
+                                                block_id,
+                                            ),
+                                        )
+                                        .await
+                                        .map_err(|e| format!("eth_call failed for L1STATICCALL: {e}"))?;
+                                    let result_hex = result.strip_prefix("0x").unwrap_or(&result);
+                                    hex::decode(result_hex).map_err(|e| format!("Failed to decode eth_call result: {e}"))
+                                })
+                            })
+                        });
+                    }
+
                     let handle = tokio::runtime::Handle::current();
                     let exec_result = tokio::task::block_in_place(|| {
                         handle.block_on(execute_txs(&mut builder, pool_txs))
                     });
                     rpc_served_calls = take_l1_rpc_served_calls();
                     clear_l1_rpc_fetcher();
+
+                    l1_staticcall_served_calls = take_l1_staticcall_rpc_served_calls();
+                    clear_l1_staticcall_rpc_fetcher();
 
                     if let Err(err) = exec_result {
                         return Err(err);
@@ -584,6 +673,20 @@ pub async fn batch_preflight<BDP: BlockDataProvider>(
                     .await?;
                     input.l1_storage_proofs = collection.proofs;
                     input.l1_headers = collection.l1_headers;
+                }
+
+                // L1STATICCALL witness collection
+                if taiko_chain_spec.is_taiko() && !l1_staticcall_served_calls.is_empty() {
+                    info!(
+                        "Detected {} L1STATICCALL calls via RPC fallback (batch block {})",
+                        l1_staticcall_served_calls.len(),
+                        prove_block.header.number
+                    );
+                    input.l1_staticcall_witnesses = fetch_l1_staticcall_witnesses(
+                        &l1_rpc_url_for_chunk,
+                        &l1_staticcall_served_calls,
+                    )
+                    .await?;
                 }
 
                 let db = if let Some(db) = builder.db.as_mut() {

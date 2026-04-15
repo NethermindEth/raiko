@@ -9,7 +9,9 @@ use raiko_lib::{
     consts::ChainSpec,
     input::{GuestBatchInput, GuestBatchOutput, GuestInput, GuestOutput, TaikoProverData},
     l1_precompiles::{
-        acquire_l1sload_lock, clear_l1sload_cache, verify_and_populate_l1sload_proofs,
+        acquire_l1sload_lock, build_verified_state_root_map, clear_l1sload_cache,
+        clear_l1_staticcall_cache, verify_and_populate_l1_staticcall_witnesses,
+        verify_and_populate_l1sload_proofs,
     },
     protocol_instance::ProtocolInstance,
     prover::{IdStore, IdWrite, Proof, ProofKey},
@@ -38,46 +40,71 @@ pub mod provider;
 
 pub type MerkleProof = HashMap<Address, EIP1186AccountProofResponse>;
 
-/// Prepare L1SLOAD state for block execution: clear cache, and if the block has
-/// L1 storage proofs, acquire the execution lock and verify/populate them.
+/// Prepare L1 precompile state for block execution: clear caches, and if the block has
+/// L1 storage proofs or L1STATICCALL witnesses, acquire the execution lock and
+/// verify/populate them.
 ///
 /// Returns the execution guard that must be held until block execution completes.
-fn prepare_l1sload_for_execution(input: &GuestInput) -> RaikoResult<MutexGuard<'static, ()>> {
+fn prepare_l1_precompiles_for_execution(input: &GuestInput) -> RaikoResult<MutexGuard<'static, ()>> {
     let guard = acquire_l1sload_lock();
+
+    // --- L1SLOAD ---
     clear_l1sload_cache();
 
-    if input.l1_storage_proofs.is_empty() {
-        return Ok(guard);
-    }
-    let anchor_tx = input.taiko.anchor_tx.as_ref().ok_or_else(|| {
-        RaikoError::Guest(raiko_lib::prover::ProverError::GuestError(
-            "No anchor tx for L1SLOAD verification".to_string(),
-        ))
-    })?;
-    let fork = input
-        .chain_spec
-        .active_fork(input.block.header.number, input.block.timestamp)
+    if !input.l1_storage_proofs.is_empty() {
+        let anchor_tx = input.taiko.anchor_tx.as_ref().ok_or_else(|| {
+            RaikoError::Guest(raiko_lib::prover::ProverError::GuestError(
+                "No anchor tx for L1SLOAD verification".to_string(),
+            ))
+        })?;
+        let fork = input
+            .chain_spec
+            .active_fork(input.block.header.number, input.block.timestamp)
+            .map_err(|e| {
+                RaikoError::Guest(raiko_lib::prover::ProverError::GuestError(format!(
+                    "Failed to determine active fork: {e}"
+                )))
+            })?;
+        let (anchor_block_number, _) =
+            get_anchor_tx_info_by_fork(fork, anchor_tx).map_err(|e| {
+                RaikoError::Guest(raiko_lib::prover::ProverError::GuestError(format!(
+                    "Failed to decode anchor tx info: {e}"
+                )))
+            })?;
+        verify_and_populate_l1sload_proofs(
+            &input.l1_storage_proofs,
+            anchor_block_number,
+            &input.taiko.l1_header,
+            &input.l1_headers,
+        )
         .map_err(|e| {
             RaikoError::Guest(raiko_lib::prover::ProverError::GuestError(format!(
-                "Failed to determine active fork: {e}"
+                "Failed to verify L1SLOAD proofs: {e}"
             )))
         })?;
-    let (anchor_block_number, _) = get_anchor_tx_info_by_fork(fork, anchor_tx).map_err(|e| {
-        RaikoError::Guest(raiko_lib::prover::ProverError::GuestError(format!(
-            "Failed to decode anchor tx info: {e}"
-        )))
-    })?;
-    verify_and_populate_l1sload_proofs(
-        &input.l1_storage_proofs,
-        anchor_block_number,
-        &input.taiko.l1_header,
-        &input.l1_headers,
-    )
-    .map_err(|e| {
-        RaikoError::Guest(raiko_lib::prover::ProverError::GuestError(format!(
-            "Failed to verify L1SLOAD proofs: {e}"
-        )))
-    })?;
+    }
+
+    // --- L1STATICCALL ---
+    clear_l1_staticcall_cache();
+
+    if !input.l1_staticcall_witnesses.is_empty() {
+        let l1_origin_header = &input.taiko.l1_header;
+        let state_root_map = build_verified_state_root_map(l1_origin_header, &input.l1_headers)
+            .map_err(|e| {
+                RaikoError::Guest(raiko_lib::prover::ProverError::GuestError(format!(
+                    "Failed to build state root map for L1STATICCALL: {e}"
+                )))
+            })?;
+        verify_and_populate_l1_staticcall_witnesses(
+            &input.l1_staticcall_witnesses,
+            &state_root_map,
+        )
+        .map_err(|e| {
+            RaikoError::Guest(raiko_lib::prover::ProverError::GuestError(format!(
+                "Failed to verify L1STATICCALL witnesses: {e}"
+            )))
+        })?;
+    }
 
     Ok(guard)
 }
@@ -188,7 +215,7 @@ impl Raiko {
             &input.taiko.anchor_tx,
         );
 
-        let _l1sload_guard = prepare_l1sload_for_execution(input)?;
+        let _l1sload_guard = prepare_l1_precompiles_for_execution(input)?;
 
         builder
             .execute_transactions(pool_tx, false)
@@ -268,7 +295,7 @@ impl Raiko {
         let db = create_mem_db(&mut input_owned).unwrap();
         let mut builder = RethBlockBuilder::new(input_owned, db);
 
-        let _l1sload_guard = prepare_l1sload_for_execution(input)?;
+        let _l1sload_guard = prepare_l1_precompiles_for_execution(input)?;
 
         let mut pool_txs = vec![input.taiko.anchor_tx.clone().unwrap()];
         pool_txs.extend_from_slice(&origin_pool_txs.as_slice());
