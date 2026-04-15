@@ -1,5 +1,6 @@
 mod l1sload;
 mod l1staticcall;
+pub mod witness_db;
 
 pub use l1sload::{
     acquire_l1sload_lock, build_verified_state_root_map, clear_l1sload_cache,
