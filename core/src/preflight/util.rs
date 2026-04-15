@@ -1585,6 +1585,7 @@ pub async fn fetch_l1_staticcall_witnesses(
             block_number: call.block_number,
             calldata: alloy_primitives::Bytes::from(call.calldata.clone()),
             return_data: alloy_primitives::Bytes::from(call.return_data.clone()),
+            gas_used: call.gas_used,
             execution_witness,
         });
     }

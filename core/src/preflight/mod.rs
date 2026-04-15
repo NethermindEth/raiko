@@ -228,24 +228,46 @@ pub async fn preflight<BDP: BlockDataProvider>(
                 .map_err(|e| RaikoError::Preflight(format!("invalid L1 RPC URL for L1STATICCALL: {e}")))?;
             let l1_client = alloy_rpc_client::ClientBuilder::default().http(parsed_url);
             let handle = tokio::runtime::Handle::current();
-            set_l1_staticcall_rpc_fetcher(move |target, block_number, calldata| {
+            set_l1_staticcall_rpc_fetcher(move |target, block_number, gas_limit, calldata| {
                 let client = l1_client.clone();
                 tokio::task::block_in_place(|| {
                     handle.block_on(async {
                         let call_data_hex = format!("0x{}", hex::encode(calldata));
                         let block_id = format!("0x{:x}", block_number);
-                        let result: String = client
+                        let gas_hex = format!("0x{:x}", gas_limit.min(30_000_000));
+
+                        #[derive(Debug, serde::Deserialize)]
+                        #[serde(rename_all = "camelCase")]
+                        struct TraceCallResult {
+                            gas: u64,
+                            return_value: String,
+                            failed: bool,
+                        }
+
+                        let resp: TraceCallResult = client
                             .request(
-                                "eth_call",
+                                "debug_traceCall",
                                 (
-                                    serde_json::json!({"to": format!("{:?}", target), "data": call_data_hex}),
+                                    serde_json::json!({
+                                        "from": "0x0000000000000000000000000000000000000000",
+                                        "to": format!("{:?}", target),
+                                        "data": call_data_hex,
+                                        "gas": gas_hex,
+                                    }),
                                     block_id,
+                                    serde_json::json!({}),
                                 ),
                             )
                             .await
-                            .map_err(|e| format!("eth_call failed for L1STATICCALL: {e}"))?;
-                        let result_hex = result.strip_prefix("0x").unwrap_or(&result);
-                        hex::decode(result_hex).map_err(|e| format!("Failed to decode eth_call result: {e}"))
+                            .map_err(|e| format!("debug_traceCall failed: {e}"))?;
+
+                        if resp.failed {
+                            return Err(format!("L1 call reverted (gas_used={})", resp.gas));
+                        }
+                        let hex_str = resp.return_value.strip_prefix("0x").unwrap_or(&resp.return_value);
+                        let bytes = hex::decode(hex_str)
+                            .map_err(|e| format!("decode returnValue: {e}"))?;
+                        Ok((resp.gas.min(gas_limit), bytes))
                     })
                 })
             });
@@ -618,24 +640,46 @@ pub async fn batch_preflight<BDP: BlockDataProvider>(
                             .map_err(|e| RaikoError::Preflight(format!("invalid L1 RPC URL for L1STATICCALL: {e}")))?;
                         let l1_client = alloy_rpc_client::ClientBuilder::default().http(parsed_url);
                         let handle = tokio::runtime::Handle::current();
-                        set_l1_staticcall_rpc_fetcher(move |target, block_number, calldata| {
+                        set_l1_staticcall_rpc_fetcher(move |target, block_number, gas_limit, calldata| {
                             let client = l1_client.clone();
                             tokio::task::block_in_place(|| {
                                 handle.block_on(async {
                                     let call_data_hex = format!("0x{}", hex::encode(calldata));
                                     let block_id = format!("0x{:x}", block_number);
-                                    let result: String = client
+                                    let gas_hex = format!("0x{:x}", gas_limit.min(30_000_000));
+
+                                    #[derive(Debug, serde::Deserialize)]
+                                    #[serde(rename_all = "camelCase")]
+                                    struct TraceCallResult {
+                                        gas: u64,
+                                        return_value: String,
+                                        failed: bool,
+                                    }
+
+                                    let resp: TraceCallResult = client
                                         .request(
-                                            "eth_call",
+                                            "debug_traceCall",
                                             (
-                                                serde_json::json!({"to": format!("{:?}", target), "data": call_data_hex}),
+                                                serde_json::json!({
+                                                    "from": "0x0000000000000000000000000000000000000000",
+                                                    "to": format!("{:?}", target),
+                                                    "data": call_data_hex,
+                                                    "gas": gas_hex,
+                                                }),
                                                 block_id,
+                                                serde_json::json!({}),
                                             ),
                                         )
                                         .await
-                                        .map_err(|e| format!("eth_call failed for L1STATICCALL: {e}"))?;
-                                    let result_hex = result.strip_prefix("0x").unwrap_or(&result);
-                                    hex::decode(result_hex).map_err(|e| format!("Failed to decode eth_call result: {e}"))
+                                        .map_err(|e| format!("debug_traceCall failed: {e}"))?;
+
+                                    if resp.failed {
+                                        return Err(format!("L1 call reverted (gas_used={})", resp.gas));
+                                    }
+                                    let hex_str = resp.return_value.strip_prefix("0x").unwrap_or(&resp.return_value);
+                                    let bytes = hex::decode(hex_str)
+                                        .map_err(|e| format!("decode returnValue: {e}"))?;
+                                    Ok((resp.gas.min(gas_limit), bytes))
                                 })
                             })
                         });
