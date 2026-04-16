@@ -61,6 +61,8 @@ pub struct L1StaticCallWitness {
     pub return_data: Bytes,
     /// Actual gas consumed on L1, as reported by `debug_traceCall`.
     pub gas_used: u64,
+    #[serde(default)]
+    pub is_reverted: bool,
     pub execution_witness: ExecutionWitness,
 }
 

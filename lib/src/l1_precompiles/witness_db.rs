@@ -59,13 +59,14 @@ impl WitnessDb {
         self.block_hashes.get(&block_number).copied()
     }
 
+    /// Missing accounts resolve to `None`, matching L1 semantics for "account does not
+    /// exist". The later output/gas assertion is what catches an actually incomplete witness.
     fn lookup_account(&self, address: Address) -> Result<Option<StateAccount>, ProviderError> {
         let key = keccak(address);
         match self.state_trie.get(&key) {
             Ok(Some(rlp_bytes)) => {
-                let account: StateAccount =
-                    alloy_rlp::Decodable::decode(&mut &rlp_bytes[..])
-                        .map_err(|_| ProviderError::BestBlockNotFound)?;
+                let account: StateAccount = alloy_rlp::Decodable::decode(&mut &rlp_bytes[..])
+                    .map_err(|_| ProviderError::BestBlockNotFound)?;
                 Ok(Some(account))
             }
             Ok(None) => Ok(None),
@@ -108,6 +109,8 @@ impl Database for WitnessDb {
         }
     }
 
+    /// Missing code is a hard error: absent bytecode always changes call behavior, so we
+    /// must fail loudly instead of pretending the contract is empty.
     fn code_by_hash(&mut self, code_hash: B256) -> Result<Bytecode, Self::Error> {
         match self.codes.get(&code_hash) {
             Some(code) => Ok(Bytecode::new_raw(alloy_primitives::Bytes::from(
@@ -120,6 +123,9 @@ impl Database for WitnessDb {
         }
     }
 
+    /// Missing storage resolves to zero, matching L1 semantics for an absent slot/account.
+    /// The separate three-way `(output, gas_used, halt status)` assertion catches witnesses
+    /// that are incomplete in a behavior-changing way.
     fn storage(&mut self, address: Address, index: U256) -> Result<U256, Self::Error> {
         if let Some((storage_trie, _slots)) = self.storage.get(&address) {
             let key = keccak(index.to_be_bytes::<32>());

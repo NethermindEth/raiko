@@ -16,10 +16,10 @@ use raiko_lib::{
         TaikoProverData,
     },
     l1_precompiles::{
-        acquire_l1sload_lock, clear_l1_rpc_fetcher, clear_l1_rpc_served_calls, clear_l1sload_cache,
+        acquire_l1sload_lock, clear_l1_rpc_fetcher, clear_l1_rpc_served_calls,
         clear_l1_staticcall_cache, clear_l1_staticcall_rpc_fetcher,
-        clear_l1_staticcall_rpc_served_calls, populate_l1sload_cache, set_l1_rpc_fetcher,
-        set_l1_staticcall_rpc_fetcher, take_l1_rpc_served_calls,
+        clear_l1_staticcall_rpc_served_calls, clear_l1sload_cache, populate_l1sload_cache,
+        set_l1_rpc_fetcher, set_l1_staticcall_rpc_fetcher, take_l1_rpc_served_calls,
         take_l1_staticcall_rpc_served_calls,
     },
     primitives::mpt::proofs_to_tries,
@@ -224,8 +224,9 @@ pub async fn preflight<BDP: BlockDataProvider>(
         clear_l1_staticcall_rpc_served_calls();
         {
             let l1_rpc_url = l1_chain_spec.rpc.clone();
-            let parsed_url = reqwest::Url::parse(&l1_rpc_url)
-                .map_err(|e| RaikoError::Preflight(format!("invalid L1 RPC URL for L1STATICCALL: {e}")))?;
+            let parsed_url = reqwest::Url::parse(&l1_rpc_url).map_err(|e| {
+                RaikoError::Preflight(format!("invalid L1 RPC URL for L1STATICCALL: {e}"))
+            })?;
             let l1_client = alloy_rpc_client::ClientBuilder::default().http(parsed_url);
             let handle = tokio::runtime::Handle::current();
             set_l1_staticcall_rpc_fetcher(move |target, block_number, gas_limit, calldata| {
@@ -262,12 +263,15 @@ pub async fn preflight<BDP: BlockDataProvider>(
                             .map_err(|e| format!("debug_traceCall failed: {e}"))?;
 
                         if resp.failed {
-                            return Err(format!("L1 call reverted (gas_used={})", resp.gas));
+                            return Ok((resp.gas.min(gas_limit), vec![], true));
                         }
-                        let hex_str = resp.return_value.strip_prefix("0x").unwrap_or(&resp.return_value);
-                        let bytes = hex::decode(hex_str)
-                            .map_err(|e| format!("decode returnValue: {e}"))?;
-                        Ok((resp.gas.min(gas_limit), bytes))
+                        let hex_str = resp
+                            .return_value
+                            .strip_prefix("0x")
+                            .unwrap_or(&resp.return_value);
+                        let bytes =
+                            hex::decode(hex_str).map_err(|e| format!("decode returnValue: {e}"))?;
+                        Ok((resp.gas.min(gas_limit), bytes, false))
                     })
                 })
             });
@@ -313,11 +317,8 @@ pub async fn preflight<BDP: BlockDataProvider>(
             "Detected {} L1STATICCALL calls via RPC fallback",
             l1_staticcall_served_calls.len()
         );
-        input.l1_staticcall_witnesses = fetch_l1_staticcall_witnesses(
-            &l1_chain_spec.rpc,
-            &l1_staticcall_served_calls,
-        )
-        .await?;
+        input.l1_staticcall_witnesses =
+            fetch_l1_staticcall_witnesses(&l1_chain_spec.rpc, &l1_staticcall_served_calls).await?;
     }
 
     let db = if let Some(db) = builder.db.as_mut() {
@@ -636,14 +637,18 @@ pub async fn batch_preflight<BDP: BlockDataProvider>(
                     clear_l1_staticcall_rpc_served_calls();
                     {
                         let l1_rpc_url = l1_rpc_url_for_chunk.clone();
-                        let parsed_url = reqwest::Url::parse(&l1_rpc_url)
-                            .map_err(|e| RaikoError::Preflight(format!("invalid L1 RPC URL for L1STATICCALL: {e}")))?;
+                        let parsed_url = reqwest::Url::parse(&l1_rpc_url).map_err(|e| {
+                            RaikoError::Preflight(format!(
+                                "invalid L1 RPC URL for L1STATICCALL: {e}"
+                            ))
+                        })?;
                         let l1_client = alloy_rpc_client::ClientBuilder::default().http(parsed_url);
                         let handle = tokio::runtime::Handle::current();
-                        set_l1_staticcall_rpc_fetcher(move |target, block_number, gas_limit, calldata| {
-                            let client = l1_client.clone();
-                            tokio::task::block_in_place(|| {
-                                handle.block_on(async {
+                        set_l1_staticcall_rpc_fetcher(
+                            move |target, block_number, gas_limit, calldata| {
+                                let client = l1_client.clone();
+                                tokio::task::block_in_place(|| {
+                                    handle.block_on(async {
                                     let call_data_hex = format!("0x{}", hex::encode(calldata));
                                     let block_id = format!("0x{:x}", block_number);
                                     let gas_hex = format!("0x{:x}", gas_limit.min(30_000_000));
@@ -674,15 +679,16 @@ pub async fn batch_preflight<BDP: BlockDataProvider>(
                                         .map_err(|e| format!("debug_traceCall failed: {e}"))?;
 
                                     if resp.failed {
-                                        return Err(format!("L1 call reverted (gas_used={})", resp.gas));
+                                        return Ok((resp.gas.min(gas_limit), vec![], true));
                                     }
                                     let hex_str = resp.return_value.strip_prefix("0x").unwrap_or(&resp.return_value);
                                     let bytes = hex::decode(hex_str)
                                         .map_err(|e| format!("decode returnValue: {e}"))?;
-                                    Ok((resp.gas.min(gas_limit), bytes))
+                                    Ok((resp.gas.min(gas_limit), bytes, false))
                                 })
-                            })
-                        });
+                                })
+                            },
+                        );
                     }
 
                     let handle = tokio::runtime::Handle::current();
