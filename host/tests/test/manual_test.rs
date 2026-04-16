@@ -55,6 +55,7 @@ pub async fn test_manual_prove() {
         ),
         prover: Some("0x70997970C51812dc3A010C7d01b50e0d17dc79C8".to_owned()),
         blob_proof_type: Some("proof_of_equivalence".to_string()),
+        use_cache: None,
         prover_args: ProverSpecificOpts {
             native: None,
             sp1: None,

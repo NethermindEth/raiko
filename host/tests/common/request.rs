@@ -37,6 +37,7 @@ pub fn make_proof_request(
         ),
         prover: Some("0x70997970C51812dc3A010C7d01b50e0d17dc79C8".to_owned()),
         blob_proof_type: Some("proof_of_equivalence".to_string()),
+        use_cache: None,
         prover_args: ProverSpecificOpts {
             native: Some(json!({
                 "json_guest_input": json_guest_input,
