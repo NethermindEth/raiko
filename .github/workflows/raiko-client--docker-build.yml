@@ -49,7 +49,7 @@ jobs:
             variant: mock
             dockerfile: Dockerfile.mock
             repository: nethermind/surge-raiko-mock
-          - os: ubuntu-latest
+          - os: ubuntu-24.04-arm
             platform: linux/arm64
             variant: mock
             dockerfile: Dockerfile.mock
