@@ -17,7 +17,7 @@ use raiko_core::{
 };
 use raiko_lib::proof_type::ProofType;
 use raiko_reqactor::Actor;
-use raiko_reqpool::ImageId;
+use raiko_reqpool::{ImageId, Status as PoolStatus};
 use raiko_tasks::TaskStatus;
 use serde_json::Value;
 use utoipa::OpenApi;
@@ -125,11 +125,24 @@ async fn realtime_handler(
     let (_input_request_key, proof_request_key, _input_request_entity, proof_request_entity) =
         process_realtime_request(&realtime_request, &image_id);
 
-    // If use_cache is false, evict existing proof to force re-proving.
+    // If use_cache is false: return the cached proof if it is already ready, then evict it so
+    // the *next* request triggers a fresh proof.  If no proof is cached yet, fall through to
+    // the normal proving flow (don't evict a still-in-progress entry).
     if !realtime_request.use_cache {
-        let _ = actor
-            .pool_remove_request(&proof_request_key.clone().into())
-            .await;
+        if let Ok(Some(status_with_context)) =
+            actor.pool_get_status(&proof_request_key.clone().into()).await
+        {
+            if matches!(status_with_context.status(), PoolStatus::Success { .. }) {
+                let _ = actor
+                    .pool_remove_request(&proof_request_key.clone().into())
+                    .await;
+                return Ok(to_v3_status(
+                    realtime_request.proof_type,
+                    None,
+                    Ok(status_with_context.into_status()),
+                ));
+            }
+        }
     }
 
     // Submit proof directly — do_prove_realtime will generate guest input
