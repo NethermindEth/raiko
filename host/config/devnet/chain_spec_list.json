@@ -14,7 +14,7 @@
     "rpc": "http://host.docker.internal:32003",
     "beacon_rpc": "http://host.docker.internal:33001",
     "verifier_address_forks": {},
-    "genesis_time": 1776061203,
+    "genesis_time": 1776330241,
     "seconds_per_slot": 12,
     "is_taiko": false
   },
@@ -33,13 +33,13 @@
         "elasticity_multiplier": "0x2"
     },
     "l1_contract": {
-        "REALTIME": "0xFd14bc4D6d794a9197D550C10804aA77990059F7"
+        "REALTIME": "0x4276B617e5C81D9CE4C43084777079b49C0E5C57"
     },
     "l2_contract": "0x7633740000000000000000000000000000010001",
     "rpc": "http://host.docker.internal:8547",
     "beacon_rpc": null,
     "verifier_address_forks": {
-        "REALTIME": { "ZISK": "0x1e6319f31ff9Df5E1657E0Df32750E9FDcd37A3c" }
+        "REALTIME": { "ZISK": "0xDAF826c91637A8C9380D18fE1954aB4fb9aa5968" }
     },
     "genesis_time": 0,
     "seconds_per_slot": 1,

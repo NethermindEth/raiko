@@ -6,7 +6,7 @@ services:
       dockerfile: Dockerfile.zk
       platforms:
         - linux/amd64
-    image: docker.io/nethermind/surge-raiko-zk:v26.0.0-surge
+    image: docker.io/nethermind/surge-raiko-zk:latest
     container_name: raiko-zk
     network_mode: host
     env_file:
