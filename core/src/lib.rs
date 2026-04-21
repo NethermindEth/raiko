@@ -10,8 +10,8 @@ use raiko_lib::{
     input::{GuestBatchInput, GuestBatchOutput, GuestInput, GuestOutput, TaikoProverData},
     l1_precompiles::{
         acquire_l1sload_lock, build_verified_state_root_map, clear_l1sload_cache,
-        clear_l1_staticcall_cache, verify_and_populate_l1_staticcall_witnesses,
-        verify_and_populate_l1sload_proofs,
+        clear_l1_staticcall_cache, populate_l1sload_cache,
+        verify_and_populate_l1_staticcall_witnesses, verify_and_populate_l1sload_proofs,
     },
     protocol_instance::ProtocolInstance,
     prover::{IdStore, IdWrite, Proof, ProofKey},
@@ -48,29 +48,40 @@ pub type MerkleProof = HashMap<Address, EIP1186AccountProofResponse>;
 fn prepare_l1_precompiles_for_execution(input: &GuestInput) -> RaikoResult<MutexGuard<'static, ()>> {
     let guard = acquire_l1sload_lock();
 
-    // --- L1SLOAD ---
     clear_l1sload_cache();
+    clear_l1_staticcall_cache();
+
+    if !input.chain_spec.is_taiko() {
+        return Ok(guard);
+    }
+
+    // Derive shared anchor / l1-origin context from the anchor tx. Both L1SLOAD and
+    // L1STATICCALL precompiles require this context at runtime even when the block
+    // has no L1SLOAD proofs — e.g. an L1STATICCALL-only batch still needs the
+    // precompile's block-range check to pass during re-execution.
+    let anchor_tx = input.taiko.anchor_tx.as_ref().ok_or_else(|| {
+        RaikoError::Guest(raiko_lib::prover::ProverError::GuestError(
+            "No anchor tx for L1 precompile context".to_string(),
+        ))
+    })?;
+    let fork = input
+        .chain_spec
+        .active_fork(input.block.header.number, input.block.timestamp)
+        .map_err(|e| {
+            RaikoError::Guest(raiko_lib::prover::ProverError::GuestError(format!(
+                "Failed to determine active fork: {e}"
+            )))
+        })?;
+    let (anchor_block_number, _) = get_anchor_tx_info_by_fork(fork, anchor_tx).map_err(|e| {
+        RaikoError::Guest(raiko_lib::prover::ProverError::GuestError(format!(
+            "Failed to decode anchor tx info: {e}"
+        )))
+    })?;
+    let l1_origin_block_number = input.taiko.l1_header.number;
+
+    populate_l1sload_cache(&[], anchor_block_number, l1_origin_block_number);
 
     if !input.l1_storage_proofs.is_empty() {
-        let anchor_tx = input.taiko.anchor_tx.as_ref().ok_or_else(|| {
-            RaikoError::Guest(raiko_lib::prover::ProverError::GuestError(
-                "No anchor tx for L1SLOAD verification".to_string(),
-            ))
-        })?;
-        let fork = input
-            .chain_spec
-            .active_fork(input.block.header.number, input.block.timestamp)
-            .map_err(|e| {
-                RaikoError::Guest(raiko_lib::prover::ProverError::GuestError(format!(
-                    "Failed to determine active fork: {e}"
-                )))
-            })?;
-        let (anchor_block_number, _) =
-            get_anchor_tx_info_by_fork(fork, anchor_tx).map_err(|e| {
-                RaikoError::Guest(raiko_lib::prover::ProverError::GuestError(format!(
-                    "Failed to decode anchor tx info: {e}"
-                )))
-            })?;
         verify_and_populate_l1sload_proofs(
             &input.l1_storage_proofs,
             anchor_block_number,
@@ -84,17 +95,15 @@ fn prepare_l1_precompiles_for_execution(input: &GuestInput) -> RaikoResult<Mutex
         })?;
     }
 
-    // --- L1STATICCALL ---
-    clear_l1_staticcall_cache();
-
     if !input.l1_staticcall_witnesses.is_empty() {
-        let l1_origin_header = &input.taiko.l1_header;
-        let state_root_map = build_verified_state_root_map(l1_origin_header, &input.l1_headers)
-            .map_err(|e| {
-                RaikoError::Guest(raiko_lib::prover::ProverError::GuestError(format!(
-                    "Failed to build state root map for L1STATICCALL: {e}"
-                )))
-            })?;
+        let state_root_map =
+            build_verified_state_root_map(&input.taiko.l1_header, &input.l1_headers).map_err(
+                |e| {
+                    RaikoError::Guest(raiko_lib::prover::ProverError::GuestError(format!(
+                        "Failed to build state root map for L1STATICCALL: {e}"
+                    )))
+                },
+            )?;
         verify_and_populate_l1_staticcall_witnesses(
             &input.l1_staticcall_witnesses,
             &state_root_map,
