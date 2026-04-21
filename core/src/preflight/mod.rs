@@ -30,9 +30,9 @@ use raiko_lib::{
 use tracing::{debug, info};
 
 use util::{
-    execute_txs, fetch_l1_proofs_for_rpc_served_calls, fetch_l1_staticcall_witnesses,
-    get_batch_blocks_and_parent_data, get_block_and_parent_data, prepare_taiko_chain_batch_input,
-    prepare_taiko_chain_input,
+    execute_txs, extend_l1_headers_for_l1staticcall_witnesses, fetch_l1_proofs_for_rpc_served_calls,
+    fetch_l1_staticcall_witnesses, get_batch_blocks_and_parent_data, get_block_and_parent_data,
+    prepare_taiko_chain_batch_input, prepare_taiko_chain_input,
 };
 
 pub use util::{
@@ -295,14 +295,22 @@ pub async fn preflight<BDP: BlockDataProvider>(
     }
 
     // Collect L1SLOAD calls discovered during execution via RPC fallback.
+    let need_l1_provider = input.chain_spec.is_taiko()
+        && (!rpc_served_calls.is_empty() || !l1_staticcall_served_calls.is_empty());
+    let l1_provider_opt = if need_l1_provider {
+        Some(RpcBlockDataProvider::new(&l1_chain_spec.rpc).await?)
+    } else {
+        None
+    };
+
     if input.chain_spec.is_taiko() && !rpc_served_calls.is_empty() {
         info!(
             "Detected {} L1SLOAD calls via RPC fallback",
             rpc_served_calls.len()
         );
-        let l1_provider = RpcBlockDataProvider::new(&l1_chain_spec.rpc).await?;
+        let l1_provider = l1_provider_opt.as_ref().expect("l1_provider must exist");
         let collection = fetch_l1_proofs_for_rpc_served_calls(
-            &l1_provider,
+            l1_provider,
             &rpc_served_calls,
             l1_origin_block_id,
         )
@@ -319,6 +327,14 @@ pub async fn preflight<BDP: BlockDataProvider>(
         );
         input.l1_staticcall_witnesses =
             fetch_l1_staticcall_witnesses(&l1_chain_spec.rpc, &l1_staticcall_served_calls).await?;
+
+        let l1_provider = l1_provider_opt.as_ref().expect("l1_provider must exist");
+        extend_l1_headers_for_l1staticcall_witnesses(
+            &mut input,
+            l1_provider,
+            l1_origin_block_id,
+        )
+        .await?;
     }
 
     let db = if let Some(db) = builder.db.as_mut() {
@@ -735,6 +751,13 @@ pub async fn batch_preflight<BDP: BlockDataProvider>(
                     input.l1_staticcall_witnesses = fetch_l1_staticcall_witnesses(
                         &l1_rpc_url_for_chunk,
                         &l1_staticcall_served_calls,
+                    )
+                    .await?;
+
+                    extend_l1_headers_for_l1staticcall_witnesses(
+                        &mut input,
+                        &l1_provider,
+                        l1_origin_block_id,
                     )
                     .await?;
                 }

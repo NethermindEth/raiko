@@ -869,6 +869,56 @@ async fn fetch_l1_headers_in_range(
     Ok(headers)
 }
 
+/// Ensure `input.l1_headers` covers every L1 block queried by L1STATICCALL witnesses.
+///
+/// The guest walks `l1_headers` backward from the L1 origin to build a trusted
+/// `block_number → state_root` map. That walk is bounded by whatever `l1_headers`
+/// contains, which today is populated only by the L1SLOAD proof collection. If an
+/// L1STATICCALL witness targets a block below the L1SLOAD-covered range (or
+/// L1SLOAD had no calls at all), the map will miss its state root and the guest
+/// fails with "no verified state root for block X".
+///
+/// This helper fetches the missing prefix `[min_staticcall_block, covered_min)`
+/// and prepends it to `input.l1_headers`, preserving oldest→newest order.
+pub async fn extend_l1_headers_for_l1staticcall_witnesses(
+    input: &mut raiko_lib::input::GuestInput,
+    l1_provider: &RpcBlockDataProvider,
+    l1_origin_block_number: u64,
+) -> RaikoResult<()> {
+    let Some(min_staticcall_block) = input
+        .l1_staticcall_witnesses
+        .iter()
+        .map(|w| w.block_number)
+        .min()
+    else {
+        return Ok(());
+    };
+
+    let covered_min = input
+        .l1_headers
+        .first()
+        .map(|h| h.number)
+        .unwrap_or(l1_origin_block_number);
+
+    if min_staticcall_block >= covered_min {
+        return Ok(());
+    }
+
+    info!(
+        "L1STATICCALL: extending l1_headers from block {} down to {} (l1_origin={}, existing_headers={})",
+        covered_min,
+        min_staticcall_block,
+        l1_origin_block_number,
+        input.l1_headers.len()
+    );
+
+    let mut extra_headers =
+        fetch_l1_headers_in_range(l1_provider, min_staticcall_block, covered_min).await?;
+    extra_headers.append(&mut input.l1_headers);
+    input.l1_headers = extra_headers;
+    Ok(())
+}
+
 /// get tx data(blob data) vec from blob hashes
 /// and get proofs for each blobs
 pub async fn get_batch_tx_data_with_proofs(
