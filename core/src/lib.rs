@@ -9,9 +9,10 @@ use raiko_lib::{
     consts::ChainSpec,
     input::{GuestBatchInput, GuestBatchOutput, GuestInput, GuestOutput, TaikoProverData},
     l1_precompiles::{
-        acquire_l1sload_lock, build_verified_state_root_map, clear_l1sload_cache,
-        clear_l1_staticcall_cache, populate_l1sload_cache,
-        verify_and_populate_l1_staticcall_witnesses, verify_and_populate_l1sload_proofs,
+        acquire_l1sload_lock, build_verified_state_root_map, clear_l1_staticcall_cache,
+        clear_l1sload_cache, populate_l1sload_cache,
+        verify_and_populate_l1_staticcall_witnesses_with_headers,
+        verify_and_populate_l1sload_proofs,
     },
     protocol_instance::ProtocolInstance,
     prover::{IdStore, IdWrite, Proof, ProofKey},
@@ -104,9 +105,18 @@ fn prepare_l1_precompiles_for_execution(input: &GuestInput) -> RaikoResult<Mutex
                     )))
                 },
             )?;
-        verify_and_populate_l1_staticcall_witnesses(
+        // Build a block-number → header map so revm can populate timestamp, base_fee,
+        // coinbase, prevrandao, and blob_excess_gas from the verified L1 headers.
+        let mut header_map: HashMap<u64, &Header> = HashMap::new();
+        header_map.insert(input.taiko.l1_header.number, &input.taiko.l1_header);
+        for h in &input.l1_headers {
+            header_map.insert(h.number, h);
+        }
+        verify_and_populate_l1_staticcall_witnesses_with_headers(
             &input.l1_staticcall_witnesses,
             &state_root_map,
+            &header_map,
+            l1_origin_block_number,
         )
         .map_err(|e| {
             RaikoError::Guest(raiko_lib::prover::ProverError::GuestError(format!(

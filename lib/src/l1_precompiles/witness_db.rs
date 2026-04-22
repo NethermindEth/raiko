@@ -54,25 +54,25 @@ impl WitnessDb {
         })
     }
 
-    /// Retrieves a decoded header at the given block number, if present.
-    pub fn header_at(&self, block_number: u64) -> Option<B256> {
-        self.block_hashes.get(&block_number).copied()
-    }
-
-    /// Missing accounts resolve to `None`, matching L1 semantics for "account does not
-    /// exist". The later output/gas assertion is what catches an actually incomplete witness.
+    /// Missing accounts resolve to `None` only when the trie walk definitively produced an absence
+    /// (`Ok(None)`). An unresolved Digest node (trie walker returns `Err(_)`) must propagate as a
+    /// hard error — silently returning zero would let a malicious prover omit paths that matter
+    /// for branch choices and still have the 3-way output/gas/halt assertion pass on pathological
+    /// contracts.
     fn lookup_account(&self, address: Address) -> Result<Option<StateAccount>, ProviderError> {
         let key = keccak(address);
         match self.state_trie.get(&key) {
             Ok(Some(rlp_bytes)) => {
                 let account: StateAccount = alloy_rlp::Decodable::decode(&mut &rlp_bytes[..])
-                    .map_err(|_| ProviderError::BestBlockNotFound)?;
+                    .map_err(ProviderError::Rlp)?;
                 Ok(Some(account))
             }
             Ok(None) => Ok(None),
-            Err(_) => {
-                debug!("WitnessDb: unresolved trie node for account {address}");
-                Ok(None)
+            Err(e) => {
+                debug!("WitnessDb: unresolved trie node for account {address}: {e:?}");
+                Err(ProviderError::TrieWitnessError(format!(
+                    "unresolved trie node for account {address}: {e:?}"
+                )))
             }
         }
     }
@@ -118,27 +118,34 @@ impl Database for WitnessDb {
             ))),
             None => {
                 debug!("WitnessDb::code_by_hash: code {code_hash} not in witness");
-                Err(ProviderError::BestBlockNotFound)
+                Err(ProviderError::TrieWitnessError(format!(
+                    "code_hash {code_hash} not in witness"
+                )))
             }
         }
     }
 
-    /// Missing storage resolves to zero, matching L1 semantics for an absent slot/account.
-    /// The separate three-way `(output, gas_used, halt status)` assertion catches witnesses
-    /// that are incomplete in a behavior-changing way.
+    /// Storage semantics:
+    ///   * `Ok(None)` from the trie → legitimate absence, return `U256::ZERO` (L1 semantics).
+    ///   * `Err(_)` from the trie → unresolved Digest node, propagate as a hard error.
+    /// The silent-zero fallback that used to hide unresolved-node errors was a soundness risk
+    /// for contracts that return the same output on multiple branches (see the load-bearing
+    /// discussion in `l1staticcall.rs` module docs).
     fn storage(&mut self, address: Address, index: U256) -> Result<U256, Self::Error> {
         if let Some((storage_trie, _slots)) = self.storage.get(&address) {
             let key = keccak(index.to_be_bytes::<32>());
             match storage_trie.get(&key) {
                 Ok(Some(rlp_bytes)) => {
                     let value: U256 = alloy_rlp::Decodable::decode(&mut &rlp_bytes[..])
-                        .map_err(|_| ProviderError::BestBlockNotFound)?;
+                        .map_err(ProviderError::Rlp)?;
                     Ok(value)
                 }
                 Ok(None) => Ok(U256::ZERO),
-                Err(_) => {
-                    debug!("WitnessDb::storage: unresolved trie node for {address} slot {index}");
-                    Ok(U256::ZERO)
+                Err(e) => {
+                    debug!("WitnessDb::storage: unresolved trie node for {address} slot {index}: {e:?}");
+                    Err(ProviderError::TrieWitnessError(format!(
+                        "unresolved storage-trie node for {address} slot {index}: {e:?}"
+                    )))
                 }
             }
         } else {
@@ -148,9 +155,8 @@ impl Database for WitnessDb {
     }
 
     fn block_hash(&mut self, number: u64) -> Result<B256, Self::Error> {
-        self.block_hashes
-            .get(&number)
-            .copied()
-            .ok_or(ProviderError::BestBlockNotFound)
+        self.block_hashes.get(&number).copied().ok_or_else(|| {
+            ProviderError::TrieWitnessError(format!("block hash for block {number} not in witness"))
+        })
     }
 }

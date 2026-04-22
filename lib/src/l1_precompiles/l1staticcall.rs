@@ -2,35 +2,69 @@
 //!
 //! Known M9 limitation: reverted L1 calls are trusted from NMC instead of being
 //! re-executed in revm. alethia-reth currently surfaces reverts as
-//! `PrecompileError`, which drops the post-call gas accounting NMC keeps.
+//! `PrecompileError`, which drops the post-call gas accounting NMC keeps. We
+//! do however enforce that the host-supplied witness for a reverted call carries
+//! `gas_used == 0 && return_data.is_empty()` — matching NMC's
+//! `GethLikeTxTracer.MarkAsFailed` contract — so a malicious prover cannot
+//! fabricate non-zero gas for reverted invocations.
 //!
 use alethia_reth_evm::precompiles::l1staticcall::set_l1_staticcall_value;
 use alloy_primitives::{Address, B256, U256};
-use anyhow::{anyhow, Result};
+use anyhow::{anyhow, ensure, Result};
+use reth_primitives::Header;
 use revm::context::result::ExecutionResult;
 use revm::context::TxEnv;
 use revm::primitives::TxKind;
 use revm::{ExecuteEvm, MainBuilder, MainContext};
 use std::collections::HashMap;
-use tracing::{debug, info, warn};
+use tracing::{debug, info};
 
 use super::witness_db::WitnessDb;
 use crate::input::L1StaticCallWitness;
 
+/// Maximum number of L1 blocks to look back from L1 origin. Matches the L2 precompile.
+const L1STATICCALL_MAX_BLOCK_LOOKBACK: u64 = 256;
+
 /// Verify and populate L1STATICCALL results from execution witnesses.
 ///
 /// For each witness:
-/// 1. Verify the L1 state root is trusted (from the verified header chain)
-/// 2. Build a `WitnessDb` over the witnessed MPT preimages + bytecodes
-/// 3. Re-execute the call with revm against the witnessed state
-/// 4. Assert revm's `(output, gas_used)` matches the witness claim; reject halts
-/// 5. Populate the L1STATICCALL cache with the verified result
+/// 1. Enforce the `[l1_origin − 256, l1_origin]` window so a prover cannot serve a
+///    witness from outside the L2 precompile's accepted range (the L2 precompile
+///    already enforces it at runtime; we re-enforce it here so the proof binds it).
+/// 2. Verify the L1 state root is trusted (from the verified header chain)
+/// 3. Build a `WitnessDb` over the witnessed MPT preimages + bytecodes
+/// 4. Re-execute the call with revm against the witnessed state
+/// 5. Assert revm's `(output, gas_used)` matches the witness claim; reject halts
+/// 6. Populate the L1STATICCALL cache with the verified result
 ///
-/// Empty-state witnesses (`ExecutionWitness::default()`) skip revm and trust the
-/// witness directly — used by unit tests and during progressive rollout.
+/// For reverted witnesses (`is_reverted == true`), we skip revm re-execution but
+/// enforce `gas_used == 0 && return_data.is_empty()` — matching NMC's
+/// `GethLikeTxTracer.MarkAsFailed` contract — so a malicious prover cannot forge
+/// non-zero gas for reverts.
 pub fn verify_and_populate_l1_staticcall_witnesses(
     witnesses: &[L1StaticCallWitness],
     state_root_map: &HashMap<u64, B256>,
+    l1_origin_block_number: u64,
+) -> Result<()> {
+    verify_and_populate_l1_staticcall_witnesses_with_headers(
+        witnesses,
+        state_root_map,
+        &HashMap::new(),
+        l1_origin_block_number,
+    )
+}
+
+/// Richer entrypoint that can also populate the revm block-env with fields from the
+/// verified L1 header (timestamp, base_fee, coinbase, prevrandao, blob_base_fee). When
+/// `header_map` is empty, those fields fall back to revm defaults — honest L1 view
+/// functions that don't read block-env opcodes still verify successfully, but contracts
+/// that read `TIMESTAMP` / `COINBASE` / `BASEFEE` / `BLOBBASEFEE` / `PREVRANDAO` must
+/// be proved with populated headers or they'll diverge from the sequencer's run.
+pub fn verify_and_populate_l1_staticcall_witnesses_with_headers(
+    witnesses: &[L1StaticCallWitness],
+    state_root_map: &HashMap<u64, B256>,
+    header_map: &HashMap<u64, &Header>,
+    l1_origin_block_number: u64,
 ) -> Result<()> {
     if witnesses.is_empty() {
         debug!("L1STATICCALL: no witnesses to verify, skipping");
@@ -38,11 +72,23 @@ pub fn verify_and_populate_l1_staticcall_witnesses(
     }
 
     info!(
-        "L1STATICCALL: verifying {} execution witnesses",
-        witnesses.len()
+        "L1STATICCALL: verifying {} execution witnesses (l1_origin={})",
+        witnesses.len(),
+        l1_origin_block_number
     );
 
+    let window_floor = l1_origin_block_number.saturating_sub(L1STATICCALL_MAX_BLOCK_LOOKBACK);
+
     for (i, w) in witnesses.iter().enumerate() {
+        // Block-range check mirrors the L2 precompile `[l1origin − 256, l1origin]` window.
+        ensure!(
+            w.block_number >= window_floor && w.block_number <= l1_origin_block_number,
+            "L1STATICCALL: witness #{i} at block {} outside lookback window [{}, {}]",
+            w.block_number,
+            window_floor,
+            l1_origin_block_number,
+        );
+
         let state_root = state_root_map.get(&w.block_number).ok_or_else(|| {
             anyhow!(
                 "L1STATICCALL: no verified state root for block {} (witness #{})",
@@ -58,9 +104,17 @@ pub fn verify_and_populate_l1_staticcall_witnesses(
         );
 
         if w.is_reverted {
+            // Match NMC's `GethLikeTxTracer.MarkAsFailed`: revert => gas=0 and empty return data.
+            // This binds the fragile coupling between the sequencer tracer and the guest so a
+            // malicious prover cannot mark an arbitrary call reverted with forged gas.
+            ensure!(
+                w.gas_used == 0 && w.return_data.is_empty(),
+                "L1STATICCALL: witness #{i} reverted but carries non-zero gas ({}) or non-empty data ({} bytes) — expected NMC-tracer semantics",
+                w.gas_used,
+                w.return_data.len(),
+            );
             debug!(
-                "L1STATICCALL: witness #{} reverted on L1 — trusting NMC gas/data and skipping revm",
-                i
+                "L1STATICCALL: witness #{i} reverted on L1 — cached as revert with gas=0"
             );
             set_l1_staticcall_value(
                 w.target_address,
@@ -73,15 +127,13 @@ pub fn verify_and_populate_l1_staticcall_witnesses(
             continue;
         }
 
-        // WARNING: this is a rollout-only escape hatch. An empty witness lets the guest
-        // skip state-root verification and revm re-execution entirely.
-        // TODO(mainnet): remove or hard-gate this path before production proving.
-        // Fast path: empty witness (used in unit tests with ExecutionWitness::default()).
-        // Skip revm re-execution since there's no state to verify against.
+        // Test-only fast path for unit tests that construct `ExecutionWitness::default()` —
+        // skips state-root verification and revm re-execution entirely. This branch is
+        // compiled *only* under `cfg(test)`; production guest builds never include it.
+        #[cfg(test)]
         if w.execution_witness.state.is_empty() {
-            warn!(
-                "L1STATICCALL: witness #{} has empty state — skipping revm re-execution",
-                i
+            tracing::warn!(
+                "L1STATICCALL: witness #{i} has empty state — test-only fast path (cfg(test))"
             );
             set_l1_staticcall_value(
                 w.target_address,
@@ -93,6 +145,13 @@ pub fn verify_and_populate_l1_staticcall_witnesses(
             );
             continue;
         }
+
+        // Production invariant: a non-reverted witness must carry state to re-execute against.
+        #[cfg(not(test))]
+        ensure!(
+            !w.execution_witness.state.is_empty(),
+            "L1STATICCALL: witness #{i} has empty state — not permitted in production proving"
+        );
 
         // 1. Build WitnessDb from the execution witness
         let db = WitnessDb::build(&w.execution_witness, *state_root)
@@ -108,14 +167,30 @@ pub fn verify_and_populate_l1_staticcall_witnesses(
             .build()
             .map_err(|e| anyhow!("L1STATICCALL #{i}: TxEnv build: {e:?}"))?;
 
-        // 3. Construct a mainnet EVM over the witness, pinning block number.
-        //    revm 34 defaults to the latest spec. For the pure/view calls we support here,
-        //    gas costs are effectively stable across post-Berlin forks, so spec pinning is
-        //    deferred until L1 activates a fork with gas-affecting changes for this path.
+        // 3. Construct a mainnet EVM over the witness, pinning block number plus any fields
+        //    the verified L1 header gives us (timestamp, base_fee, coinbase, prevrandao,
+        //    blob_base_fee). revm 34 defaults to the latest spec; for post-Berlin view calls
+        //    gas costs are stable, so spec pinning is deferred until L1 activates a gas-affecting
+        //    change on this path.
         let block_number = w.block_number;
+        let header = header_map.get(&w.block_number).copied();
         let mut evm = revm::Context::mainnet()
             .with_db(db)
-            .modify_block_chained(|blk| blk.number = U256::from(block_number))
+            .modify_block_chained(|blk| {
+                blk.number = U256::from(block_number);
+                if let Some(h) = header {
+                    blk.timestamp = U256::from(h.timestamp);
+                    blk.beneficiary = h.beneficiary;
+                    blk.basefee = h.base_fee_per_gas.unwrap_or(0);
+                    blk.prevrandao = Some(h.mix_hash);
+                    // Revm derives blob_base_fee from excess_blob_gas via the active spec.
+                    // base_fee_update_fraction=0 means "don't adjust" — use the excess-gas
+                    // value verbatim as the sequencer's RPC saw it.
+                    if let Some(excess) = h.excess_blob_gas {
+                        blk.set_blob_excess_gas_and_price(excess, 0);
+                    }
+                }
+            })
             .build_mainnet();
 
         // 4. Execute the call
@@ -183,6 +258,19 @@ mod tests {
     // Helpers
     // ───────────────────────────────────────────────
 
+    /// Test l1_origin that comfortably contains all test block numbers (50..=300) within the
+    /// 256-block window. Window floor = 300 - 256 = 44.
+    const TEST_L1_ORIGIN: u64 = 300;
+
+    /// Wrapper that passes the shared `TEST_L1_ORIGIN` so individual tests stay focused on
+    /// witness-body semantics rather than range-check boilerplate.
+    fn verify_test(
+        witnesses: &[L1StaticCallWitness],
+        state_root_map: &HashMap<u64, B256>,
+    ) -> Result<()> {
+        verify_and_populate_l1_staticcall_witnesses(witnesses, state_root_map, TEST_L1_ORIGIN)
+    }
+
     fn make_witness(
         target: Address,
         block: u64,
@@ -215,7 +303,7 @@ mod tests {
     fn test_verify_empty_witnesses_succeeds() {
         reset_all();
         let state_root_map: HashMap<u64, B256> = HashMap::new();
-        let result = verify_and_populate_l1_staticcall_witnesses(&[], &state_root_map);
+        let result = verify_test(&[], &state_root_map);
         assert!(result.is_ok(), "Empty witness list should return Ok");
     }
 
@@ -229,7 +317,7 @@ mod tests {
         // State root map does not contain block 50
         let state_root_map: HashMap<u64, B256> = HashMap::from([(100, B256::from([0x11u8; 32]))]);
 
-        let result = verify_and_populate_l1_staticcall_witnesses(&[witness], &state_root_map);
+        let result = verify_test(&[witness], &state_root_map);
         assert!(
             result.is_err(),
             "Should fail when witness references block not in state_root_map"
@@ -252,7 +340,7 @@ mod tests {
 
         let state_root_map: HashMap<u64, B256> = HashMap::from([(100, B256::from([0x22u8; 32]))]);
 
-        let result = verify_and_populate_l1_staticcall_witnesses(&[witness], &state_root_map);
+        let result = verify_test(&[witness], &state_root_map);
         assert!(
             result.is_ok(),
             "Single valid witness should succeed: {:?}",
@@ -287,11 +375,12 @@ mod tests {
             target_address: target,
             block_number: 100,
             calldata: Bytes::from(calldata.clone()),
+            // NMC parity: MarkAsFailed returns gas=0 / empty data for reverted traceCalls.
             return_data: Bytes::from(vec![]),
-            gas_used: 55_000,
+            gas_used: 0,
             is_reverted: true,
             execution_witness: ExecutionWitness {
-                // Intentionally malformed state. The revert fast path should skip revm and
+                // Intentionally malformed state. The revert path should skip revm and
                 // witness parsing entirely, so this still succeeds.
                 state: vec![Bytes::from(vec![0xFFu8; 8])],
                 codes: vec![],
@@ -302,7 +391,7 @@ mod tests {
 
         let state_root_map: HashMap<u64, B256> = HashMap::from([(100, B256::from([0x22u8; 32]))]);
 
-        let result = verify_and_populate_l1_staticcall_witnesses(&[witness], &state_root_map);
+        let result = verify_test(&[witness], &state_root_map);
         assert!(
             result.is_ok(),
             "reverted witness should bypass revm build: {:?}",
@@ -343,10 +432,7 @@ mod tests {
             (102, B256::from([0x03u8; 32])),
         ]);
 
-        let result = verify_and_populate_l1_staticcall_witnesses(
-            &[witness_a, witness_b, witness_c],
-            &state_root_map,
-        );
+        let result = verify_test(&[witness_a, witness_b, witness_c], &state_root_map);
         assert!(
             result.is_ok(),
             "Multiple valid witnesses should all succeed: {:?}",
@@ -408,7 +494,7 @@ mod tests {
 
         let state_root_map: HashMap<u64, B256> = HashMap::from([(200, B256::from([0x44u8; 32]))]);
 
-        let result = verify_and_populate_l1_staticcall_witnesses(&[witness], &state_root_map);
+        let result = verify_test(&[witness], &state_root_map);
         assert!(
             result.is_ok(),
             "Verification should succeed: {:?}",
@@ -456,7 +542,7 @@ mod tests {
         let state_root_map: HashMap<u64, B256> = HashMap::from([(100, B256::from([0x55u8; 32]))]);
 
         let result =
-            verify_and_populate_l1_staticcall_witnesses(&[witness_1, witness_2], &state_root_map);
+            verify_test(&[witness_1, witness_2], &state_root_map);
         assert!(
             result.is_ok(),
             "Two witnesses for same target should succeed: {:?}",
@@ -535,7 +621,7 @@ mod tests {
 
         let state_root_map: HashMap<u64, B256> = HashMap::from([(100, B256::from([0x11u8; 32]))]);
 
-        let result = verify_and_populate_l1_staticcall_witnesses(&[witness], &state_root_map);
+        let result = verify_test(&[witness], &state_root_map);
         assert!(
             result.is_err(),
             "Malformed witness state should be rejected"
@@ -575,10 +661,91 @@ mod tests {
         // Trusted root that the witness definitively does not produce.
         let state_root_map: HashMap<u64, B256> = HashMap::from([(200, B256::from([0xAAu8; 32]))]);
 
-        let result = verify_and_populate_l1_staticcall_witnesses(&[witness], &state_root_map);
+        let result = verify_test(&[witness], &state_root_map);
         assert!(
             result.is_err(),
             "Witness whose trie doesn't hash to the trusted state_root should be rejected"
         );
+    }
+
+    // ───────────────────────────────────────────────
+    // Range + revert-semantics guards
+    // ───────────────────────────────────────────────
+
+    #[test]
+    #[serial]
+    fn test_verify_rejects_witness_below_window_floor() {
+        reset_all();
+        let target = Address::from([0xF1u8; 20]);
+        let floor = TEST_L1_ORIGIN.saturating_sub(L1STATICCALL_MAX_BLOCK_LOOKBACK);
+        // One block below the window floor.
+        let outside = floor.saturating_sub(1);
+        let witness = make_witness(target, outside, &[0x01], &[0x02]);
+        let state_root_map: HashMap<u64, B256> =
+            HashMap::from([(outside, B256::from([0x11u8; 32]))]);
+
+        let result = verify_test(&[witness], &state_root_map);
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(
+            err.contains("outside lookback window"),
+            "expected window-violation error, got: {err}"
+        );
+    }
+
+    #[test]
+    #[serial]
+    fn test_verify_rejects_witness_above_l1_origin() {
+        reset_all();
+        let target = Address::from([0xF2u8; 20]);
+        let witness = make_witness(target, TEST_L1_ORIGIN + 1, &[0x01], &[0x02]);
+        let state_root_map: HashMap<u64, B256> =
+            HashMap::from([(TEST_L1_ORIGIN + 1, B256::from([0x11u8; 32]))]);
+
+        let result = verify_test(&[witness], &state_root_map);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("outside lookback window"));
+    }
+
+    #[test]
+    #[serial]
+    fn test_verify_rejects_reverted_with_nonzero_gas() {
+        reset_all();
+        let target = Address::from([0xF3u8; 20]);
+        let witness = L1StaticCallWitness {
+            target_address: target,
+            block_number: 100,
+            calldata: Bytes::from(vec![0x01]),
+            return_data: Bytes::from(vec![]),
+            gas_used: 12_345, // violates NMC tracer contract (should be 0 for reverts)
+            is_reverted: true,
+            execution_witness: ExecutionWitness::default(),
+        };
+        let state_root_map: HashMap<u64, B256> = HashMap::from([(100, B256::from([0x22u8; 32]))]);
+
+        let result = verify_test(&[witness], &state_root_map);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("non-zero gas"));
+    }
+
+    #[test]
+    #[serial]
+    fn test_verify_rejects_reverted_with_nonempty_data() {
+        reset_all();
+        let target = Address::from([0xF4u8; 20]);
+        let witness = L1StaticCallWitness {
+            target_address: target,
+            block_number: 100,
+            calldata: Bytes::from(vec![0x01]),
+            return_data: Bytes::from(vec![0xAA]), // violates NMC tracer contract
+            gas_used: 0,
+            is_reverted: true,
+            execution_witness: ExecutionWitness::default(),
+        };
+        let state_root_map: HashMap<u64, B256> = HashMap::from([(100, B256::from([0x22u8; 32]))]);
+
+        let result = verify_test(&[witness], &state_root_map);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("non-empty data"));
     }
 }

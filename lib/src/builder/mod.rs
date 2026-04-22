@@ -14,7 +14,8 @@ use crate::{
     input::{GuestBatchInput, GuestInput},
     l1_precompiles::{
         acquire_l1sload_lock, build_verified_state_root_map, clear_l1_staticcall_cache,
-        clear_l1sload_cache, populate_l1sload_cache, verify_and_populate_l1_staticcall_witnesses,
+        clear_l1sload_cache, populate_l1sload_cache,
+        verify_and_populate_l1_staticcall_witnesses_with_headers,
         verify_and_populate_l1sload_proofs,
     },
     mem_db::{AccountState, DbAccount, MemDb},
@@ -296,9 +297,17 @@ pub fn calculate_block_header(input: &mut GuestInput) -> Header {
             let state_root_map =
                 build_verified_state_root_map(&input.taiko.l1_header, &input.l1_headers)
                     .expect("failed to build verified L1 state-root map for L1STATICCALL");
-            verify_and_populate_l1_staticcall_witnesses(
+            let mut header_map: std::collections::HashMap<u64, &Header> =
+                std::collections::HashMap::new();
+            header_map.insert(input.taiko.l1_header.number, &input.taiko.l1_header);
+            for h in &input.l1_headers {
+                header_map.insert(h.number, h);
+            }
+            verify_and_populate_l1_staticcall_witnesses_with_headers(
                 &input.l1_staticcall_witnesses,
                 &state_root_map,
+                &header_map,
+                l1_origin_block_number,
             )
             .expect("L1STATICCALL witness verification failed");
         }
@@ -374,9 +383,20 @@ pub fn calculate_batch_blocks_final_header(input: &mut GuestBatchInput) -> Vec<T
                     &input.inputs[i].l1_headers,
                 )
                 .expect("failed to build verified L1 state-root map for L1STATICCALL in batch");
-                verify_and_populate_l1_staticcall_witnesses(
+                let mut header_map: std::collections::HashMap<u64, &Header> =
+                    std::collections::HashMap::new();
+                header_map.insert(
+                    input.inputs[i].taiko.l1_header.number,
+                    &input.inputs[i].taiko.l1_header,
+                );
+                for h in &input.inputs[i].l1_headers {
+                    header_map.insert(h.number, h);
+                }
+                verify_and_populate_l1_staticcall_witnesses_with_headers(
                     &input.inputs[i].l1_staticcall_witnesses,
                     &state_root_map,
+                    &header_map,
+                    l1_origin_block_number,
                 )
                 .expect("L1STATICCALL witness verification failed in batch");
             }

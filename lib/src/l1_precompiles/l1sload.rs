@@ -4,7 +4,7 @@ use alethia_reth_evm::precompiles::l1sload::{
 use alloy_primitives::{Bytes, B256, U256};
 use alloy_rlp::{Buf, Decodable, Header as RlpHeader};
 use alloy_trie::{proof::verify_proof, Nibbles};
-use anyhow::{anyhow, bail, Context, Result};
+use anyhow::{anyhow, bail, ensure, Context, Result};
 use reth_primitives::Header;
 use std::collections::HashMap;
 use std::sync::{LazyLock, Mutex, MutexGuard};
@@ -165,6 +165,21 @@ pub fn build_verified_state_root_map(
     if l1_headers.is_empty() {
         return Ok(state_root_map);
     }
+
+    // Cap the backward walk at 256 so a prover cannot extend the verified window beyond
+    // the L1/L2-precompile-accepted `[l1_origin − 256, l1_origin]` range.
+    ensure!(
+        l1_headers.len() <= 256,
+        "L1 headers exceed 256-block lookback cap ({} provided)",
+        l1_headers.len(),
+    );
+
+    // Guard against the otherwise-silent `u64` wrap on `l1_origin_number - 1` when
+    // origin == 0 (impossible in production but reachable via test fixtures).
+    ensure!(
+        l1_origin_number >= 1,
+        "L1 origin block number must be >= 1 for backward walk"
+    );
 
     // Headers are ordered oldest→newest and do NOT include the L1 origin itself.
     // Walk in reverse (newest→oldest), starting from the origin's parent_hash since
