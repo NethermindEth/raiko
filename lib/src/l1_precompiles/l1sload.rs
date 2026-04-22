@@ -116,6 +116,10 @@ pub fn populate_l1sload_cache(
     anchor_block_number: u64,
     l1_origin_block_number: u64,
 ) {
+    debug!(
+        "L1 precompiles: shared context set (anchor={}, l1_origin={})",
+        anchor_block_number, l1_origin_block_number
+    );
     set_anchor_block_id(anchor_block_number);
     set_l1_origin_block_id(l1_origin_block_number);
 

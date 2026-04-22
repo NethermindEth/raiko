@@ -956,6 +956,12 @@ pub async fn extend_l1_headers_for_l1staticcall_witnesses(
             )));
         }
     }
+    info!(
+        "L1STATICCALL: l1_headers extended, now {} headers covering [{}, {})",
+        input.l1_headers.len(),
+        input.l1_headers.first().map(|h| h.number).unwrap_or(0),
+        l1_origin_block_number,
+    );
     Ok(())
 }
 

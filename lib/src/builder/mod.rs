@@ -262,6 +262,12 @@ pub fn calculate_block_header(input: &mut GuestInput) -> Header {
     cycle_tracker.end();
 
     let _l1sload_guard = acquire_l1sload_lock();
+    info!(
+        "guest: calculate_block_header block={} (l1sload_proofs={}, l1staticcall_witnesses={})",
+        input.block.header.number,
+        input.l1_storage_proofs.len(),
+        input.l1_staticcall_witnesses.len()
+    );
     clear_l1sload_cache();
     clear_l1_staticcall_cache();
     if input.chain_spec.is_taiko() {
@@ -342,9 +348,21 @@ pub fn calculate_block_header(input: &mut GuestInput) -> Header {
 
 pub fn calculate_batch_blocks_final_header(input: &mut GuestBatchInput) -> Vec<TaikoBlock> {
     let pool_txs_list = generate_transactions_for_batch_blocks(&input);
+    info!(
+        "guest: calculate_batch_blocks_final_header — {} batched blocks",
+        pool_txs_list.len()
+    );
     let mut final_blocks = Vec::new();
     for (i, pool_txs) in pool_txs_list.iter().enumerate() {
         let _l1sload_guard = acquire_l1sload_lock();
+        info!(
+            "guest: batch block {}/{} (number={}, l1sload_proofs={}, l1staticcall_witnesses={})",
+            i + 1,
+            pool_txs_list.len(),
+            input.inputs[i].block.header.number,
+            input.inputs[i].l1_storage_proofs.len(),
+            input.inputs[i].l1_staticcall_witnesses.len()
+        );
         clear_l1sload_cache();
         clear_l1_staticcall_cache();
         if input.inputs[i].chain_spec.is_taiko() {

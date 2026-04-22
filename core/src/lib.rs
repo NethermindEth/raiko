@@ -53,6 +53,7 @@ fn prepare_l1_precompiles_for_execution(input: &GuestInput) -> RaikoResult<Mutex
     clear_l1_staticcall_cache();
 
     if !input.chain_spec.is_taiko() {
+        debug!("L1 precompiles: skipping setup for non-Taiko chain");
         return Ok(guard);
     }
 
@@ -80,6 +81,13 @@ fn prepare_l1_precompiles_for_execution(input: &GuestInput) -> RaikoResult<Mutex
     })?;
     let l1_origin_block_number = input.taiko.l1_header.number;
 
+    info!(
+        "L1 precompiles: context ready (anchor={}, l1_origin={}, l1sload_proofs={}, l1staticcall_witnesses={})",
+        anchor_block_number,
+        l1_origin_block_number,
+        input.l1_storage_proofs.len(),
+        input.l1_staticcall_witnesses.len(),
+    );
     populate_l1sload_cache(&[], anchor_block_number, l1_origin_block_number);
 
     if !input.l1_storage_proofs.is_empty() {

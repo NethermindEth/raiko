@@ -309,6 +309,12 @@ pub async fn preflight<BDP: BlockDataProvider>(
         l1_staticcall_served_calls = take_l1_staticcall_rpc_served_calls();
         clear_l1_staticcall_rpc_fetcher();
 
+        info!(
+            "preflight: L1 precompile RPC summary — L1SLOAD served {} call(s), L1STATICCALL served {} call(s)",
+            rpc_served_calls.len(),
+            l1_staticcall_served_calls.len(),
+        );
+
         if let Err(err) = exec_result {
             return Err(err);
         }
@@ -691,6 +697,13 @@ pub async fn batch_preflight<BDP: BlockDataProvider>(
 
                     l1_staticcall_served_calls = take_l1_staticcall_rpc_served_calls();
                     clear_l1_staticcall_rpc_fetcher();
+
+                    info!(
+                        "batch_preflight: block {} L1 precompile RPC summary — L1SLOAD={}, L1STATICCALL={}",
+                        prove_block.header.number,
+                        rpc_served_calls.len(),
+                        l1_staticcall_served_calls.len(),
+                    );
 
                     if let Err(err) = exec_result {
                         return Err(err);
