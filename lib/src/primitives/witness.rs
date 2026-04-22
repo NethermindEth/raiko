@@ -17,8 +17,9 @@ use crate::input::ExecutionWitness;
 
 /// Builds resolved MPT tries from an `ExecutionWitness`.
 ///
-/// Returns `(state_trie, storage_map, codes, ancestor_headers)`.
-/// The state trie root is verified against the trusted `state_root`.
+/// Returns `(state_trie, storage_map)`. Bytecodes and ancestor headers are
+/// parsed separately by the caller (see `WitnessDb::build`). The state-trie
+/// root is verified against the trusted `state_root`.
 pub fn witness_to_tries(
     state_root: B256,
     witness: &ExecutionWitness,

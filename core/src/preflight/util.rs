@@ -30,6 +30,11 @@ use raiko_lib::input::{ExecutionWitness, L1StaticCallWitness, L1StorageProof};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::iter;
+use std::sync::LazyLock;
+
+/// Shared HTTP client for preflight RPC calls — re-used across invocations so connection
+/// pooling works and we don't pay the TLS setup cost on every single preflight.
+static PREFLIGHT_HTTP_CLIENT: LazyLock<reqwest::Client> = LazyLock::new(reqwest::Client::new);
 use tracing::{debug, error, info, instrument, warn};
 
 use crate::{
@@ -855,6 +860,7 @@ async fn fetch_l1_headers_in_range(
 
     info!("Fetching L1 headers: blocks {}..{}", from_block, to_block);
 
+    let expected_count = (to_block - from_block) as usize;
     let blocks_to_fetch: Vec<(u64, bool)> = (from_block..to_block).map(|n| (n, false)).collect();
 
     let blocks = l1_provider.get_blocks(&blocks_to_fetch).await?;
@@ -865,6 +871,27 @@ async fn fetch_l1_headers_in_range(
         .collect();
 
     headers.sort_by_key(|h| h.number);
+
+    // Surface RPC gaps at preflight time so they aren't rediscovered inside the guest as
+    // opaque "no verified state root" errors.
+    if headers.len() != expected_count {
+        return Err(RaikoError::Preflight(format!(
+            "L1 header RPC returned {} headers for range [{}, {}) — expected {}",
+            headers.len(),
+            from_block,
+            to_block,
+            expected_count,
+        )));
+    }
+    for (idx, h) in headers.iter().enumerate() {
+        let expected_number = from_block + idx as u64;
+        if h.number != expected_number {
+            return Err(RaikoError::Preflight(format!(
+                "L1 header block number mismatch at index {idx}: got {}, expected {}",
+                h.number, expected_number,
+            )));
+        }
+    }
 
     Ok(headers)
 }
@@ -916,6 +943,19 @@ pub async fn extend_l1_headers_for_l1staticcall_witnesses(
         fetch_l1_headers_in_range(l1_provider, min_staticcall_block, covered_min).await?;
     extra_headers.append(&mut input.l1_headers);
     input.l1_headers = extra_headers;
+
+    // Preflight-side sanity: the combined chain (`l1_headers` + origin parent) should chain
+    // via parent_hash. The guest catches this later anyway, but failing here produces a
+    // clearer error in the preflight phase.
+    for pair in input.l1_headers.windows(2) {
+        let (prev, next) = (&pair[0], &pair[1]);
+        if next.parent_hash != prev.hash_slow() {
+            return Err(RaikoError::Preflight(format!(
+                "L1 header chain broken between blocks {} and {}: parent_hash mismatch",
+                prev.number, next.number,
+            )));
+        }
+    }
     Ok(())
 }
 
@@ -1564,86 +1604,118 @@ async fn get_and_filter_blob_data_by_blobscan(
 }
 /// Fetch execution witnesses for L1STATICCALL calls from the L1 NMC node.
 ///
-/// For each recorded call, calls debug_executionWitnessCall on L1 to get the
-/// execution witness (MPT trie nodes + bytecodes + keys + headers).
+/// For each *distinct* recorded call, calls `debug_executionWitnessCall` on L1 to get the
+/// execution witness (MPT trie nodes + bytecodes + keys + headers). Calls are deduplicated
+/// on `(target, block_number, calldata)` (R17) and fetched in parallel (R12). Uses the
+/// shared [`PREFLIGHT_HTTP_CLIENT`] so we don't construct a new TLS stack per invocation (R23).
 pub async fn fetch_l1_staticcall_witnesses(
     l1_rpc_url: &str,
     calls: &[L1StaticCallRecord],
 ) -> RaikoResult<Vec<L1StaticCallWitness>> {
-    let client = reqwest::Client::new();
-    let mut witnesses = Vec::new();
-
-    for (i, call) in calls.iter().enumerate() {
-        info!(
-            "L1STATICCALL: fetching execution witness {}/{} for target={:?}, block={}",
-            i + 1,
-            calls.len(),
-            call.target,
-            call.block_number
-        );
-
-        let call_data_hex = format!("0x{}", hex::encode(&call.calldata));
-        let block_hex = format!("0x{:x}", call.block_number);
-
-        let resp = client
-            .post(l1_rpc_url)
-            .json(&serde_json::json!({
-                "jsonrpc": "2.0",
-                "method": "debug_executionWitnessCall",
-                "params": [
-                    {"to": format!("{:?}", call.target), "data": call_data_hex},
-                    block_hex
-                ],
-                "id": 1
-            }))
-            .send()
-            .await
-            .map_err(|e| {
-                RaikoError::Preflight(format!(
-                    "L1STATICCALL: debug_executionWitnessCall request failed: {e}"
-                ))
-            })?;
-
-        let body: serde_json::Value = resp.json().await.map_err(|e| {
-            RaikoError::Preflight(format!(
-                "L1STATICCALL: failed to parse debug_executionWitnessCall response: {e}"
-            ))
-        })?;
-
-        if let Some(error) = body.get("error") {
-            return Err(RaikoError::Preflight(format!(
-                "L1STATICCALL: debug_executionWitnessCall returned error: {}",
-                error
-            )));
+    // Dedup distinct RPC lookups but preserve original order in the returned Vec so downstream
+    // ZK-guest indexing (witness #0, #1, …) matches the sequence in which L1STATICCALL calls
+    // were served during execution.
+    let mut unique_keys: Vec<(Address, u64, Vec<u8>)> = Vec::with_capacity(calls.len());
+    let mut key_index: HashMap<(Address, u64, Vec<u8>), usize> = HashMap::new();
+    for call in calls {
+        let key = (call.target, call.block_number, call.calldata.clone());
+        if !key_index.contains_key(&key) {
+            key_index.insert(key.clone(), unique_keys.len());
+            unique_keys.push(key);
         }
-
-        let result = body.get("result").ok_or_else(|| {
-            RaikoError::Preflight(
-                "L1STATICCALL: debug_executionWitnessCall response missing 'result'".to_string(),
-            )
-        })?;
-
-        let execution_witness: ExecutionWitness =
-            serde_json::from_value(result.clone()).map_err(|e| {
-                RaikoError::Preflight(format!(
-                    "L1STATICCALL: failed to deserialize ExecutionWitness: {e}"
-                ))
-            })?;
-
-        witnesses.push(L1StaticCallWitness {
-            target_address: call.target,
-            block_number: call.block_number,
-            calldata: alloy_primitives::Bytes::from(call.calldata.clone()),
-            return_data: alloy_primitives::Bytes::from(call.return_data.clone()),
-            gas_used: call.gas_used,
-            is_reverted: call.is_reverted,
-            execution_witness,
-        });
     }
 
     info!(
-        "L1STATICCALL: fetched {} execution witnesses",
-        witnesses.len()
+        "L1STATICCALL: fetching execution witnesses for {} distinct calls (from {} invocations)",
+        unique_keys.len(),
+        calls.len(),
+    );
+
+    // Parallel fetch of the distinct witnesses — debug_executionWitnessCall is independent per
+    // (target, block, calldata) triple, so we don't need per-call sequencing.
+    let client = PREFLIGHT_HTTP_CLIENT.clone();
+    let fetches = unique_keys.iter().enumerate().map(|(i, (target, block_number, calldata))| {
+        let client = client.clone();
+        let rpc = l1_rpc_url.to_string();
+        let target = *target;
+        let block_number = *block_number;
+        let calldata = calldata.clone();
+        let total = unique_keys.len();
+        async move {
+            debug!(
+                "L1STATICCALL: fetching execution witness {}/{} for target={:?}, block={}",
+                i + 1, total, target, block_number
+            );
+            let call_data_hex = format!("0x{}", hex::encode(&calldata));
+            let block_hex = format!("0x{:x}", block_number);
+            let resp = client
+                .post(&rpc)
+                .json(&serde_json::json!({
+                    "jsonrpc": "2.0",
+                    "method": "debug_executionWitnessCall",
+                    "params": [
+                        {"to": format!("{:?}", target), "data": call_data_hex},
+                        block_hex
+                    ],
+                    "id": 1
+                }))
+                .send()
+                .await
+                .map_err(|e| RaikoError::Preflight(format!(
+                    "L1STATICCALL: debug_executionWitnessCall request failed: {e}"
+                )))?;
+
+            let body: serde_json::Value = resp.json().await.map_err(|e| RaikoError::Preflight(
+                format!("L1STATICCALL: failed to parse debug_executionWitnessCall response: {e}"),
+            ))?;
+
+            if let Some(error) = body.get("error") {
+                return Err(RaikoError::Preflight(format!(
+                    "L1STATICCALL: debug_executionWitnessCall returned error: {}",
+                    error
+                )));
+            }
+
+            let result = body.get("result").ok_or_else(|| RaikoError::Preflight(
+                "L1STATICCALL: debug_executionWitnessCall response missing 'result'".to_string(),
+            ))?;
+
+            let witness: ExecutionWitness = serde_json::from_value(result.clone())
+                .map_err(|e| RaikoError::Preflight(format!(
+                    "L1STATICCALL: failed to deserialize ExecutionWitness: {e}"
+                )))?;
+            Ok::<ExecutionWitness, RaikoError>(witness)
+        }
+    });
+
+    let fetched_witnesses: Vec<ExecutionWitness> = futures::future::join_all(fetches)
+        .await
+        .into_iter()
+        .collect::<RaikoResult<Vec<_>>>()?;
+
+    // Map the deduplicated witnesses back onto the original call sequence so the guest sees
+    // the same number of witness records as there are L1STATICCALL invocations.
+    let witnesses: Vec<L1StaticCallWitness> = calls
+        .iter()
+        .map(|call| {
+            let key = (call.target, call.block_number, call.calldata.clone());
+            let idx = key_index[&key];
+            L1StaticCallWitness {
+                target_address: call.target,
+                block_number: call.block_number,
+                calldata: alloy_primitives::Bytes::from(call.calldata.clone()),
+                return_data: alloy_primitives::Bytes::from(call.return_data.clone()),
+                gas_used: call.gas_used,
+                is_reverted: call.is_reverted,
+                execution_witness: fetched_witnesses[idx].clone(),
+            }
+        })
+        .collect();
+
+    info!(
+        "L1STATICCALL: fetched {} distinct witnesses, replicated to {} invocation records",
+        fetched_witnesses.len(),
+        witnesses.len(),
     );
     Ok(witnesses)
 }

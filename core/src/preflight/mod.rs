@@ -47,6 +47,77 @@ mod lru;
 
 mod util;
 
+/// JSON response shape for `debug_traceCall` — shared by the single-block and batch
+/// preflight paths (R10: hoisted to file scope so the two call sites use one definition).
+#[derive(Debug, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct TraceCallResult {
+    gas: u64,
+    return_value: String,
+    failed: bool,
+}
+
+/// Build the L1STATICCALL RPC fetcher closure that `set_l1_staticcall_rpc_fetcher` expects.
+/// Extracted so the single-block and batch preflight paths use the same implementation
+/// (R10 consolidation; matches the precedent from commit 612f9af1 for L1SLOAD).
+fn make_l1_staticcall_rpc_fetcher(
+    l1_rpc_url: String,
+    handle: tokio::runtime::Handle,
+) -> RaikoResult<
+    impl Fn(alloy_primitives::Address, u64, u64, &[u8]) -> Result<(u64, Vec<u8>, bool), String>
+        + Send
+        + Sync
+        + 'static,
+> {
+    let parsed_url = reqwest::Url::parse(&l1_rpc_url)
+        .map_err(|e| RaikoError::Preflight(format!("invalid L1 RPC URL for L1STATICCALL: {e}")))?;
+    let l1_client = alloy_rpc_client::ClientBuilder::default().http(parsed_url);
+    Ok(move |target, block_number, gas_limit: u64, calldata: &[u8]| {
+        let client = l1_client.clone();
+        let handle = handle.clone();
+        let calldata_owned = calldata.to_vec();
+        tokio::task::block_in_place(move || {
+            handle.block_on(async move {
+                let call_data_hex = format!("0x{}", alloy_primitives::hex::encode(&calldata_owned));
+                let block_id = format!("0x{:x}", block_number);
+                // `gas` here is the L2 precompile's remaining budget (capped at 30M), reused
+                // as the L1 call budget so sequencer and prover OOM identically on an
+                // underfunded caller (R11). Decoupling L1 call budget from L2 gas_remaining
+                // is tracked as a follow-up.
+                let gas_hex = format!("0x{:x}", gas_limit.min(30_000_000));
+
+                let resp: TraceCallResult = client
+                    .request(
+                        "debug_traceCall",
+                        (
+                            serde_json::json!({
+                                "from": "0x0000000000000000000000000000000000000000",
+                                "to": format!("{:?}", target),
+                                "data": call_data_hex,
+                                "gas": gas_hex,
+                            }),
+                            block_id,
+                            serde_json::json!({}),
+                        ),
+                    )
+                    .await
+                    .map_err(|e| format!("debug_traceCall failed: {e}"))?;
+
+                if resp.failed {
+                    return Ok((resp.gas.min(gas_limit), vec![], true));
+                }
+                let hex_str = resp
+                    .return_value
+                    .strip_prefix("0x")
+                    .unwrap_or(&resp.return_value);
+                let bytes = alloy_primitives::hex::decode(hex_str)
+                    .map_err(|e| format!("decode returnValue: {e}"))?;
+                Ok((resp.gas.min(gas_limit), bytes, false))
+            })
+        })
+    })
+}
+
 pub struct PreflightData {
     pub block_number: u64,
     pub l1_chain_spec: ChainSpec,
@@ -219,62 +290,13 @@ pub async fn preflight<BDP: BlockDataProvider>(
             })
         });
 
-        // L1STATICCALL setup
+        // L1STATICCALL setup (single-block path).
         clear_l1_staticcall_cache();
         clear_l1_staticcall_rpc_served_calls();
         {
-            let l1_rpc_url = l1_chain_spec.rpc.clone();
-            let parsed_url = reqwest::Url::parse(&l1_rpc_url).map_err(|e| {
-                RaikoError::Preflight(format!("invalid L1 RPC URL for L1STATICCALL: {e}"))
-            })?;
-            let l1_client = alloy_rpc_client::ClientBuilder::default().http(parsed_url);
             let handle = tokio::runtime::Handle::current();
-            set_l1_staticcall_rpc_fetcher(move |target, block_number, gas_limit, calldata| {
-                let client = l1_client.clone();
-                tokio::task::block_in_place(|| {
-                    handle.block_on(async {
-                        let call_data_hex = format!("0x{}", hex::encode(calldata));
-                        let block_id = format!("0x{:x}", block_number);
-                        let gas_hex = format!("0x{:x}", gas_limit.min(30_000_000));
-
-                        #[derive(Debug, serde::Deserialize)]
-                        #[serde(rename_all = "camelCase")]
-                        struct TraceCallResult {
-                            gas: u64,
-                            return_value: String,
-                            failed: bool,
-                        }
-
-                        let resp: TraceCallResult = client
-                            .request(
-                                "debug_traceCall",
-                                (
-                                    serde_json::json!({
-                                        "from": "0x0000000000000000000000000000000000000000",
-                                        "to": format!("{:?}", target),
-                                        "data": call_data_hex,
-                                        "gas": gas_hex,
-                                    }),
-                                    block_id,
-                                    serde_json::json!({}),
-                                ),
-                            )
-                            .await
-                            .map_err(|e| format!("debug_traceCall failed: {e}"))?;
-
-                        if resp.failed {
-                            return Ok((resp.gas.min(gas_limit), vec![], true));
-                        }
-                        let hex_str = resp
-                            .return_value
-                            .strip_prefix("0x")
-                            .unwrap_or(&resp.return_value);
-                        let bytes =
-                            hex::decode(hex_str).map_err(|e| format!("decode returnValue: {e}"))?;
-                        Ok((resp.gas.min(gas_limit), bytes, false))
-                    })
-                })
-            });
+            let fetcher = make_l1_staticcall_rpc_fetcher(l1_chain_spec.rpc.clone(), handle)?;
+            set_l1_staticcall_rpc_fetcher(fetcher);
         }
 
         let handle = tokio::runtime::Handle::current();
@@ -648,63 +670,16 @@ pub async fn batch_preflight<BDP: BlockDataProvider>(
                         })
                     });
 
-                    // L1STATICCALL setup
+                    // L1STATICCALL setup (batch path).
                     clear_l1_staticcall_cache();
                     clear_l1_staticcall_rpc_served_calls();
                     {
-                        let l1_rpc_url = l1_rpc_url_for_chunk.clone();
-                        let parsed_url = reqwest::Url::parse(&l1_rpc_url).map_err(|e| {
-                            RaikoError::Preflight(format!(
-                                "invalid L1 RPC URL for L1STATICCALL: {e}"
-                            ))
-                        })?;
-                        let l1_client = alloy_rpc_client::ClientBuilder::default().http(parsed_url);
                         let handle = tokio::runtime::Handle::current();
-                        set_l1_staticcall_rpc_fetcher(
-                            move |target, block_number, gas_limit, calldata| {
-                                let client = l1_client.clone();
-                                tokio::task::block_in_place(|| {
-                                    handle.block_on(async {
-                                    let call_data_hex = format!("0x{}", hex::encode(calldata));
-                                    let block_id = format!("0x{:x}", block_number);
-                                    let gas_hex = format!("0x{:x}", gas_limit.min(30_000_000));
-
-                                    #[derive(Debug, serde::Deserialize)]
-                                    #[serde(rename_all = "camelCase")]
-                                    struct TraceCallResult {
-                                        gas: u64,
-                                        return_value: String,
-                                        failed: bool,
-                                    }
-
-                                    let resp: TraceCallResult = client
-                                        .request(
-                                            "debug_traceCall",
-                                            (
-                                                serde_json::json!({
-                                                    "from": "0x0000000000000000000000000000000000000000",
-                                                    "to": format!("{:?}", target),
-                                                    "data": call_data_hex,
-                                                    "gas": gas_hex,
-                                                }),
-                                                block_id,
-                                                serde_json::json!({}),
-                                            ),
-                                        )
-                                        .await
-                                        .map_err(|e| format!("debug_traceCall failed: {e}"))?;
-
-                                    if resp.failed {
-                                        return Ok((resp.gas.min(gas_limit), vec![], true));
-                                    }
-                                    let hex_str = resp.return_value.strip_prefix("0x").unwrap_or(&resp.return_value);
-                                    let bytes = hex::decode(hex_str)
-                                        .map_err(|e| format!("decode returnValue: {e}"))?;
-                                    Ok((resp.gas.min(gas_limit), bytes, false))
-                                })
-                                })
-                            },
-                        );
+                        let fetcher = make_l1_staticcall_rpc_fetcher(
+                            l1_rpc_url_for_chunk.clone(),
+                            handle,
+                        )?;
+                        set_l1_staticcall_rpc_fetcher(fetcher);
                     }
 
                     let handle = tokio::runtime::Handle::current();

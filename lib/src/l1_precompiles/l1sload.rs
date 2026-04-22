@@ -53,9 +53,11 @@ pub fn verify_and_populate_l1sload_proofs(
         l1_headers.len()
     );
 
-    // Set block context for the precompile's range checks.
-    set_anchor_block_id(anchor_block_number);
-    set_l1_origin_block_id(l1_origin_block_number);
+    // Precondition: the caller (host `prepare_l1_precompiles_for_execution` and guest
+    // `builder/mod.rs::calculate_block_header`) must have already set the shared anchor /
+    // l1-origin context via `populate_l1sload_cache(&[], anchor, l1_origin)`. The
+    // previously-present redundant set-globals here masked the context-unset bug fixed in
+    // commit a9762498 — not setting them again makes the coupling explicit.
 
     // Build verified block_number → state_root map by walking backward from L1 origin.
     let state_root_map = build_verified_state_root_map(l1_origin_header, l1_headers)?;
