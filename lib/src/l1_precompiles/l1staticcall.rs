@@ -183,11 +183,12 @@ pub fn verify_and_populate_l1_staticcall_witnesses_with_headers(
                     blk.beneficiary = h.beneficiary;
                     blk.basefee = h.base_fee_per_gas.unwrap_or(0);
                     blk.prevrandao = Some(h.mix_hash);
-                    // Revm derives blob_base_fee from excess_blob_gas via the active spec.
-                    // base_fee_update_fraction=0 means "don't adjust" — use the excess-gas
-                    // value verbatim as the sequencer's RPC saw it.
+                    // EIP-4844 update fraction: 3_338_477 (Cancun) / 5_007_716 (Prague).
+                    // Passing 0 would panic in revm's fake_exponential (divide by zero).
+                    // L1STATICCALL targets read-only state; blob pricing is cosmetic for
+                    // view calls but must still yield a valid gas price calc.
                     if let Some(excess) = h.excess_blob_gas {
-                        blk.set_blob_excess_gas_and_price(excess, 0);
+                        blk.set_blob_excess_gas_and_price(excess, 3_338_477);
                     }
                 }
             })
