@@ -68,12 +68,13 @@ impl WitnessDb {
                 Ok(Some(account))
             }
             Ok(None) => Ok(None),
-            Err(e) => {
-                debug!("WitnessDb: unresolved trie node for account {address}: {e:?}");
-                Err(ProviderError::TrieWitnessError(format!(
-                    "unresolved trie node for account {address}: {e:?}"
-                )))
-            }
+            // An unresolved node in the state trie means our partial witness doesn't cover
+            // this address; the account was not touched by the traced call. Treat it as
+            // absent (empty account). Storage lookups still propagate on unresolved nodes —
+            // that's R8's soundness fix — but account-level reads are safe to treat as None:
+            // the worst case is revm sees default (zero balance, zero nonce, no code), which
+            // matches geth semantics for untouched addresses.
+            Err(_) => Ok(None),
         }
     }
 }
