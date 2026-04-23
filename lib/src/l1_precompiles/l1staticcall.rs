@@ -157,13 +157,23 @@ pub fn verify_and_populate_l1_staticcall_witnesses_with_headers(
         let db = WitnessDb::build(&w.execution_witness, *state_root)
             .map_err(|e| anyhow!("L1STATICCALL #{i}: WitnessDb build: {e}"))?;
 
+        let block_number = w.block_number;
+        let header = header_map.get(&w.block_number).copied();
+
         // 2. Build the call TxEnv for a read-only call (caller = Address::ZERO).
         //    Gas limit matches NMC's cap so revm can complete calls that NMC sequenced.
+        //    gas_price matches the L1 block basefee (mirrors eth_call semantics) so the
+        //    GasPriceLessThanBasefee check passes when the verified header has non-zero fee.
+        let gas_price = header
+            .and_then(|h| h.base_fee_per_gas)
+            .unwrap_or(0)
+            .into();
         let tx = TxEnv::builder()
             .caller(Address::ZERO)
             .kind(TxKind::Call(w.target_address))
             .data(w.calldata.clone())
             .gas_limit(30_000_000)
+            .gas_price(gas_price)
             .build()
             .map_err(|e| anyhow!("L1STATICCALL #{i}: TxEnv build: {e:?}"))?;
 
@@ -172,8 +182,6 @@ pub fn verify_and_populate_l1_staticcall_witnesses_with_headers(
         //    blob_base_fee). revm 34 defaults to the latest spec; for post-Berlin view calls
         //    gas costs are stable, so spec pinning is deferred until L1 activates a gas-affecting
         //    change on this path.
-        let block_number = w.block_number;
-        let header = header_map.get(&w.block_number).copied();
         let mut evm = revm::Context::mainnet()
             .with_db(db)
             .modify_block_chained(|blk| {
