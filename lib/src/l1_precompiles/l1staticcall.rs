@@ -162,26 +162,24 @@ pub fn verify_and_populate_l1_staticcall_witnesses_with_headers(
 
         // 2. Build the call TxEnv for a read-only call (caller = Address::ZERO).
         //    Gas limit matches NMC's cap so revm can complete calls that NMC sequenced.
-        //    gas_price matches the L1 block basefee (mirrors eth_call semantics) so the
-        //    GasPriceLessThanBasefee check passes when the verified header has non-zero fee.
-        let gas_price = header
-            .and_then(|h| h.base_fee_per_gas)
-            .unwrap_or(0)
-            .into();
+        //    gas_price is left at 0 so revm doesn't charge the zero-address caller fees
+        //    (which would fail since Address::ZERO has no balance in the witness).
         let tx = TxEnv::builder()
             .caller(Address::ZERO)
             .kind(TxKind::Call(w.target_address))
             .data(w.calldata.clone())
             .gas_limit(30_000_000)
-            .gas_price(gas_price)
             .build()
             .map_err(|e| anyhow!("L1STATICCALL #{i}: TxEnv build: {e:?}"))?;
 
-        // 3. Construct a mainnet EVM over the witness, pinning block number plus any fields
-        //    the verified L1 header gives us (timestamp, base_fee, coinbase, prevrandao,
-        //    blob_base_fee). revm 34 defaults to the latest spec; for post-Berlin view calls
-        //    gas costs are stable, so spec pinning is deferred until L1 activates a gas-affecting
-        //    change on this path.
+        // 3. Construct a mainnet EVM over the witness. We pin block.number and pass the
+        //    verified header's timestamp/beneficiary/prevrandao for correct BLOCK_TIMESTAMP /
+        //    COINBASE / DIFFICULTY opcodes. We deliberately do NOT set basefee or
+        //    blob_excess_gas_and_price here: both require CfgEnv-gated opt-outs to keep the
+        //    zero-address caller viable (basefee forces gas_price >= basefee, and
+        //    set_blob_excess_gas_and_price with a non-zero update fraction panics in
+        //    feature-constrained revm builds). Targets that rely on BASEFEE/BLOBBASEFEE
+        //    will see 0 — documented trade-off.
         let mut evm = revm::Context::mainnet()
             .with_db(db)
             .modify_block_chained(|blk| {
@@ -189,15 +187,7 @@ pub fn verify_and_populate_l1_staticcall_witnesses_with_headers(
                 if let Some(h) = header {
                     blk.timestamp = U256::from(h.timestamp);
                     blk.beneficiary = h.beneficiary;
-                    blk.basefee = h.base_fee_per_gas.unwrap_or(0);
                     blk.prevrandao = Some(h.mix_hash);
-                    // EIP-4844 update fraction: 3_338_477 (Cancun) / 5_007_716 (Prague).
-                    // Passing 0 would panic in revm's fake_exponential (divide by zero).
-                    // L1STATICCALL targets read-only state; blob pricing is cosmetic for
-                    // view calls but must still yield a valid gas price calc.
-                    if let Some(excess) = h.excess_blob_gas {
-                        blk.set_blob_excess_gas_and_price(excess, 3_338_477);
-                    }
                 }
             })
             .build_mainnet();
