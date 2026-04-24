@@ -1608,6 +1608,35 @@ async fn get_and_filter_blob_data_by_blobscan(
     let blob = response.json::<BlobScanData>().await?;
     Ok(blob_to_bytes(&blob.data))
 }
+/// Build the JSON-RPC request body for `debug_executionWitnessCall`.
+///
+/// **The `gas` field is load-bearing.** Nethermind's `debug_executionWitnessCall`
+/// returns a near-empty witness (only the state root node, no codes, no keys) when
+/// gas is omitted — the RPC handler's `Gas ??= header.GasLimit` default fires, but
+/// the recorder doesn't populate along that path. Passing the same 30M cap the
+/// L1STATICCALL precompile uses in `debug_traceCall` ensures the call runs to
+/// completion and touches every trie node the guest later needs. Discovered during
+/// the #41 e2e: without this, `witness_codes=0` and revm halts on missing code.
+pub(crate) fn build_debug_execution_witness_call_payload(
+    target: alloy_primitives::Address,
+    calldata: &[u8],
+    block_number: u64,
+) -> serde_json::Value {
+    serde_json::json!({
+        "jsonrpc": "2.0",
+        "method": "debug_executionWitnessCall",
+        "params": [
+            {
+                "to": format!("{:?}", target),
+                "data": format!("0x{}", hex::encode(calldata)),
+                "gas": "0x1c9c380"
+            },
+            format!("0x{:x}", block_number)
+        ],
+        "id": 1
+    })
+}
+
 /// Fetch execution witnesses for L1STATICCALL calls from the L1 NMC node.
 ///
 /// For each *distinct* recorded call, calls `debug_executionWitnessCall` on L1 to get the
@@ -1652,19 +1681,10 @@ pub async fn fetch_l1_staticcall_witnesses(
                 "L1STATICCALL: fetching execution witness {}/{} for target={:?}, block={}",
                 i + 1, total, target, block_number
             );
-            let call_data_hex = format!("0x{}", hex::encode(&calldata));
-            let block_hex = format!("0x{:x}", block_number);
+            let payload = build_debug_execution_witness_call_payload(target, &calldata, block_number);
             let resp = client
                 .post(&rpc)
-                .json(&serde_json::json!({
-                    "jsonrpc": "2.0",
-                    "method": "debug_executionWitnessCall",
-                    "params": [
-                        {"to": format!("{:?}", target), "data": call_data_hex},
-                        block_hex
-                    ],
-                    "id": 1
-                }))
+                .json(&payload)
                 .send()
                 .await
                 .map_err(|e| RaikoError::Preflight(format!(
@@ -1735,6 +1755,36 @@ mod test {
     };
 
     use super::*;
+
+    #[test]
+    fn test_debug_execution_witness_call_payload_includes_gas_field() {
+        // Regression guard: Nethermind returns an empty witness (no codes, no keys) when
+        // `gas` is omitted from `debug_executionWitnessCall`. The symptom of the bug is
+        // revm halting on missing contract code during guest verification — see the
+        // #41 e2e root cause. If anyone strips the `gas` field thinking it's a cosmetic
+        // default, this test fails loudly instead of letting the bug reach devnet.
+        let target = alloy_primitives::Address::from([0xABu8; 20]);
+        let calldata: &[u8] = &[0x20, 0x96, 0x52, 0x55];
+        let block_number: u64 = 105;
+
+        let payload = build_debug_execution_witness_call_payload(target, calldata, block_number);
+        let params = payload
+            .get("params")
+            .and_then(|p| p.as_array())
+            .expect("params must be an array");
+        let tx = params.first().and_then(|t| t.as_object()).expect("tx must be an object");
+
+        let gas = tx.get("gas").expect("gas field must be present — see fn docs");
+        assert_eq!(
+            gas.as_str().unwrap(),
+            "0x1c9c380",
+            "gas must be 30M (0x1c9c380) to match precompile cap; any other value risks partial witnesses"
+        );
+        assert_eq!(tx.get("to").unwrap().as_str().unwrap(), format!("{:?}", target));
+        assert_eq!(tx.get("data").unwrap().as_str().unwrap(), "0x20965255");
+        assert_eq!(params[1].as_str().unwrap(), "0x69");
+        assert_eq!(payload.get("method").unwrap().as_str().unwrap(), "debug_executionWitnessCall");
+    }
 
     #[ignore = "not run in CI as devnet changes frequently"]
     #[tokio::test]

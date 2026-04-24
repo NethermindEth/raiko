@@ -160,6 +160,27 @@ pub fn verify_and_populate_l1_staticcall_witnesses_with_headers(
         let block_number = w.block_number;
         let header = header_map.get(&w.block_number).copied();
 
+        // Diagnostic context for regression debugging — logged at INFO so it shows up
+        // in devnet runs without flipping RUST_LOG. If this ever gets noisy in production
+        // drop to debug! but keep the fields: they collapsed #40's multi-regression
+        // cascade from "guess and rebuild" to "read the log".
+        info!(
+            "L1STATICCALL #{i}: target={:?}, block={}, calldata_len={}, state_root={}, \
+             witness_state_nodes={}, witness_codes={}, witness_keys={}, witness_headers={}, \
+             witness_return_len={}, witness_gas={}, has_header={}",
+            w.target_address,
+            w.block_number,
+            w.calldata.len(),
+            state_root,
+            w.execution_witness.state.len(),
+            w.execution_witness.codes.len(),
+            w.execution_witness.keys.len(),
+            w.execution_witness.headers.len(),
+            w.return_data.len(),
+            w.gas_used,
+            header.is_some(),
+        );
+
         // 2. Build the call TxEnv for a read-only call (caller = Address::ZERO).
         //    Gas limit matches NMC's cap so revm can complete calls that NMC sequenced.
         //    gas_price is left at 0 so revm doesn't charge the zero-address caller fees
@@ -192,10 +213,47 @@ pub fn verify_and_populate_l1_staticcall_witnesses_with_headers(
             })
             .build_mainnet();
 
+        // Capture the full env revm is actually seeing so the root cause of any divergence
+        // is on the wire when it happens. Without these the caller only sees "mismatch"
+        // and must rebuild to learn which env field was wrong.
+        {
+            let cfg = &evm.ctx.cfg;
+            let blk = &evm.ctx.block;
+            info!(
+                "L1STATICCALL #{i} evm env: spec={:?}, chain_id={}, \
+                 blk.number={}, blk.timestamp={}, blk.beneficiary={:?}, blk.basefee={}, \
+                 blk.prevrandao={:?}, blk.gas_limit={}, blk.difficulty={}, \
+                 blk.blob_excess_gas_and_price={:?}",
+                cfg.spec,
+                cfg.chain_id,
+                blk.number,
+                blk.timestamp,
+                blk.beneficiary,
+                blk.basefee,
+                blk.prevrandao,
+                blk.gas_limit,
+                blk.difficulty,
+                blk.blob_excess_gas_and_price,
+            );
+        }
+
         // 4. Execute the call
         let outcome = evm
             .transact(tx)
             .map_err(|e| anyhow!("L1STATICCALL #{i}: revm transact: {e:?}"))?;
+
+        debug!(
+            "L1STATICCALL #{i} revm outcome: {:?}",
+            match &outcome.result {
+                ExecutionResult::Success {
+                    output, gas_used, ..
+                } => format!("Success(output_len={}, gas={})", output.data().len(), gas_used),
+                ExecutionResult::Revert { output, gas_used } =>
+                    format!("Revert(output_len={}, gas={})", output.len(), gas_used),
+                ExecutionResult::Halt { reason, gas_used } =>
+                    format!("Halt({reason:?}, gas={gas_used})"),
+            }
+        );
 
         // 5. Three-way assertion: output + gas_used + halt status
         let (output, gas_used) = match outcome.result {
@@ -205,17 +263,38 @@ pub fn verify_and_populate_l1_staticcall_witnesses_with_headers(
             ExecutionResult::Revert { output, gas_used } => (output, gas_used),
             ExecutionResult::Halt { reason, gas_used } => {
                 return Err(anyhow!(
-                    "L1STATICCALL #{i}: halted {reason:?} after {gas_used} gas"
+                    "L1STATICCALL #{i}: halted {reason:?} after {gas_used} gas (target={:?}, block={}, calldata=0x{})",
+                    w.target_address,
+                    w.block_number,
+                    alloy_primitives::hex::encode(&w.calldata),
                 ));
             }
         };
 
         if output.as_ref() != w.return_data.as_ref() {
-            return Err(anyhow!("L1STATICCALL #{i}: return_data mismatch"));
+            // Include both sides of the mismatch so the root cause is visible without
+            // needing to re-instrument. Without these fields the prior error — "return_data
+            // mismatch" — was uninformative and forced a guess-and-check rebuild cycle.
+            return Err(anyhow!(
+                "L1STATICCALL #{i}: return_data mismatch (target={:?}, block={}, calldata=0x{}, revm_gas={}, witness_gas={}): \
+                 revm returned {} bytes (0x{}), witness expects {} bytes (0x{})",
+                w.target_address,
+                w.block_number,
+                alloy_primitives::hex::encode(&w.calldata),
+                gas_used,
+                w.gas_used,
+                output.len(),
+                alloy_primitives::hex::encode(&output),
+                w.return_data.len(),
+                alloy_primitives::hex::encode(&w.return_data),
+            ));
         }
         if gas_used != w.gas_used {
             return Err(anyhow!(
-                "L1STATICCALL #{i}: gas_used mismatch (witness={}, revm={})",
+                "L1STATICCALL #{i}: gas_used mismatch (target={:?}, block={}, calldata=0x{}): witness={}, revm={}",
+                w.target_address,
+                w.block_number,
+                alloy_primitives::hex::encode(&w.calldata),
                 w.gas_used,
                 gas_used
             ));
@@ -746,5 +825,183 @@ mod tests {
         let result = verify_test(&[witness], &state_root_map);
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains("non-empty data"));
+    }
+
+    // ───────────────────────────────────────────────
+    // revm re-execution regression guards
+    // ───────────────────────────────────────────────
+    //
+    // #40 exposed that the rest of this module's tests all use
+    // `ExecutionWitness::default()` → the cfg(test) fast path → revm never runs.
+    // R7 (block-env population) sailed through `cargo test` and only failed during
+    // devnet replay. The tests below drive revm with a hand-built valid state trie
+    // so future changes to block env, spec, witness handling, or CfgEnv cannot
+    // regress the simple SLOAD path without being caught here.
+
+    use crate::primitives::mpt::{keccak, MptNode, RlpBytes, StateAccount};
+
+    /// Builds a witness for a minimal contract at `target` whose runtime code is a
+    /// `SLOAD(slot 0); RETURN 32 bytes` loop. Returns `(witness, state_root, expected_return)`.
+    fn sload_target_witness(
+        target: Address,
+        block_number: u64,
+        stored_value: U256,
+    ) -> (L1StaticCallWitness, B256, Vec<u8>) {
+        // PUSH1 0 SLOAD PUSH1 0 MSTORE PUSH1 0x20 PUSH1 0 RETURN — 11 bytes.
+        let code: Vec<u8> = vec![
+            0x60, 0x00, 0x54, 0x60, 0x00, 0x52, 0x60, 0x20, 0x60, 0x00, 0xf3,
+        ];
+        let code_hash: B256 = keccak(&code).into();
+
+        let mut storage_trie = MptNode::default();
+        let storage_key = keccak(U256::ZERO.to_be_bytes::<32>());
+        storage_trie.insert_rlp(&storage_key, stored_value).unwrap();
+        let storage_root: B256 = storage_trie.hash();
+
+        let account = StateAccount {
+            nonce: 0,
+            balance: U256::ZERO,
+            storage_root,
+            code_hash,
+        };
+        let mut state_trie = MptNode::default();
+        let address_key = keccak(target);
+        state_trie.insert_rlp(&address_key, account).unwrap();
+        let state_root: B256 = state_trie.hash();
+
+        let expected_return = stored_value.to_be_bytes::<32>().to_vec();
+
+        let witness = L1StaticCallWitness {
+            target_address: target,
+            block_number,
+            calldata: Bytes::new(),
+            return_data: Bytes::from(expected_return.clone()),
+            // gas_used is whatever revm computes. Callers that want to assert
+            // full success replace this with the revm-reported value on a second pass;
+            // callers that only want to assert correct output leave it at 0 and expect
+            // the verifier to fail with "gas_used mismatch" (proving revm ran and
+            // produced matching bytes).
+            gas_used: 0,
+            is_reverted: false,
+            execution_witness: ExecutionWitness {
+                state: vec![
+                    Bytes::from(state_trie.to_rlp()),
+                    Bytes::from(storage_trie.to_rlp()),
+                ],
+                codes: vec![Bytes::from(code)],
+                keys: vec![
+                    Bytes::from(target.as_slice().to_vec()),
+                    Bytes::from(U256::ZERO.to_be_bytes::<32>().to_vec()),
+                ],
+                headers: vec![],
+            },
+        };
+        (witness, state_root, expected_return)
+    }
+
+    #[test]
+    #[serial]
+    fn test_revm_reexecution_produces_correct_return_data_for_sload() {
+        reset_all();
+        let target = Address::from([0xABu8; 20]);
+        let (witness, state_root, _) =
+            sload_target_witness(target, 100, U256::from(0xDEAD_BEEFu64));
+        let state_root_map: HashMap<u64, B256> = HashMap::from([(100, state_root)]);
+
+        let err = verify_test(&[witness], &state_root_map)
+            .expect_err("gas_used=0 in fixture must fail revm's gas check");
+        let msg = err.to_string();
+
+        // The point of this regression guard: revm MUST produce the correct 32-byte
+        // SLOAD output. Only gas should mismatch against our placeholder `gas_used: 0`.
+        assert!(
+            msg.contains("gas_used mismatch"),
+            "Expected gas_used mismatch (proves revm re-executed the SLOAD correctly). \
+             Got instead: {msg}"
+        );
+        assert!(
+            !msg.contains("return_data mismatch"),
+            "return_data mismatch means revm's re-execution drifted from the witness \
+             output — exactly the class of failure R7/#40 surfaced. Got: {msg}"
+        );
+    }
+
+    #[test]
+    #[serial]
+    fn test_revm_reexecution_ignores_populated_block_env_for_storage_only_target() {
+        // Tighter regression guard for R7 specifically: a target that only reads
+        // storage must produce byte-identical output whether or not timestamp,
+        // beneficiary, or prevrandao are populated in the block env. If someone
+        // ever changes how block-env is threaded into revm (e.g. flipping a spec
+        // default, adding a pre-execution hook) and it perturbs a pure-SLOAD call,
+        // this test fails loudly.
+        reset_all();
+        let target = Address::from([0xCDu8; 20]);
+        let (witness, state_root, _) = sload_target_witness(target, 150, U256::from(42u64));
+        let state_root_map: HashMap<u64, B256> = HashMap::from([(150, state_root)]);
+
+        // Construct a synthetic header so the `_with_headers` path is exercised.
+        let header = reth_primitives::Header {
+            number: 150,
+            timestamp: 1_776_933_683,
+            beneficiary: Address::from([0xEEu8; 20]),
+            mix_hash: B256::from([0x11u8; 32]),
+            base_fee_per_gas: Some(1_000_000_000),
+            excess_blob_gas: Some(0),
+            ..Default::default()
+        };
+        let header_map: HashMap<u64, &reth_primitives::Header> = HashMap::from([(150, &header)]);
+
+        let err = verify_and_populate_l1_staticcall_witnesses_with_headers(
+            &[witness],
+            &state_root_map,
+            &header_map,
+            TEST_L1_ORIGIN,
+        )
+        .expect_err("gas_used=0 placeholder must fail the gas assertion");
+
+        let msg = err.to_string();
+        assert!(
+            msg.contains("gas_used mismatch"),
+            "Populated block env must not disturb SLOAD output — expected the only \
+             mismatch to be gas_used. Got: {msg}"
+        );
+        assert!(
+            !msg.contains("return_data mismatch"),
+            "return_data differed with populated block env (R7 regression class). \
+             The full mismatch details are in the error message — read them: {msg}"
+        );
+    }
+
+    #[test]
+    #[serial]
+    fn test_revm_reexecution_surfaces_return_data_mismatch_with_diagnostics() {
+        // Guarantees the improved error message in `return_data mismatch` actually
+        // carries both the revm output and the witness expected value. Without this,
+        // diagnosing the #40 regression chain would again require a code change +
+        // rebuild cycle just to see which bytes differ.
+        reset_all();
+        let target = Address::from([0xEFu8; 20]);
+        let (mut witness, state_root, _) =
+            sload_target_witness(target, 200, U256::from(0xBEEFu64));
+        // Deliberately corrupt the expected return_data so the verifier surfaces a
+        // return_data mismatch — proving the error carries enough context to debug.
+        witness.return_data = Bytes::from(vec![0xFFu8; 32]);
+        let state_root_map: HashMap<u64, B256> = HashMap::from([(200, state_root)]);
+
+        let err =
+            verify_test(&[witness], &state_root_map).expect_err("corrupted return_data must fail");
+        let msg = err.to_string();
+
+        assert!(msg.contains("return_data mismatch"), "Got: {msg}");
+        assert!(msg.contains("revm returned"), "Missing revm output. Got: {msg}");
+        assert!(msg.contains("witness expects"), "Missing witness value. Got: {msg}");
+        assert!(msg.contains("target="), "Missing target address. Got: {msg}");
+        assert!(msg.contains("block=200"), "Missing block number. Got: {msg}");
+        // The revm output should be the actual SLOAD'd value encoded as 32 bytes.
+        assert!(
+            msg.contains(&format!("{:064x}", 0xBEEFu64)),
+            "Expected revm output hex to contain the stored value. Got: {msg}"
+        );
     }
 }
