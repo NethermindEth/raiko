@@ -1617,6 +1617,15 @@ async fn get_and_filter_blob_data_by_blobscan(
 /// L1STATICCALL precompile uses in `debug_traceCall` ensures the call runs to
 /// completion and touches every trie node the guest later needs. Discovered during
 /// the #41 e2e: without this, `witness_codes=0` and revm halts on missing code.
+///
+/// **The `from` field is also load-bearing.** Nethermind defaults a missing `from`
+/// to the zero address, but it does so *before* `WitnessGeneratingWorldState`
+/// records the caller's account access, so the witness omits any MPT path the guest
+/// would later walk for that caller. The guest in turn re-executes with
+/// `caller = Address::ZERO`, so the two halves silently diverge for any contract
+/// whose code reads `msg.sender`-dependent storage. We pin `from` here to the same
+/// zero address the guest uses; without this match, the witness lacks the trie
+/// nodes the guest needs and verification fails late with a `return_data mismatch`.
 pub(crate) fn build_debug_execution_witness_call_payload(
     target: alloy_primitives::Address,
     calldata: &[u8],
@@ -1627,9 +1636,10 @@ pub(crate) fn build_debug_execution_witness_call_payload(
         "method": "debug_executionWitnessCall",
         "params": [
             {
+                "from": format!("{:?}", alloy_primitives::Address::ZERO),
                 "to": format!("{:?}", target),
                 "data": format!("0x{}", hex::encode(calldata)),
-                "gas": "0x1c9c380"
+                "gas": format!("0x{:x}", raiko_lib::l1_precompiles::L1STATICCALL_GAS_CAP)
             },
             format!("0x{:x}", block_number)
         ],
@@ -1784,6 +1794,45 @@ mod test {
         assert_eq!(tx.get("data").unwrap().as_str().unwrap(), "0x20965255");
         assert_eq!(params[1].as_str().unwrap(), "0x69");
         assert_eq!(payload.get("method").unwrap().as_str().unwrap(), "debug_executionWitnessCall");
+    }
+
+    #[test]
+    fn test_debug_execution_witness_call_payload_includes_from_field() {
+        // Regression guard: without an explicit `from = 0x00…00`, NMC's
+        // `debug_executionWitnessCall` runs the call from the zero address (default)
+        // but `WitnessGeneratingWorldState` skips recording the caller's account-trie
+        // path along the default branch. The guest later re-executes with
+        // `caller = Address::ZERO` and walks an absent trie node, surfacing as a
+        // late `return_data mismatch` for any target whose code reads msg.sender-
+        // dependent storage. Pin `from` to the same zero address the guest uses so
+        // the witness covers the full set of MPT paths the guest will walk.
+        let target = alloy_primitives::Address::from([0xCDu8; 20]);
+        let payload = build_debug_execution_witness_call_payload(target, &[0xAB, 0xCD], 200);
+        let tx = payload["params"][0]
+            .as_object()
+            .expect("tx must be an object");
+        let from = tx.get("from").expect("from field must be present — see fn docs");
+        assert_eq!(
+            from.as_str().unwrap(),
+            "0x0000000000000000000000000000000000000000",
+            "`from` must be the zero address to match the guest's caller; any other \
+             value lets the witness omit MPT paths the guest will need"
+        );
+    }
+
+    #[test]
+    fn test_debug_execution_witness_call_payload_gas_matches_l1staticcall_cap() {
+        // Both halves of the verifier must use the same gas budget — sequencer
+        // and prover OOM identically only when the witness fetch caps at the same
+        // value as the L1STATICCALL precompile's 30M ceiling.
+        let target = alloy_primitives::Address::from([0xEEu8; 20]);
+        let payload = build_debug_execution_witness_call_payload(target, &[], 1);
+        let gas_hex = payload["params"][0]["gas"].as_str().unwrap().to_string();
+        let expected = format!("0x{:x}", raiko_lib::l1_precompiles::L1STATICCALL_GAS_CAP);
+        assert_eq!(
+            gas_hex, expected,
+            "payload gas must derive from L1STATICCALL_GAS_CAP — drift is a sequencer↔prover OOM divergence"
+        );
     }
 
     #[ignore = "not run in CI as devnet changes frequently"]

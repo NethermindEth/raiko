@@ -16,7 +16,7 @@ use revm::context::result::ExecutionResult;
 use revm::context::TxEnv;
 use revm::primitives::TxKind;
 use revm::{ExecuteEvm, MainBuilder, MainContext};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use tracing::{debug, info};
 
 use super::witness_db::WitnessDb;
@@ -24,6 +24,14 @@ use crate::input::L1StaticCallWitness;
 
 /// Maximum number of L1 blocks to look back from L1 origin. Matches the L2 precompile.
 const L1STATICCALL_MAX_BLOCK_LOOKBACK: u64 = 256;
+
+/// Gas cap for any single L1STATICCALL re-execution. Single source of truth shared
+/// between the guest re-executor (`TxEnv::gas_limit`), the host preflight's
+/// `debug_traceCall` budget, and the witness-fetch RPC payload. Keeping these in
+/// lockstep prevents sequencer↔prover OOM divergence: if the sequencer can run a
+/// 30M-gas L1 view but the prover budgets less, the guest halts mid-execution
+/// against an honest witness and the proof aborts.
+pub const L1STATICCALL_GAS_CAP: u64 = 30_000_000;
 
 /// Verify and populate L1STATICCALL results from execution witnesses.
 ///
@@ -79,6 +87,14 @@ pub fn verify_and_populate_l1_staticcall_witnesses_with_headers(
 
     let window_floor = l1_origin_block_number.saturating_sub(L1STATICCALL_MAX_BLOCK_LOOKBACK);
 
+    // Dedup identical (target, block, calldata) triples within the witness slice. The preflight
+    // already deduplicates RPC fetches and replicates fetched witnesses back across the original
+    // call sequence so the guest sees one record per L1STATICCALL invocation. Re-running the
+    // expensive WitnessDb::build + revm transact for the second-and-later replicas is pure
+    // wasted ZK cycles: the cache key is `(target, block, calldata)` so the first verification
+    // populates the cache and any duplicate invocation will hit the same entry.
+    let mut seen: HashSet<(Address, u64, Vec<u8>)> = HashSet::with_capacity(witnesses.len());
+
     for (i, w) in witnesses.iter().enumerate() {
         // Block-range check mirrors the L2 precompile `[l1origin − 256, l1origin]` window.
         ensure!(
@@ -88,14 +104,6 @@ pub fn verify_and_populate_l1_staticcall_witnesses_with_headers(
             window_floor,
             l1_origin_block_number,
         );
-
-        let state_root = state_root_map.get(&w.block_number).ok_or_else(|| {
-            anyhow!(
-                "L1STATICCALL: no verified state root for block {} (witness #{})",
-                w.block_number,
-                i
-            )
-        })?;
 
         debug!(
             "L1STATICCALL: witness #{}: target={:?}, block={}, calldata_len={}, return_len={}, state_nodes={}, codes={}",
@@ -107,6 +115,11 @@ pub fn verify_and_populate_l1_staticcall_witnesses_with_headers(
             // Match NMC's `GethLikeTxTracer.MarkAsFailed`: revert => gas=0 and empty return data.
             // This binds the fragile coupling between the sequencer tracer and the guest so a
             // malicious prover cannot mark an arbitrary call reverted with forged gas.
+            //
+            // We deliberately reach this branch *before* the state-root lookup: a reverted call
+            // doesn't re-execute against L1 state, so requiring an entry in `state_root_map` for
+            // every reverted block would add a useless dependency (and surface as a misleading
+            // "no verified state root" error when the real cause is the revert itself).
             ensure!(
                 w.gas_used == 0 && w.return_data.is_empty(),
                 "L1STATICCALL: witness #{i} reverted but carries non-zero gas ({}) or non-empty data ({} bytes) — expected NMC-tracer semantics",
@@ -123,6 +136,29 @@ pub fn verify_and_populate_l1_staticcall_witnesses_with_headers(
                 w.gas_used,
                 w.return_data.to_vec(),
                 true,
+            );
+            continue;
+        }
+
+        // State-root lookup is only required for non-reverted witnesses (revm needs a verified
+        // root to bind the WitnessDb to the verified L1 chain). Hoisted under the revert check
+        // so reverted calls don't pay the dependency.
+        let state_root = state_root_map.get(&w.block_number).ok_or_else(|| {
+            anyhow!(
+                "L1STATICCALL: no verified state root for block {} (witness #{})",
+                w.block_number,
+                i
+            )
+        })?;
+
+        // R5 dedup — skip the heavy WitnessDb + revm work for any duplicate invocation. We
+        // keep the per-record cache write below so duplicate-invocation cache reads continue
+        // to land. (The first occurrence already executed and `set_l1_staticcall_value`d the
+        // verified output under the same (target, block, calldata) cache key.)
+        let key = (w.target_address, w.block_number, w.calldata.to_vec());
+        if !seen.insert(key) {
+            debug!(
+                "L1STATICCALL: witness #{i} duplicates an earlier (target, block, calldata) — skipping re-verification"
             );
             continue;
         }
@@ -189,7 +225,7 @@ pub fn verify_and_populate_l1_staticcall_witnesses_with_headers(
             .caller(Address::ZERO)
             .kind(TxKind::Call(w.target_address))
             .data(w.calldata.clone())
-            .gas_limit(30_000_000)
+            .gas_limit(L1STATICCALL_GAS_CAP)
             .build()
             .map_err(|e| anyhow!("L1STATICCALL #{i}: TxEnv build: {e:?}"))?;
 
@@ -1002,6 +1038,102 @@ mod tests {
         assert!(
             msg.contains(&format!("{:064x}", 0xBEEFu64)),
             "Expected revm output hex to contain the stored value. Got: {msg}"
+        );
+    }
+
+    // ───────────────────────────────────────────────
+    // Review-comment regression guards (R1–R5 from #43)
+    // ───────────────────────────────────────────────
+
+    #[test]
+    #[serial]
+    fn test_verify_reverted_witness_without_state_root_succeeds() {
+        // R3 regression guard: reverted witnesses must NOT require an entry in
+        // `state_root_map` for their block — they don't re-execute against L1
+        // state, so the dependency is misleading. Pre-fix the lookup happened
+        // before the revert branch and surfaced as
+        // `no verified state root for block N` for any reverted call outside
+        // the verified state-root set, hiding the real (revert) failure.
+        reset_all();
+        let target = Address::from([0xBCu8; 20]);
+        let calldata = vec![0xAA, 0xBB];
+        let witness = L1StaticCallWitness {
+            target_address: target,
+            block_number: 100,
+            calldata: Bytes::from(calldata),
+            return_data: Bytes::from(vec![]),
+            gas_used: 0,
+            is_reverted: true,
+            execution_witness: ExecutionWitness::default(),
+        };
+        // Empty state-root map — block 100 deliberately absent.
+        let state_root_map: HashMap<u64, B256> = HashMap::new();
+
+        let result = verify_test(&[witness], &state_root_map);
+        assert!(
+            result.is_ok(),
+            "reverted witness must succeed without a state-root entry: {:?}",
+            result.err()
+        );
+    }
+
+    #[test]
+    #[serial]
+    fn test_verify_dedups_identical_witnesses() {
+        // R5 regression guard: when the preflight replicates a single
+        // deduplicated fetch back across N invocation slots (so the guest
+        // sees one record per L1STATICCALL invocation), the verifier must
+        // not redundantly rebuild WitnessDb + revm-transact for each replica.
+        // We can't observe `WitnessDb::build` calls directly here, but we
+        // can prove the loop doesn't double-write the cache or fail by
+        // running the same witness 3× and asserting one cached value.
+        reset_all();
+        let target = Address::from([0xDEu8; 20]);
+        let calldata = vec![0x12, 0x34];
+        let return_data = vec![0x77, 0x88, 0x99];
+        let witness = make_witness(target, 150, &calldata, &return_data);
+        let state_root_map: HashMap<u64, B256> =
+            HashMap::from([(150, B256::from([0x55u8; 32]))]);
+
+        // Three identical replicas — the dedup should reduce to one verification.
+        let result = verify_test(
+            &[witness.clone(), witness.clone(), witness],
+            &state_root_map,
+        );
+        assert!(
+            result.is_ok(),
+            "duplicate witnesses must not error: {:?}",
+            result.err()
+        );
+
+        set_anchor_block_id(140);
+        set_l1_origin_block_id(160);
+
+        let mut input = Vec::with_capacity(52 + calldata.len());
+        input.extend_from_slice(target.as_slice());
+        input.extend_from_slice(&U256::from(150u64).to_be_bytes::<32>());
+        input.extend_from_slice(&calldata);
+
+        let res = l1staticcall_run(&input, 100_000);
+        assert!(
+            res.is_ok(),
+            "deduplicated cache must still serve the value: {:?}",
+            res.err()
+        );
+        assert_eq!(res.unwrap().bytes.as_ref(), &return_data);
+    }
+
+    #[test]
+    #[serial]
+    fn test_l1staticcall_gas_cap_const_matches_evm_limit() {
+        // Defensive guard: any drift in `L1STATICCALL_GAS_CAP` will silently
+        // change the witness fetcher's RPC budget, the precompile's revm
+        // gas_limit, and the host preflight's `debug_traceCall` budget.
+        // Pin the value here so a refactor that "rounds it up" gets
+        // surfaced in the test diff, not in a devnet replay six weeks later.
+        assert_eq!(
+            L1STATICCALL_GAS_CAP, 30_000_000,
+            "L1STATICCALL_GAS_CAP changed — sequencer/witness/guest must move together"
         );
     }
 }

@@ -9,7 +9,7 @@ pub use l1sload::{
 
 pub use l1staticcall::{
     verify_and_populate_l1_staticcall_witnesses,
-    verify_and_populate_l1_staticcall_witnesses_with_headers,
+    verify_and_populate_l1_staticcall_witnesses_with_headers, L1STATICCALL_GAS_CAP,
 };
 
 /// Re-export L1 RPC fallback functions for L1SLOAD support

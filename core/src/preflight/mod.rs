@@ -83,8 +83,12 @@ fn make_l1_staticcall_rpc_fetcher(
                 // `gas` here is the L2 precompile's remaining budget (capped at 30M), reused
                 // as the L1 call budget so sequencer and prover OOM identically on an
                 // underfunded caller (R11). Decoupling L1 call budget from L2 gas_remaining
-                // is tracked as a follow-up.
-                let gas_hex = format!("0x{:x}", gas_limit.min(30_000_000));
+                // is tracked as a follow-up. Cap derives from `L1STATICCALL_GAS_CAP`
+                // (the single source of truth shared with the witness fetcher and guest).
+                let gas_hex = format!(
+                    "0x{:x}",
+                    gas_limit.min(raiko_lib::l1_precompiles::L1STATICCALL_GAS_CAP)
+                );
 
                 let resp: TraceCallResult = client
                     .request(
