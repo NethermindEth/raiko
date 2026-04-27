@@ -25,10 +25,16 @@ use raiko_lib::{
     utils::shasta_rules::ANCHOR_MAX_OFFSET,
 };
 
-use raiko_lib::input::L1StorageProof;
+use alethia_reth_evm::precompiles::l1staticcall::L1StaticCallRecord;
+use raiko_lib::input::{ExecutionWitness, L1StaticCallWitness, L1StorageProof};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::iter;
+use std::sync::LazyLock;
+
+/// Shared HTTP client for preflight RPC calls — re-used across invocations so connection
+/// pooling works and we don't pay the TLS setup cost on every single preflight.
+static PREFLIGHT_HTTP_CLIENT: LazyLock<reqwest::Client> = LazyLock::new(reqwest::Client::new);
 use tracing::{debug, error, info, instrument, warn};
 
 use crate::{
@@ -854,6 +860,7 @@ async fn fetch_l1_headers_in_range(
 
     info!("Fetching L1 headers: blocks {}..{}", from_block, to_block);
 
+    let expected_count = (to_block - from_block) as usize;
     let blocks_to_fetch: Vec<(u64, bool)> = (from_block..to_block).map(|n| (n, false)).collect();
 
     let blocks = l1_provider.get_blocks(&blocks_to_fetch).await?;
@@ -865,7 +872,97 @@ async fn fetch_l1_headers_in_range(
 
     headers.sort_by_key(|h| h.number);
 
+    // Surface RPC gaps at preflight time so they aren't rediscovered inside the guest as
+    // opaque "no verified state root" errors.
+    if headers.len() != expected_count {
+        return Err(RaikoError::Preflight(format!(
+            "L1 header RPC returned {} headers for range [{}, {}) — expected {}",
+            headers.len(),
+            from_block,
+            to_block,
+            expected_count,
+        )));
+    }
+    for (idx, h) in headers.iter().enumerate() {
+        let expected_number = from_block + idx as u64;
+        if h.number != expected_number {
+            return Err(RaikoError::Preflight(format!(
+                "L1 header block number mismatch at index {idx}: got {}, expected {}",
+                h.number, expected_number,
+            )));
+        }
+    }
+
     Ok(headers)
+}
+
+/// Ensure `input.l1_headers` covers every L1 block queried by L1STATICCALL witnesses.
+///
+/// The guest walks `l1_headers` backward from the L1 origin to build a trusted
+/// `block_number → state_root` map. That walk is bounded by whatever `l1_headers`
+/// contains, which today is populated only by the L1SLOAD proof collection. If an
+/// L1STATICCALL witness targets a block below the L1SLOAD-covered range (or
+/// L1SLOAD had no calls at all), the map will miss its state root and the guest
+/// fails with "no verified state root for block X".
+///
+/// This helper fetches the missing prefix `[min_staticcall_block, covered_min)`
+/// and prepends it to `input.l1_headers`, preserving oldest→newest order.
+pub async fn extend_l1_headers_for_l1staticcall_witnesses(
+    input: &mut raiko_lib::input::GuestInput,
+    l1_provider: &RpcBlockDataProvider,
+    l1_origin_block_number: u64,
+) -> RaikoResult<()> {
+    let Some(min_staticcall_block) = input
+        .l1_staticcall_witnesses
+        .iter()
+        .map(|w| w.block_number)
+        .min()
+    else {
+        return Ok(());
+    };
+
+    let covered_min = input
+        .l1_headers
+        .first()
+        .map(|h| h.number)
+        .unwrap_or(l1_origin_block_number);
+
+    if min_staticcall_block >= covered_min {
+        return Ok(());
+    }
+
+    info!(
+        "L1STATICCALL: extending l1_headers from block {} down to {} (l1_origin={}, existing_headers={})",
+        covered_min,
+        min_staticcall_block,
+        l1_origin_block_number,
+        input.l1_headers.len()
+    );
+
+    let mut extra_headers =
+        fetch_l1_headers_in_range(l1_provider, min_staticcall_block, covered_min).await?;
+    extra_headers.append(&mut input.l1_headers);
+    input.l1_headers = extra_headers;
+
+    // Preflight-side sanity: the combined chain (`l1_headers` + origin parent) should chain
+    // via parent_hash. The guest catches this later anyway, but failing here produces a
+    // clearer error in the preflight phase.
+    for pair in input.l1_headers.windows(2) {
+        let (prev, next) = (&pair[0], &pair[1]);
+        if next.parent_hash != prev.hash_slow() {
+            return Err(RaikoError::Preflight(format!(
+                "L1 header chain broken between blocks {} and {}: parent_hash mismatch",
+                prev.number, next.number,
+            )));
+        }
+    }
+    info!(
+        "L1STATICCALL: l1_headers extended, now {} headers covering [{}, {})",
+        input.l1_headers.len(),
+        input.l1_headers.first().map(|h| h.number).unwrap_or(0),
+        l1_origin_block_number,
+    );
+    Ok(())
 }
 
 /// get tx data(blob data) vec from blob hashes
@@ -1511,6 +1608,154 @@ async fn get_and_filter_blob_data_by_blobscan(
     let blob = response.json::<BlobScanData>().await?;
     Ok(blob_to_bytes(&blob.data))
 }
+/// Build the JSON-RPC request body for `debug_executionWitnessCall`.
+///
+/// **The `gas` field is load-bearing.** Nethermind's `debug_executionWitnessCall`
+/// returns a near-empty witness (only the state root node, no codes, no keys) when
+/// gas is omitted — the RPC handler's `Gas ??= header.GasLimit` default fires, but
+/// the recorder doesn't populate along that path. Passing the same 30M cap the
+/// L1STATICCALL precompile uses in `debug_traceCall` ensures the call runs to
+/// completion and touches every trie node the guest later needs. Discovered during
+/// the #41 e2e: without this, `witness_codes=0` and revm halts on missing code.
+///
+/// **The `from` field is also load-bearing.** Nethermind defaults a missing `from`
+/// to the zero address, but it does so *before* `WitnessGeneratingWorldState`
+/// records the caller's account access, so the witness omits any MPT path the guest
+/// would later walk for that caller. The guest in turn re-executes with
+/// `caller = Address::ZERO`, so the two halves silently diverge for any contract
+/// whose code reads `msg.sender`-dependent storage. We pin `from` here to the same
+/// zero address the guest uses; without this match, the witness lacks the trie
+/// nodes the guest needs and verification fails late with a `return_data mismatch`.
+pub(crate) fn build_debug_execution_witness_call_payload(
+    target: alloy_primitives::Address,
+    calldata: &[u8],
+    block_number: u64,
+) -> serde_json::Value {
+    serde_json::json!({
+        "jsonrpc": "2.0",
+        "method": "debug_executionWitnessCall",
+        "params": [
+            {
+                "from": format!("{:?}", alloy_primitives::Address::ZERO),
+                "to": format!("{:?}", target),
+                "data": format!("0x{}", hex::encode(calldata)),
+                "gas": format!("0x{:x}", raiko_lib::l1_precompiles::L1STATICCALL_GAS_CAP)
+            },
+            format!("0x{:x}", block_number)
+        ],
+        "id": 1
+    })
+}
+
+/// Fetch execution witnesses for L1STATICCALL calls from the L1 NMC node.
+///
+/// For each *distinct* recorded call, calls `debug_executionWitnessCall` on L1 to get the
+/// execution witness (MPT trie nodes + bytecodes + keys + headers). Calls are deduplicated
+/// on `(target, block_number, calldata)` (R17) and fetched in parallel (R12). Uses the
+/// shared [`PREFLIGHT_HTTP_CLIENT`] so we don't construct a new TLS stack per invocation (R23).
+pub async fn fetch_l1_staticcall_witnesses(
+    l1_rpc_url: &str,
+    calls: &[L1StaticCallRecord],
+) -> RaikoResult<Vec<L1StaticCallWitness>> {
+    // Dedup distinct RPC lookups but preserve original order in the returned Vec so downstream
+    // ZK-guest indexing (witness #0, #1, …) matches the sequence in which L1STATICCALL calls
+    // were served during execution.
+    let mut unique_keys: Vec<(Address, u64, Vec<u8>)> = Vec::with_capacity(calls.len());
+    let mut key_index: HashMap<(Address, u64, Vec<u8>), usize> = HashMap::new();
+    for call in calls {
+        let key = (call.target, call.block_number, call.calldata.clone());
+        if !key_index.contains_key(&key) {
+            key_index.insert(key.clone(), unique_keys.len());
+            unique_keys.push(key);
+        }
+    }
+
+    info!(
+        "L1STATICCALL: fetching execution witnesses for {} distinct calls (from {} invocations)",
+        unique_keys.len(),
+        calls.len(),
+    );
+
+    // Parallel fetch of the distinct witnesses — debug_executionWitnessCall is independent per
+    // (target, block, calldata) triple, so we don't need per-call sequencing.
+    let client = PREFLIGHT_HTTP_CLIENT.clone();
+    let fetches = unique_keys.iter().enumerate().map(|(i, (target, block_number, calldata))| {
+        let client = client.clone();
+        let rpc = l1_rpc_url.to_string();
+        let target = *target;
+        let block_number = *block_number;
+        let calldata = calldata.clone();
+        let total = unique_keys.len();
+        async move {
+            debug!(
+                "L1STATICCALL: fetching execution witness {}/{} for target={:?}, block={}",
+                i + 1, total, target, block_number
+            );
+            let payload = build_debug_execution_witness_call_payload(target, &calldata, block_number);
+            let resp = client
+                .post(&rpc)
+                .json(&payload)
+                .send()
+                .await
+                .map_err(|e| RaikoError::Preflight(format!(
+                    "L1STATICCALL: debug_executionWitnessCall request failed: {e}"
+                )))?;
+
+            let body: serde_json::Value = resp.json().await.map_err(|e| RaikoError::Preflight(
+                format!("L1STATICCALL: failed to parse debug_executionWitnessCall response: {e}"),
+            ))?;
+
+            if let Some(error) = body.get("error") {
+                return Err(RaikoError::Preflight(format!(
+                    "L1STATICCALL: debug_executionWitnessCall returned error: {}",
+                    error
+                )));
+            }
+
+            let result = body.get("result").ok_or_else(|| RaikoError::Preflight(
+                "L1STATICCALL: debug_executionWitnessCall response missing 'result'".to_string(),
+            ))?;
+
+            let witness: ExecutionWitness = serde_json::from_value(result.clone())
+                .map_err(|e| RaikoError::Preflight(format!(
+                    "L1STATICCALL: failed to deserialize ExecutionWitness: {e}"
+                )))?;
+            Ok::<ExecutionWitness, RaikoError>(witness)
+        }
+    });
+
+    let fetched_witnesses: Vec<ExecutionWitness> = futures::future::join_all(fetches)
+        .await
+        .into_iter()
+        .collect::<RaikoResult<Vec<_>>>()?;
+
+    // Map the deduplicated witnesses back onto the original call sequence so the guest sees
+    // the same number of witness records as there are L1STATICCALL invocations.
+    let witnesses: Vec<L1StaticCallWitness> = calls
+        .iter()
+        .map(|call| {
+            let key = (call.target, call.block_number, call.calldata.clone());
+            let idx = key_index[&key];
+            L1StaticCallWitness {
+                target_address: call.target,
+                block_number: call.block_number,
+                calldata: alloy_primitives::Bytes::from(call.calldata.clone()),
+                return_data: alloy_primitives::Bytes::from(call.return_data.clone()),
+                gas_used: call.gas_used,
+                is_reverted: call.is_reverted,
+                execution_witness: fetched_witnesses[idx].clone(),
+            }
+        })
+        .collect();
+
+    info!(
+        "L1STATICCALL: fetched {} distinct witnesses, replicated to {} invocation records",
+        fetched_witnesses.len(),
+        witnesses.len(),
+    );
+    Ok(witnesses)
+}
+
 #[cfg(test)]
 mod test {
     use alloy_rlp::Decodable;
@@ -1520,6 +1765,75 @@ mod test {
     };
 
     use super::*;
+
+    #[test]
+    fn test_debug_execution_witness_call_payload_includes_gas_field() {
+        // Regression guard: Nethermind returns an empty witness (no codes, no keys) when
+        // `gas` is omitted from `debug_executionWitnessCall`. The symptom of the bug is
+        // revm halting on missing contract code during guest verification — see the
+        // #41 e2e root cause. If anyone strips the `gas` field thinking it's a cosmetic
+        // default, this test fails loudly instead of letting the bug reach devnet.
+        let target = alloy_primitives::Address::from([0xABu8; 20]);
+        let calldata: &[u8] = &[0x20, 0x96, 0x52, 0x55];
+        let block_number: u64 = 105;
+
+        let payload = build_debug_execution_witness_call_payload(target, calldata, block_number);
+        let params = payload
+            .get("params")
+            .and_then(|p| p.as_array())
+            .expect("params must be an array");
+        let tx = params.first().and_then(|t| t.as_object()).expect("tx must be an object");
+
+        let gas = tx.get("gas").expect("gas field must be present — see fn docs");
+        assert_eq!(
+            gas.as_str().unwrap(),
+            "0x1c9c380",
+            "gas must be 30M (0x1c9c380) to match precompile cap; any other value risks partial witnesses"
+        );
+        assert_eq!(tx.get("to").unwrap().as_str().unwrap(), format!("{:?}", target));
+        assert_eq!(tx.get("data").unwrap().as_str().unwrap(), "0x20965255");
+        assert_eq!(params[1].as_str().unwrap(), "0x69");
+        assert_eq!(payload.get("method").unwrap().as_str().unwrap(), "debug_executionWitnessCall");
+    }
+
+    #[test]
+    fn test_debug_execution_witness_call_payload_includes_from_field() {
+        // Regression guard: without an explicit `from = 0x00…00`, NMC's
+        // `debug_executionWitnessCall` runs the call from the zero address (default)
+        // but `WitnessGeneratingWorldState` skips recording the caller's account-trie
+        // path along the default branch. The guest later re-executes with
+        // `caller = Address::ZERO` and walks an absent trie node, surfacing as a
+        // late `return_data mismatch` for any target whose code reads msg.sender-
+        // dependent storage. Pin `from` to the same zero address the guest uses so
+        // the witness covers the full set of MPT paths the guest will walk.
+        let target = alloy_primitives::Address::from([0xCDu8; 20]);
+        let payload = build_debug_execution_witness_call_payload(target, &[0xAB, 0xCD], 200);
+        let tx = payload["params"][0]
+            .as_object()
+            .expect("tx must be an object");
+        let from = tx.get("from").expect("from field must be present — see fn docs");
+        assert_eq!(
+            from.as_str().unwrap(),
+            "0x0000000000000000000000000000000000000000",
+            "`from` must be the zero address to match the guest's caller; any other \
+             value lets the witness omit MPT paths the guest will need"
+        );
+    }
+
+    #[test]
+    fn test_debug_execution_witness_call_payload_gas_matches_l1staticcall_cap() {
+        // Both halves of the verifier must use the same gas budget — sequencer
+        // and prover OOM identically only when the witness fetch caps at the same
+        // value as the L1STATICCALL precompile's 30M ceiling.
+        let target = alloy_primitives::Address::from([0xEEu8; 20]);
+        let payload = build_debug_execution_witness_call_payload(target, &[], 1);
+        let gas_hex = payload["params"][0]["gas"].as_str().unwrap().to_string();
+        let expected = format!("0x{:x}", raiko_lib::l1_precompiles::L1STATICCALL_GAS_CAP);
+        assert_eq!(
+            gas_hex, expected,
+            "payload gas must derive from L1STATICCALL_GAS_CAP — drift is a sequencer↔prover OOM divergence"
+        );
+    }
 
     #[ignore = "not run in CI as devnet changes frequently"]
     #[tokio::test]

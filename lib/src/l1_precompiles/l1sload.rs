@@ -4,7 +4,7 @@ use alethia_reth_evm::precompiles::l1sload::{
 use alloy_primitives::{Bytes, B256, U256};
 use alloy_rlp::{Buf, Decodable, Header as RlpHeader};
 use alloy_trie::{proof::verify_proof, Nibbles};
-use anyhow::{anyhow, bail, Context, Result};
+use anyhow::{anyhow, bail, ensure, Context, Result};
 use reth_primitives::Header;
 use std::collections::HashMap;
 use std::sync::{LazyLock, Mutex, MutexGuard};
@@ -53,9 +53,11 @@ pub fn verify_and_populate_l1sload_proofs(
         l1_headers.len()
     );
 
-    // Set block context for the precompile's range checks.
-    set_anchor_block_id(anchor_block_number);
-    set_l1_origin_block_id(l1_origin_block_number);
+    // Precondition: the caller (host `prepare_l1_precompiles_for_execution` and guest
+    // `builder/mod.rs::calculate_block_header`) must have already set the shared anchor /
+    // l1-origin context via `populate_l1sload_cache(&[], anchor, l1_origin)`. The
+    // previously-present redundant set-globals here masked the context-unset bug fixed in
+    // commit a9762498 — not setting them again makes the coupling explicit.
 
     // Build verified block_number → state_root map by walking backward from L1 origin.
     let state_root_map = build_verified_state_root_map(l1_origin_header, l1_headers)?;
@@ -114,6 +116,10 @@ pub fn populate_l1sload_cache(
     anchor_block_number: u64,
     l1_origin_block_number: u64,
 ) {
+    debug!(
+        "L1 precompiles: shared context set (anchor={}, l1_origin={})",
+        anchor_block_number, l1_origin_block_number
+    );
     set_anchor_block_id(anchor_block_number);
     set_l1_origin_block_id(l1_origin_block_number);
 
@@ -152,7 +158,7 @@ pub fn clear_l1sload_cache() {
 /// `l1_headers` must be ordered oldest→newest, ending just below L1 origin (i.e. the last
 /// header's hash must equal `l1_origin_header.parent_hash` when walking backward).
 /// We walk in reverse, verifying parent_hash linkage at each step.
-fn build_verified_state_root_map(
+pub fn build_verified_state_root_map(
     l1_origin_header: &Header,
     l1_headers: &[Header],
 ) -> Result<HashMap<u64, B256>> {
@@ -165,6 +171,21 @@ fn build_verified_state_root_map(
     if l1_headers.is_empty() {
         return Ok(state_root_map);
     }
+
+    // Cap the backward walk at 256 so a prover cannot extend the verified window beyond
+    // the L1/L2-precompile-accepted `[l1_origin − 256, l1_origin]` range.
+    ensure!(
+        l1_headers.len() <= 256,
+        "L1 headers exceed 256-block lookback cap ({} provided)",
+        l1_headers.len(),
+    );
+
+    // Guard against the otherwise-silent `u64` wrap on `l1_origin_number - 1` when
+    // origin == 0 (impossible in production but reachable via test fixtures).
+    ensure!(
+        l1_origin_number >= 1,
+        "L1 origin block number must be >= 1 for backward walk"
+    );
 
     // Headers are ordered oldest→newest and do NOT include the L1 origin itself.
     // Walk in reverse (newest→oldest), starting from the origin's parent_hash since

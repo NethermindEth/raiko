@@ -26,6 +26,7 @@ alethia-reth-primitives = { workspace = true, features = [
     "reth-codec",
     "alloy-compat",
 ] }
+alethia-reth-evm = { workspace = true }
 
 # alloy
 alloy-rlp = { workspace = true }
@@ -52,6 +53,9 @@ eyre = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 serde_with = { workspace = true }
+
+# hex encoding
+hex = { workspace = true }
 
 # crypto
 secp256k1 = { workspace = true }

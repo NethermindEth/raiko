@@ -80,6 +80,7 @@ alethia-reth-primitives = { workspace = true, features = ["serde"] }
 
 [dev-dependencies]
 hex-literal = { workspace = true }
+serial_test = { workspace = true }
 
 [build-dependencies]
 rkyv = { workspace = true }

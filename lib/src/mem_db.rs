@@ -158,6 +158,8 @@ impl MemDb {
     }
 }
 
+/// The L2 block re-execution builder path uses this [`MemDb`]; the L1STATICCALL guest
+/// witness verification uses its own [`WitnessDb`] in `l1_precompiles::witness_db`.
 impl Database for MemDb {
     type Error = ProviderError;
 

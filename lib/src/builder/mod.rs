@@ -12,7 +12,12 @@ use crate::{
     consts::MAX_BLOCK_HASH_AGE,
     guest_mem_forget,
     input::{GuestBatchInput, GuestInput},
-    l1_precompiles::{acquire_l1sload_lock, clear_l1sload_cache, verify_and_populate_l1sload_proofs},
+    l1_precompiles::{
+        acquire_l1sload_lock, build_verified_state_root_map, clear_l1_staticcall_cache,
+        clear_l1sload_cache, populate_l1sload_cache,
+        verify_and_populate_l1_staticcall_witnesses_with_headers,
+        verify_and_populate_l1sload_proofs,
+    },
     mem_db::{AccountState, DbAccount, MemDb},
     CycleTracker,
 };
@@ -257,26 +262,61 @@ pub fn calculate_block_header(input: &mut GuestInput) -> Header {
     cycle_tracker.end();
 
     let _l1sload_guard = acquire_l1sload_lock();
+    info!(
+        "guest: calculate_block_header block={} (l1sload_proofs={}, l1staticcall_witnesses={})",
+        input.block.header.number,
+        input.l1_storage_proofs.len(),
+        input.l1_staticcall_witnesses.len()
+    );
     clear_l1sload_cache();
+    clear_l1_staticcall_cache();
     if input.chain_spec.is_taiko() {
         let anchor_tx = input
             .taiko
             .anchor_tx
             .as_ref()
-            .expect("anchor tx required for L1SLOAD");
+            .expect("anchor tx required for L1 precompiles");
         let fork = input
             .chain_spec
             .active_fork(input.block.header.number, input.block.header.timestamp)
-            .expect("failed to determine active fork for L1SLOAD");
+            .expect("failed to determine active fork for L1 precompiles");
         let (anchor_block_number, _) =
             get_anchor_tx_info_by_fork(fork, anchor_tx).expect("failed to decode anchor tx info");
-        verify_and_populate_l1sload_proofs(
-            &input.l1_storage_proofs,
-            anchor_block_number,
-            &input.taiko.l1_header,
-            &input.l1_headers,
-        )
-        .expect("L1SLOAD proof verification failed");
+        let l1_origin_block_number = input.taiko.l1_header.number;
+
+        // Set the shared anchor / l1-origin context unconditionally — matches the host-side
+        // fix in core/src/lib.rs. L1STATICCALL-only blocks (no L1SLOAD proofs) still need
+        // the range check to pass against correct context values, not stale zeroes.
+        populate_l1sload_cache(&[], anchor_block_number, l1_origin_block_number);
+
+        if !input.l1_storage_proofs.is_empty() {
+            verify_and_populate_l1sload_proofs(
+                &input.l1_storage_proofs,
+                anchor_block_number,
+                &input.taiko.l1_header,
+                &input.l1_headers,
+            )
+            .expect("L1SLOAD proof verification failed");
+        }
+
+        if !input.l1_staticcall_witnesses.is_empty() {
+            let state_root_map =
+                build_verified_state_root_map(&input.taiko.l1_header, &input.l1_headers)
+                    .expect("failed to build verified L1 state-root map for L1STATICCALL");
+            let mut header_map: std::collections::HashMap<u64, &Header> =
+                std::collections::HashMap::new();
+            header_map.insert(input.taiko.l1_header.number, &input.taiko.l1_header);
+            for h in &input.l1_headers {
+                header_map.insert(h.number, h);
+            }
+            verify_and_populate_l1_staticcall_witnesses_with_headers(
+                &input.l1_staticcall_witnesses,
+                &state_root_map,
+                &header_map,
+                l1_origin_block_number,
+            )
+            .expect("L1STATICCALL witness verification failed");
+        }
     }
 
     let pool_tx = generate_transactions(
@@ -308,32 +348,76 @@ pub fn calculate_block_header(input: &mut GuestInput) -> Header {
 
 pub fn calculate_batch_blocks_final_header(input: &mut GuestBatchInput) -> Vec<TaikoBlock> {
     let pool_txs_list = generate_transactions_for_batch_blocks(&input);
+    info!(
+        "guest: calculate_batch_blocks_final_header — {} batched blocks",
+        pool_txs_list.len()
+    );
     let mut final_blocks = Vec::new();
     for (i, pool_txs) in pool_txs_list.iter().enumerate() {
         let _l1sload_guard = acquire_l1sload_lock();
+        info!(
+            "guest: batch block {}/{} (number={}, l1sload_proofs={}, l1staticcall_witnesses={})",
+            i + 1,
+            pool_txs_list.len(),
+            input.inputs[i].block.header.number,
+            input.inputs[i].l1_storage_proofs.len(),
+            input.inputs[i].l1_staticcall_witnesses.len()
+        );
         clear_l1sload_cache();
+        clear_l1_staticcall_cache();
         if input.inputs[i].chain_spec.is_taiko() {
             let anchor_tx = input.inputs[i]
                 .taiko
                 .anchor_tx
                 .as_ref()
-                .expect("anchor tx required for L1SLOAD in batch");
+                .expect("anchor tx required for L1 precompiles in batch");
             let fork = input.inputs[i]
                 .chain_spec
                 .active_fork(
                     input.inputs[i].block.header.number,
                     input.inputs[i].block.header.timestamp,
                 )
-                .expect("failed to determine active fork for L1SLOAD in batch");
+                .expect("failed to determine active fork for L1 precompiles in batch");
             let (anchor_block_number, _) = get_anchor_tx_info_by_fork(fork, anchor_tx)
                 .expect("failed to decode anchor tx info in batch");
-            verify_and_populate_l1sload_proofs(
-                &input.inputs[i].l1_storage_proofs,
-                anchor_block_number,
-                &input.inputs[i].taiko.l1_header,
-                &input.inputs[i].l1_headers,
-            )
-            .expect("L1SLOAD proof verification failed");
+            let l1_origin_block_number = input.inputs[i].taiko.l1_header.number;
+
+            // Set shared anchor / l1-origin context unconditionally (R3 mirror).
+            populate_l1sload_cache(&[], anchor_block_number, l1_origin_block_number);
+
+            if !input.inputs[i].l1_storage_proofs.is_empty() {
+                verify_and_populate_l1sload_proofs(
+                    &input.inputs[i].l1_storage_proofs,
+                    anchor_block_number,
+                    &input.inputs[i].taiko.l1_header,
+                    &input.inputs[i].l1_headers,
+                )
+                .expect("L1SLOAD proof verification failed");
+            }
+
+            if !input.inputs[i].l1_staticcall_witnesses.is_empty() {
+                let state_root_map = build_verified_state_root_map(
+                    &input.inputs[i].taiko.l1_header,
+                    &input.inputs[i].l1_headers,
+                )
+                .expect("failed to build verified L1 state-root map for L1STATICCALL in batch");
+                let mut header_map: std::collections::HashMap<u64, &Header> =
+                    std::collections::HashMap::new();
+                header_map.insert(
+                    input.inputs[i].taiko.l1_header.number,
+                    &input.inputs[i].taiko.l1_header,
+                );
+                for h in &input.inputs[i].l1_headers {
+                    header_map.insert(h.number, h);
+                }
+                verify_and_populate_l1_staticcall_witnesses_with_headers(
+                    &input.inputs[i].l1_staticcall_witnesses,
+                    &state_root_map,
+                    &header_map,
+                    l1_origin_block_number,
+                )
+                .expect("L1STATICCALL witness verification failed in batch");
+            }
         }
 
         // First, create the MemDb using a mutable reference (no clone needed —
