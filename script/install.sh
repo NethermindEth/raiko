@@ -66,7 +66,8 @@ install_zisk_cli() {
     echo "Installing Zisk v$ZISK_VERSION..."
     run_ziskup --version "$ZISK_VERSION" --nokey
     source "$HOME/.bashrc" 2>/dev/null || true
-    command -v cargo-zisk >/dev/null 2>&1 || {
+    export PATH="$ZISK_DIR/bin:$PATH"
+    command -v cargo-zisk >/dev/null 2>&1 || [ -x "$ZISK_DIR/bin/cargo-zisk" ] || {
         echo "Error: Failed to install Zisk. Install manually:"
         echo "  curl https://raw.githubusercontent.com/0xPolygonHermez/zisk/main/ziskup/install.sh | bash"
         exit 1
