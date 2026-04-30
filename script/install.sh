@@ -31,6 +31,94 @@ install_sp1() {
 
 # ─── ZisK ──────────────────────────────────────────────────────────────────────
 
+# Verify host has the build tools, system libraries, and free disk space needed
+# for a full Zisk install (cli, toolchain, proving keys, optional GPU build).
+# Fails fast with an actionable error.
+#
+# Env overrides:
+#   ZISK_MIN_DISK_GB   minimum free GiB at ZISK_DIR's filesystem (default: 80)
+#   ZISK_SKIP_VERIFY=1 skip all verification checks
+verify_zisk_prerequisites() {
+    if [ "${ZISK_SKIP_VERIFY:-0}" = "1" ]; then
+        echo "Skipping zisk prerequisite verification (ZISK_SKIP_VERIFY=1)"
+        return 0
+    fi
+
+    local min_gb="${ZISK_MIN_DISK_GB:-150}"
+    local missing_cmds=()
+    local warn_cmds=()
+    local missing_pkgs=()
+
+    echo "Verifying zisk prerequisites..."
+
+    # Required binaries (ziskup download, sp1 install, GPU build, toolchain)
+    local required=(curl git gcc g++ make cmake pkg-config cargo rustc)
+    for cmd in "${required[@]}"; do
+        command -v "$cmd" >/dev/null 2>&1 || missing_cmds+=("$cmd")
+    done
+
+    # Optional: nvcc enables GPU build path; absence just means CPU-only
+    command -v nvcc >/dev/null 2>&1 || warn_cmds+=("nvcc")
+
+    if [ ${#missing_cmds[@]} -gt 0 ]; then
+        echo "Error: missing required commands: ${missing_cmds[*]}"
+        echo "  Debian/Ubuntu: sudo apt-get install -y curl git build-essential cmake pkg-config"
+        echo "  Rust toolchain: curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y"
+        return 1
+    fi
+
+    # Required system libraries (best-effort dpkg check on Debian/Ubuntu hosts)
+    if command -v dpkg >/dev/null 2>&1; then
+        local required_pkgs=(build-essential libomp-dev libopenmpi-dev libsodium-dev libgmp-dev libclang-dev libssl-dev pkg-config cmake protobuf-compiler)
+        for pkg in "${required_pkgs[@]}"; do
+            dpkg -s "$pkg" >/dev/null 2>&1 || missing_pkgs+=("$pkg")
+        done
+        if [ ${#missing_pkgs[@]} -gt 0 ]; then
+            echo "Error: missing required system packages: ${missing_pkgs[*]}"
+            echo "  sudo apt-get update && sudo apt-get install -y ${missing_pkgs[*]}"
+            return 1
+        fi
+    else
+        echo "Warning: dpkg not available; skipping system-package check (non-Debian host)"
+    fi
+
+    # Disk space — check the closest existing path on ZISK_DIR's filesystem
+    local check_path
+    if [ -d "$ZISK_DIR" ]; then
+        check_path="$ZISK_DIR"
+    elif [ -d "$(dirname "$ZISK_DIR")" ]; then
+        check_path="$(dirname "$ZISK_DIR")"
+    else
+        check_path="$HOME"
+    fi
+
+    local avail_kb avail_gb
+    avail_kb=$(df -Pk "$check_path" 2>/dev/null | awk 'NR==2 {print $4}')
+    if [ -z "$avail_kb" ]; then
+        echo "Warning: could not determine free disk space at $check_path; skipping disk check"
+    else
+        avail_gb=$((avail_kb / 1024 / 1024))
+        if [ "$avail_gb" -lt "$min_gb" ]; then
+            echo "Error: insufficient disk space at $check_path"
+            echo "  Available: ${avail_gb} GiB"
+            echo "  Required:  ${min_gb} GiB (override via ZISK_MIN_DISK_GB)"
+            echo "  Zisk proving keys (~40-50 GiB) plus toolchain, GPU build artifacts,"
+            echo "  and SP1/risc0 deps typically exceed 60 GiB. Free space or set ZISK_DIR"
+            echo "  to a larger volume (e.g. ZISK_DIR=/ephemeral/.zisk)."
+            return 1
+        fi
+        echo "Disk space OK: ${avail_gb} GiB available at $check_path (>= ${min_gb} GiB required)"
+    fi
+
+    if [ ${#warn_cmds[@]} -gt 0 ]; then
+        echo "Note: optional commands not found: ${warn_cmds[*]}"
+        echo "  nvcc absent — Zisk will install CPU-only (GPU acceleration disabled)"
+    fi
+
+    echo "All zisk prerequisites satisfied."
+    return 0
+}
+
 # Create ZISK_DIR and, when using a custom path, symlink ~/.zisk -> ZISK_DIR.
 # Must be called before any ziskup/cargo-zisk commands.
 setup_zisk_dir() {
@@ -215,6 +303,7 @@ fi
 
 # ─── ZisK ──────────────────────────────────────────────────────────────────────
 if [ -z "$1" ] || [ "$1" == "zisk" ]; then
+    verify_zisk_prerequisites
     setup_zisk_dir
     install_sp1
     install_zisk_cli
