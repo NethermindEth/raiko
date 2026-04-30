@@ -82,9 +82,11 @@ verify_zisk_prerequisites() {
         echo "Warning: dpkg not available; skipping system-package check (non-Debian host)"
     fi
 
-    # Disk space — check the closest existing path on ZISK_DIR's filesystem
+    # Disk space — check the closest existing path on ZISK_DIR's filesystem.
+    # ~/.zisk is often a symlink (e.g. -> /ephemeral/.zisk) from a prior install,
+    # so resolve it and report both paths + mount point to avoid confusion.
     local check_path
-    if [ -d "$ZISK_DIR" ]; then
+    if [ -e "$ZISK_DIR" ]; then
         check_path="$ZISK_DIR"
     elif [ -d "$(dirname "$ZISK_DIR")" ]; then
         check_path="$(dirname "$ZISK_DIR")"
@@ -92,14 +94,27 @@ verify_zisk_prerequisites() {
         check_path="$HOME"
     fi
 
-    local avail_kb avail_gb
-    avail_kb=$(df -Pk "$check_path" 2>/dev/null | awk 'NR==2 {print $4}')
+    local resolved_path
+    resolved_path=$(readlink -f "$check_path" 2>/dev/null || echo "$check_path")
+    [ -z "$resolved_path" ] && resolved_path="$check_path"
+
+    local df_line avail_kb avail_gb device mount
+    df_line=$(df -Pk "$resolved_path" 2>/dev/null | awk 'NR==2')
+    avail_kb=$(echo "$df_line" | awk '{print $4}')
+    device=$(echo "$df_line" | awk '{print $1}')
+    mount=$(echo "$df_line" | awk '{print $6}')
+
+    local where="$check_path"
+    [ "$resolved_path" != "$check_path" ] && where="$check_path -> $resolved_path"
+    [ -n "$device" ] && where="$where on $device (mounted at $mount)"
+
     if [ -z "$avail_kb" ]; then
-        echo "Warning: could not determine free disk space at $check_path; skipping disk check"
+        echo "Warning: could not determine free disk space at $resolved_path; skipping disk check"
     else
         avail_gb=$((avail_kb / 1024 / 1024))
         if [ "$avail_gb" -lt "$min_gb" ]; then
-            echo "Error: insufficient disk space at $check_path"
+            echo "Error: insufficient disk space"
+            echo "  Path:      $where"
             echo "  Available: ${avail_gb} GiB"
             echo "  Required:  ${min_gb} GiB (override via ZISK_MIN_DISK_GB)"
             echo "  Zisk proving keys (~40-50 GiB) plus toolchain, GPU build artifacts,"
@@ -107,7 +122,7 @@ verify_zisk_prerequisites() {
             echo "  to a larger volume (e.g. ZISK_DIR=/ephemeral/.zisk)."
             return 1
         fi
-        echo "Disk space OK: ${avail_gb} GiB available at $check_path (>= ${min_gb} GiB required)"
+        echo "Disk space OK: ${avail_gb} GiB available at $where (>= ${min_gb} GiB required)"
     fi
 
     if [ ${#warn_cmds[@]} -gt 0 ]; then
