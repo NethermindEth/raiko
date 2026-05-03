@@ -118,25 +118,35 @@ APT_OPTIONAL=(
 REQUIRED_MISSING=$(apt_missing "${APT_REQUIRED[@]}")
 OPTIONAL_MISSING=$(apt_missing "${APT_OPTIONAL[@]}")
 
-# ─── per-package prompts ────────────────────────────────────────────────────────
+# ─── prompts ────────────────────────────────────────────────────────────────────
 
 TO_INSTALL=()
 
-prompt_pkg_list() {
-    local label="$1" pkgs="$2" p
-    [ -z "$pkgs" ] && return 0
+# REQUIRED: single bulk prompt — all-or-nothing, since each is mandatory.
+if [ -n "$REQUIRED_MISSING" ]; then
     echo
-    echo "[$label] missing on this host:"
-    for p in $pkgs; do echo "  - $p"; done
-    for p in $pkgs; do
+    echo "[REQUIRED] missing on this host:"
+    for p in $REQUIRED_MISSING; do echo "  - $p"; done
+    if confirm "Install all required packages?"; then
+        for p in $REQUIRED_MISSING; do TO_INSTALL+=("$p"); done
+    else
+        echo "Required packages declined; cannot proceed."
+        echo "Install them manually before running 'TARGET=zisk make install'."
+        exit 1
+    fi
+fi
+
+# OPTIONAL: per-package prompts — user may want some but not others.
+if [ -n "$OPTIONAL_MISSING" ]; then
+    echo
+    echo "[OPTIONAL] missing on this host (parity with Dockerfile.zk):"
+    for p in $OPTIONAL_MISSING; do echo "  - $p"; done
+    for p in $OPTIONAL_MISSING; do
         if confirm "Install $p?"; then
             TO_INSTALL+=("$p")
         fi
     done
-}
-
-prompt_pkg_list "REQUIRED" "$REQUIRED_MISSING"
-prompt_pkg_list "OPTIONAL" "$OPTIONAL_MISSING"
+fi
 
 # ─── batch apt install (one transaction, one apt-update) ────────────────────────
 
