@@ -7,21 +7,24 @@ set -e
 # then prompts before installing each one.
 #
 # Usage:
-#   ./script/install-zisk-deps.sh             # interactive
-#   ./script/install-zisk-deps.sh --yes       # auto-confirm every prompt
-#   ./script/install-zisk-deps.sh --dry-run   # detect only, install nothing
+#   ./script/install-zisk-deps.sh                # interactive
+#   ./script/install-zisk-deps.sh --yes          # auto-confirm every prompt
+#   ./script/install-zisk-deps.sh --dry-run      # detect only, install nothing
+#   ./script/install-zisk-deps.sh --no-optional  # skip OPTIONAL package prompts
 #
 # Exit code: 0 if all required deps end up present, 1 otherwise.
 
 ASSUME_YES=0
 DRY_RUN=0
+SKIP_OPTIONAL=0
 
 while [ $# -gt 0 ]; do
     case "$1" in
-        -y|--yes)     ASSUME_YES=1 ;;
-        -n|--dry-run) DRY_RUN=1 ;;
+        -y|--yes)         ASSUME_YES=1 ;;
+        -n|--dry-run)     DRY_RUN=1 ;;
+        --no-optional|--required-only) SKIP_OPTIONAL=1 ;;
         -h|--help)
-            sed -n '2,16p' "$0" | sed 's/^# \{0,1\}//'
+            sed -n '2,17p' "$0" | sed 's/^# \{0,1\}//'
             exit 0
             ;;
         *) echo "Unknown flag: $1"; exit 2 ;;
@@ -118,6 +121,11 @@ APT_OPTIONAL=(
 REQUIRED_MISSING=$(apt_missing "${APT_REQUIRED[@]}")
 OPTIONAL_MISSING=$(apt_missing "${APT_OPTIONAL[@]}")
 
+# Tracks whether anything was actually installed; finalizer steps (cargo env
+# source, docker restart) only run when state changed, so re-runs of the
+# script on a fully-provisioned host stay side-effect-free.
+CHANGED=0
+
 # ─── prompts ────────────────────────────────────────────────────────────────────
 
 TO_INSTALL=()
@@ -155,6 +163,7 @@ if [ ${#TO_INSTALL[@]} -gt 0 ]; then
     echo "Installing: ${TO_INSTALL[*]}"
     run_priv apt-get update
     run_priv apt-get install -y "${TO_INSTALL[@]}"
+    [ "$DRY_RUN" = "1" ] || CHANGED=1
 fi
 
 # ─── Rust toolchain ─────────────────────────────────────────────────────────────
@@ -169,6 +178,7 @@ if ! command -v cargo >/dev/null 2>&1 || ! command -v rustc >/dev/null 2>&1; the
             curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
             # shellcheck disable=SC1091
             [ -f "$HOME/.cargo/env" ] && . "$HOME/.cargo/env"
+            CHANGED=1
         fi
     fi
 fi
@@ -181,6 +191,7 @@ if ! command -v nvcc >/dev/null 2>&1; then
     echo "  Note: nvidia-cuda-toolkit is ~2 GiB. Skip on hosts without an NVIDIA GPU."
     if confirm "Install nvidia-cuda-toolkit?"; then
         run_priv apt-get install -y nvidia-cuda-toolkit
+        [ "$DRY_RUN" = "1" ] || CHANGED=1
     fi
 fi
 
@@ -204,5 +215,35 @@ if ! command -v cargo >/dev/null 2>&1 || ! command -v rustc >/dev/null 2>&1; the
 fi
 
 echo "All required ZisK dependencies are present."
+
+# ─── finalizers ─────────────────────────────────────────────────────────────────
+# Run only when state actually changed in this invocation. Re-runs on an already-
+# provisioned host stay side-effect-free.
+if [ "$CHANGED" = "1" ] && [ "$DRY_RUN" != "1" ]; then
+    echo
+    echo "── Finalizing ──"
+
+    # 1. Source the cargo env so this shell sees the toolchain.
+    #    (rustup also writes a source line into ~/.bashrc, so new shells inherit it.)
+    if [ -f "$HOME/.cargo/env" ]; then
+        # shellcheck disable=SC1091
+        . "$HOME/.cargo/env"
+        echo "Sourced $HOME/.cargo/env"
+    fi
+
+    # 2. Restart docker — picks up nvidia-container-runtime changes from the
+    #    cuda toolkit install and clears any deferred needrestart on dockerd.
+    if command -v systemctl >/dev/null 2>&1 && systemctl list-unit-files docker.service >/dev/null 2>&1; then
+        echo "Restarting docker.service..."
+        run_priv systemctl restart docker
+    else
+        echo "Skipping docker restart (no systemd docker.service detected)"
+    fi
+fi
+
+echo
 echo "Next: TARGET=zisk make install"
+echo "Note: if you open a new shell, cargo PATH is set automatically via ~/.bashrc."
+echo "      Within the *current parent shell* (the one that invoked this script),"
+echo "      run 'source $HOME/.cargo/env' to pick up cargo without restarting."
 exit 0
