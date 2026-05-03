@@ -84,8 +84,10 @@ fi
 
 # ─── package lists ──────────────────────────────────────────────────────────────
 
-# Hard requirements for ZisK install (mirrors verify_zisk_prerequisites in
-# install.sh: required commands + system libraries).
+# Hard requirements for ZisK install. Includes packages needed by both the
+# CPU-only path and the GPU build path triggered by build_zisk_gpu in
+# install.sh — the GPU build pulls in lib-float (needs riscv64-unknown-elf-gcc),
+# lib-c (needs nasm), and proofman-starks-lib-c (needs nlohmann/json.hpp).
 APT_REQUIRED=(
     build-essential
     cmake
@@ -97,6 +99,9 @@ APT_REQUIRED=(
     libsodium-dev
     libopenmpi-dev
     protobuf-compiler
+    nasm
+    gcc-riscv64-unknown-elf
+    nlohmann-json3-dev
     curl
     git
 )
@@ -104,16 +109,13 @@ APT_REQUIRED=(
 # Useful for parity with Dockerfile.zk and broader Raiko builds, but not
 # strictly required by the host install path.
 APT_OPTIONAL=(
-    nasm
     jq
     xz-utils
-    nlohmann-json3-dev
     uuid-dev
     libgrpc++-dev
     libsecp256k1-dev
     libpqxx-dev
     clang
-    gcc-riscv64-unknown-elf
     openmpi-bin
     openmpi-common
 )
@@ -183,15 +185,70 @@ if ! command -v cargo >/dev/null 2>&1 || ! command -v rustc >/dev/null 2>&1; the
     fi
 fi
 
-# ─── CUDA / nvcc (optional, large) ──────────────────────────────────────────────
+# ─── CUDA toolkit (optional, large; only useful with an NVIDIA GPU) ────────────
+# We deliberately avoid Ubuntu apt's `nvidia-cuda-toolkit` package: on jammy it
+# ships CUDA 11.5, whose nvcc only knows up to sm_90 and fails compiling for
+# Blackwell (sm_120) GPUs. Use NVIDIA's official repo for cuda-toolkit-12-8,
+# which supports Blackwell, Hopper, Ada, Ampere, Turing, and earlier archs.
+#
+# Env override:
+#   CUDA_VERSION=12-8   target cuda-toolkit package suffix (default: 12-8)
+
+CUDA_VERSION="${CUDA_VERSION:-12-8}"
 
 if ! command -v nvcc >/dev/null 2>&1; then
-    echo
-    echo "nvcc not found (only needed for ZisK GPU build path)."
-    echo "  Note: nvidia-cuda-toolkit is ~2 GiB. Skip on hosts without an NVIDIA GPU."
-    if confirm "Install nvidia-cuda-toolkit?"; then
-        run_priv apt-get install -y nvidia-cuda-toolkit
-        [ "$DRY_RUN" = "1" ] || CHANGED=1
+    if ! command -v nvidia-smi >/dev/null 2>&1; then
+        echo
+        echo "Skipping CUDA install: nvidia-smi not found (no NVIDIA driver)."
+        echo "  ZisK will run in CPU-only mode. Install the NVIDIA driver first if"
+        echo "  you intend to use GPU acceleration, then re-run this script."
+    else
+        # Read GPU compute capability via nvidia-smi (e.g. "12.0" for Blackwell)
+        gpu_name=$(nvidia-smi --query-gpu=name --format=csv,noheader 2>/dev/null | head -n1)
+        gpu_cc=$(nvidia-smi --query-gpu=compute_cap --format=csv,noheader 2>/dev/null | head -n1)
+        echo
+        echo "NVIDIA GPU detected: ${gpu_name:-unknown} (compute capability ${gpu_cc:-unknown})"
+        echo "Installing CUDA $CUDA_VERSION from NVIDIA's official repo (~4 GiB)."
+        echo "  Why not 'apt install nvidia-cuda-toolkit'? It ships CUDA 11.5 on Ubuntu 22.04,"
+        echo "  which can't compile for sm_90+ GPUs (Hopper/Blackwell)."
+
+        if confirm "Install CUDA toolkit $CUDA_VERSION?"; then
+            if [ "$DRY_RUN" = "1" ]; then
+                echo "DRY-RUN: would install cuda-keyring + cuda-toolkit-$CUDA_VERSION"
+            else
+                # Remove the apt-shipped CUDA 11.5 if present — it conflicts with the
+                # NVIDIA-repo build and just wastes ~4 GiB of disk otherwise.
+                if dpkg -s nvidia-cuda-toolkit >/dev/null 2>&1; then
+                    echo "Removing conflicting nvidia-cuda-toolkit (CUDA 11.5)..."
+                    run_priv apt-get remove -y nvidia-cuda-toolkit
+                fi
+
+                local_keyring=$(mktemp /tmp/cuda-keyring.XXXXXX.deb)
+                curl -fsSL -o "$local_keyring" \
+                    "https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2204/x86_64/cuda-keyring_1.1-1_all.deb"
+                run_priv dpkg -i "$local_keyring"
+                rm -f "$local_keyring"
+                run_priv apt-get update
+                run_priv apt-get install -y "cuda-toolkit-$CUDA_VERSION"
+
+                # Add CUDA to PATH in this session and persist for new shells.
+                cuda_prefix="/usr/local/cuda-${CUDA_VERSION/-/.}"
+                if [ -d "$cuda_prefix" ]; then
+                    export PATH="$cuda_prefix/bin:$PATH"
+                    export LD_LIBRARY_PATH="$cuda_prefix/lib64:${LD_LIBRARY_PATH:-}"
+                    if ! grep -q "cuda-${CUDA_VERSION/-/.}" "$HOME/.bashrc" 2>/dev/null; then
+                        {
+                            echo ""
+                            echo "# CUDA $CUDA_VERSION (added by install-zisk-deps.sh)"
+                            echo "export PATH=$cuda_prefix/bin:\$PATH"
+                            echo "export LD_LIBRARY_PATH=$cuda_prefix/lib64:\${LD_LIBRARY_PATH:-}"
+                        } >> "$HOME/.bashrc"
+                        echo "Added CUDA $CUDA_VERSION PATH/LD_LIBRARY_PATH to $HOME/.bashrc"
+                    fi
+                fi
+                CHANGED=1
+            fi
+        fi
     fi
 fi
 
