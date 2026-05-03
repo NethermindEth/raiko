@@ -261,7 +261,12 @@ build_zisk_gpu() {
         git clone --depth=1 --branch "v$ZISK_VERSION" \
             https://github.com/0xPolygonHermez/zisk.git "$tmp/zisk"
         cd "$tmp/zisk"
-        if cargo build --release --features gpu; then
+        # Force serial make inside cargo's build scripts. lib-float's upstream
+        # Makefile has a parallel-build race where `make clean` removes build/
+        # while compile recipes run, leading to "can't create build/<x>.o: No
+        # such file or directory". `MAKEFLAGS=-j1` keeps cargo's outer build
+        # parallel but serializes the make sub-invocations.
+        if MAKEFLAGS="-j1" cargo build --release --features gpu; then
             copy_zisk_gpu_binaries "target/release"
             echo "$ZISK_VERSION" > "$marker"
             echo "Zisk successfully built with GPU support!"

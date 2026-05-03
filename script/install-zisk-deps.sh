@@ -196,26 +196,51 @@ fi
 
 CUDA_VERSION="${CUDA_VERSION:-12-8}"
 
-if ! command -v nvcc >/dev/null 2>&1; then
-    if ! command -v nvidia-smi >/dev/null 2>&1; then
-        echo
-        echo "Skipping CUDA install: nvidia-smi not found (no NVIDIA driver)."
-        echo "  ZisK will run in CPU-only mode. Install the NVIDIA driver first if"
-        echo "  you intend to use GPU acceleration, then re-run this script."
-    else
-        # Read GPU compute capability via nvidia-smi (e.g. "12.0" for Blackwell)
-        gpu_name=$(nvidia-smi --query-gpu=name --format=csv,noheader 2>/dev/null | head -n1)
-        gpu_cc=$(nvidia-smi --query-gpu=compute_cap --format=csv,noheader 2>/dev/null | head -n1)
-        echo
-        echo "NVIDIA GPU detected: ${gpu_name:-unknown} (compute capability ${gpu_cc:-unknown})"
-        echo "Installing CUDA $CUDA_VERSION from NVIDIA's official repo (~4 GiB)."
-        echo "  Why not 'apt install nvidia-cuda-toolkit'? It ships CUDA 11.5 on Ubuntu 22.04,"
-        echo "  which can't compile for sm_90+ GPUs (Hopper/Blackwell)."
+# Decide whether the host needs CUDA action. Three states:
+#   - no driver         → skip everything (CPU-only mode)
+#   - no nvcc           → install CUDA $CUDA_VERSION
+#   - nvcc but stale    → existing nvcc can't compile for the host's GPU arch
+#                         (e.g. apt's CUDA 11.5 on a Blackwell sm_120 host).
+#                         Offer to replace.
+need_cuda_action=""
+nvcc_arch_ok=1
+if command -v nvidia-smi >/dev/null 2>&1; then
+    gpu_name=$(nvidia-smi --query-gpu=name --format=csv,noheader 2>/dev/null | head -n1)
+    gpu_cc=$(nvidia-smi --query-gpu=compute_cap --format=csv,noheader 2>/dev/null | head -n1)
+    gpu_sm="${gpu_cc//./}"   # "12.0" → "120"
 
-        if confirm "Install CUDA toolkit $CUDA_VERSION?"; then
-            if [ "$DRY_RUN" = "1" ]; then
-                echo "DRY-RUN: would install cuda-keyring + cuda-toolkit-$CUDA_VERSION"
-            else
+    if ! command -v nvcc >/dev/null 2>&1; then
+        need_cuda_action="install"
+    elif [ -n "$gpu_sm" ] && ! nvcc --list-gpu-arch 2>/dev/null | grep -q "compute_${gpu_sm}\b"; then
+        nvcc_arch_ok=0
+        need_cuda_action="upgrade"
+    fi
+fi
+
+if [ -z "$need_cuda_action" ] && ! command -v nvidia-smi >/dev/null 2>&1; then
+    echo
+    echo "Skipping CUDA install: nvidia-smi not found (no NVIDIA driver)."
+    echo "  ZisK will run in CPU-only mode. Install the NVIDIA driver first if"
+    echo "  you intend to use GPU acceleration, then re-run this script."
+elif [ -n "$need_cuda_action" ]; then
+    echo
+    echo "NVIDIA GPU detected: ${gpu_name:-unknown} (compute capability ${gpu_cc:-unknown})"
+    if [ "$need_cuda_action" = "upgrade" ]; then
+        nvcc_ver=$(nvcc --version 2>/dev/null | grep -oE 'release [0-9]+\.[0-9]+' | head -n1)
+        echo "Existing nvcc ($nvcc_ver, $(command -v nvcc)) does NOT support sm_${gpu_sm}."
+        echo "ZisK GPU build will fail with 'Unsupported gpu architecture compute_${gpu_sm}'."
+        echo "Need to upgrade to a CUDA toolkit that supports your GPU arch."
+    else
+        echo "nvcc not present."
+    fi
+    echo "Installing CUDA $CUDA_VERSION from NVIDIA's official repo (~4 GiB)."
+    echo "  Why not 'apt install nvidia-cuda-toolkit'? It ships CUDA 11.5 on Ubuntu 22.04,"
+    echo "  which can't compile for sm_90+ GPUs (Hopper/Blackwell)."
+
+    if confirm "${need_cuda_action^} CUDA toolkit $CUDA_VERSION?"; then
+        if [ "$DRY_RUN" = "1" ]; then
+            echo "DRY-RUN: would install cuda-keyring + cuda-toolkit-$CUDA_VERSION"
+        else
                 # Remove the apt-shipped CUDA 11.5 if present — it conflicts with the
                 # NVIDIA-repo build and just wastes ~4 GiB of disk otherwise.
                 if dpkg -s nvidia-cuda-toolkit >/dev/null 2>&1; then
@@ -250,7 +275,6 @@ if ! command -v nvcc >/dev/null 2>&1; then
             fi
         fi
     fi
-fi
 
 # ─── final verification ─────────────────────────────────────────────────────────
 
