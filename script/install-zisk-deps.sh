@@ -1,0 +1,198 @@
+#!/usr/bin/env bash
+set -e
+
+# install-zisk-deps.sh
+# Interactive dependency installer for ZisK on Debian/Ubuntu hosts.
+# Detects missing binaries, system packages, and the Rust toolchain,
+# then prompts before installing each one.
+#
+# Usage:
+#   ./script/install-zisk-deps.sh             # interactive
+#   ./script/install-zisk-deps.sh --yes       # auto-confirm every prompt
+#   ./script/install-zisk-deps.sh --dry-run   # detect only, install nothing
+#
+# Exit code: 0 if all required deps end up present, 1 otherwise.
+
+ASSUME_YES=0
+DRY_RUN=0
+
+while [ $# -gt 0 ]; do
+    case "$1" in
+        -y|--yes)     ASSUME_YES=1 ;;
+        -n|--dry-run) DRY_RUN=1 ;;
+        -h|--help)
+            sed -n '2,16p' "$0" | sed 's/^# \{0,1\}//'
+            exit 0
+            ;;
+        *) echo "Unknown flag: $1"; exit 2 ;;
+    esac
+    shift
+done
+
+# ─── helpers ────────────────────────────────────────────────────────────────────
+
+confirm() {
+    local question="$1"
+    if [ "$ASSUME_YES" = "1" ]; then
+        echo "$question [auto-yes]"
+        return 0
+    fi
+    local reply
+    if [ -r /dev/tty ]; then
+        read -r -p "$question [y/N] " reply </dev/tty
+    else
+        read -r -p "$question [y/N] " reply
+    fi
+    case "$reply" in
+        [yY]|[yY][eE][sS]) return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
+run_priv() {
+    if [ "$DRY_RUN" = "1" ]; then
+        echo "DRY-RUN: $*"
+        return 0
+    fi
+    if [ "$(id -u)" = "0" ]; then
+        "$@"
+    elif command -v sudo >/dev/null 2>&1; then
+        sudo "$@"
+    else
+        echo "Error: not root and sudo unavailable; cannot run: $*"
+        return 1
+    fi
+}
+
+apt_missing() {
+    local pkg
+    for pkg in "$@"; do
+        dpkg -s "$pkg" >/dev/null 2>&1 || echo "$pkg"
+    done
+}
+
+# ─── distro check ───────────────────────────────────────────────────────────────
+
+if ! command -v dpkg >/dev/null 2>&1 || ! command -v apt-get >/dev/null 2>&1; then
+    echo "This script targets Debian/Ubuntu. Detected non-apt host."
+    echo "Refer to the README for manual installation steps."
+    exit 1
+fi
+
+# ─── package lists ──────────────────────────────────────────────────────────────
+
+# Hard requirements for ZisK install (mirrors verify_zisk_prerequisites in
+# install.sh: required commands + system libraries).
+APT_REQUIRED=(
+    build-essential
+    cmake
+    pkg-config
+    libssl-dev
+    libclang-dev
+    libomp-dev
+    libgmp-dev
+    libsodium-dev
+    libopenmpi-dev
+    protobuf-compiler
+    curl
+    git
+)
+
+# Useful for parity with Dockerfile.zk and broader Raiko builds, but not
+# strictly required by the host install path.
+APT_OPTIONAL=(
+    nasm
+    jq
+    xz-utils
+    nlohmann-json3-dev
+    uuid-dev
+    libgrpc++-dev
+    libsecp256k1-dev
+    libpqxx-dev
+    clang
+    gcc-riscv64-unknown-elf
+    openmpi-bin
+    openmpi-common
+)
+
+REQUIRED_MISSING=$(apt_missing "${APT_REQUIRED[@]}")
+OPTIONAL_MISSING=$(apt_missing "${APT_OPTIONAL[@]}")
+
+# ─── per-package prompts ────────────────────────────────────────────────────────
+
+TO_INSTALL=()
+
+prompt_pkg_list() {
+    local label="$1" pkgs="$2" p
+    [ -z "$pkgs" ] && return 0
+    echo
+    echo "[$label] missing on this host:"
+    for p in $pkgs; do echo "  - $p"; done
+    for p in $pkgs; do
+        if confirm "Install $p?"; then
+            TO_INSTALL+=("$p")
+        fi
+    done
+}
+
+prompt_pkg_list "REQUIRED" "$REQUIRED_MISSING"
+prompt_pkg_list "OPTIONAL" "$OPTIONAL_MISSING"
+
+# ─── batch apt install (one transaction, one apt-update) ────────────────────────
+
+if [ ${#TO_INSTALL[@]} -gt 0 ]; then
+    echo
+    echo "Installing: ${TO_INSTALL[*]}"
+    run_priv apt-get update
+    run_priv apt-get install -y "${TO_INSTALL[@]}"
+fi
+
+# ─── Rust toolchain ─────────────────────────────────────────────────────────────
+
+if ! command -v cargo >/dev/null 2>&1 || ! command -v rustc >/dev/null 2>&1; then
+    echo
+    echo "Rust toolchain (cargo / rustc) not found."
+    if confirm "Install via rustup (https://rustup.rs)?"; then
+        if [ "$DRY_RUN" = "1" ]; then
+            echo "DRY-RUN: curl https://sh.rustup.rs | sh -s -- -y"
+        else
+            curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+            # shellcheck disable=SC1091
+            [ -f "$HOME/.cargo/env" ] && . "$HOME/.cargo/env"
+        fi
+    fi
+fi
+
+# ─── CUDA / nvcc (optional, large) ──────────────────────────────────────────────
+
+if ! command -v nvcc >/dev/null 2>&1; then
+    echo
+    echo "nvcc not found (only needed for ZisK GPU build path)."
+    echo "  Note: nvidia-cuda-toolkit is ~2 GiB. Skip on hosts without an NVIDIA GPU."
+    if confirm "Install nvidia-cuda-toolkit?"; then
+        run_priv apt-get install -y nvidia-cuda-toolkit
+    fi
+fi
+
+# ─── final verification ─────────────────────────────────────────────────────────
+
+echo
+echo "── Final dependency check ──"
+
+STILL_MISSING=$(apt_missing "${APT_REQUIRED[@]}")
+if [ -n "$STILL_MISSING" ]; then
+    echo "Still missing required packages:"
+    for p in $STILL_MISSING; do echo "  - $p"; done
+    echo "Re-run this script and confirm installation, or install them manually."
+    exit 1
+fi
+
+if ! command -v cargo >/dev/null 2>&1 || ! command -v rustc >/dev/null 2>&1; then
+    echo "Rust toolchain still missing. Install via:"
+    echo "  curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y"
+    exit 1
+fi
+
+echo "All required ZisK dependencies are present."
+echo "Next: TARGET=zisk make install"
+exit 0
