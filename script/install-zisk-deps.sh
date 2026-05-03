@@ -196,24 +196,119 @@ fi
 
 CUDA_VERSION="${CUDA_VERSION:-12-8}"
 
-# Decide whether the host needs CUDA action. Three states:
-#   - no driver         → skip everything (CPU-only mode)
-#   - no nvcc           → install CUDA $CUDA_VERSION
-#   - nvcc but stale    → existing nvcc can't compile for the host's GPU arch
-#                         (e.g. apt's CUDA 11.5 on a Blackwell sm_120 host).
-#                         Offer to replace.
+# ─── CUDA helper functions ──────────────────────────────────────────────────────
+
+# Purge legacy CUDA 11.x apt packages. `apt remove nvidia-cuda-toolkit` only drops
+# the meta-package; 30+ transitives (libcudart11.0, libcublas11, …) survive and
+# end up ahead of /usr/local/cuda/lib64 in the linker search path, breaking
+# CUDA 12 builds with "undefined symbol: cudaGetDeviceProperties_v2".
+purge_old_cuda_packages() {
+    echo "Purging legacy CUDA 11.x apt packages..."
+    run_priv apt-get remove --purge -y \
+        'nvidia-cuda-toolkit' 'nvidia-cuda-toolkit-doc' \
+        'nvidia-cuda-dev' 'nvidia-cuda-gdb' \
+        'nvidia-profiler' 'nvidia-visual-profiler' \
+        'libcudart11*' \
+        'libcublas11*' 'libcublaslt11' \
+        'libcufft10' 'libcufftw10' \
+        'libcusolver11' 'libcusolvermg11' \
+        'libcusparse11' \
+        'libcurand10' \
+        'libnvjpeg11' \
+        'libnvrtc11.2' 'libnvrtc-builtins11.5' \
+        'libcupti11.5' \
+        'libcuinj64-11.5' \
+        'libnvtoolsext1' 'libnvvm4' 'libnvblas11' \
+        'libnppc11' 'libnpps11' 'libnppial11' 'libnppicc11' 'libnppidei11' \
+        'libnppif11' 'libnppig11' 'libnppim11' 'libnppist11' 'libnppisu11' 'libnppitc11' \
+        'libcub-dev' 'libthrust-dev' \
+        'libnvidia-ml-dev' 'libaccinj64-11.5' 2>/dev/null || true
+    run_priv apt-get autoremove -y --purge
+    run_priv ldconfig
+}
+
+# Install fresh CUDA toolkit from NVIDIA's official repo.
+install_cuda_toolkit() {
+    local local_keyring
+    local_keyring=$(mktemp /tmp/cuda-keyring.XXXXXX.deb)
+    curl -fsSL -o "$local_keyring" \
+        "https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2204/x86_64/cuda-keyring_1.1-1_all.deb"
+    run_priv dpkg -i "$local_keyring"
+    rm -f "$local_keyring"
+    run_priv apt-get update
+    run_priv apt-get install -y "cuda-toolkit-$CUDA_VERSION"
+}
+
+# Pin the dynamic linker, link-time linker, and shell PATH to a CUDA prefix.
+# Idempotent: repeated calls don't duplicate ld.so.conf.d entry or .bashrc lines.
+pin_cuda_linker_path() {
+    local cuda_prefix="$1"
+    [ -d "$cuda_prefix" ] || { echo "pin_cuda_linker_path: $cuda_prefix not a directory"; return 1; }
+
+    echo "$cuda_prefix/lib64" | run_priv tee /etc/ld.so.conf.d/000-cuda.conf >/dev/null
+    run_priv ldconfig
+
+    export PATH="$cuda_prefix/bin:$PATH"
+    export LD_LIBRARY_PATH="$cuda_prefix/lib64:${LD_LIBRARY_PATH:-}"
+    export LIBRARY_PATH="$cuda_prefix/lib64:${LIBRARY_PATH:-}"
+    if ! grep -q "$cuda_prefix" "$HOME/.bashrc" 2>/dev/null; then
+        {
+            echo ""
+            echo "# CUDA paths (added by install-zisk-deps.sh)"
+            echo "export PATH=$cuda_prefix/bin:\$PATH"
+            echo "export LD_LIBRARY_PATH=$cuda_prefix/lib64:\${LD_LIBRARY_PATH:-}"
+            echo "export LIBRARY_PATH=$cuda_prefix/lib64:\${LIBRARY_PATH:-}"
+        } >> "$HOME/.bashrc"
+        echo "Added CUDA paths ($cuda_prefix) to $HOME/.bashrc"
+    fi
+}
+
+# Verify only the requested CUDA prefix's libcudart is reachable. Returns 1 on
+# stale leftovers so callers can decide to abort or clean up.
+verify_cuda_link_path() {
+    local cuda_prefix="$1"
+    local stale stray_files
+    stale=$(ldconfig -p 2>/dev/null | awk '/libcudart\.so/ {print $NF}' | grep -v "$cuda_prefix" || true)
+    stray_files=$(find /usr/lib/x86_64-linux-gnu /lib/x86_64-linux-gnu -maxdepth 1 -name 'libcudart.so*' 2>/dev/null)
+    if [ -n "$stale" ] || [ -n "$stray_files" ]; then
+        echo "Error: libcudart files exist outside $cuda_prefix and will shadow CUDA 12 symbols at link time."
+        [ -n "$stale" ] && { echo "  ldconfig -p reports:"; echo "$stale" | sed 's/^/    /'; }
+        [ -n "$stray_files" ] && { echo "  filesystem stragglers:"; echo "$stray_files" | sed 's/^/    /'; }
+        echo "Run: sudo dpkg -S <one-of-those-paths> to find the offending package."
+        return 1
+    fi
+    echo "Linker path clean: only $cuda_prefix/lib64/libcudart.so* will resolve."
+    return 0
+}
+
+# ─── CUDA dispatch ──────────────────────────────────────────────────────────────
+# Four states:
+#   - no_driver        → skip (CPU-only mode)
+#   - install          → no nvcc → fresh install of CUDA $CUDA_VERSION
+#   - upgrade          → nvcc exists but can't compile for the host GPU's arch
+#                        (e.g. apt's CUDA 11.5 vs Blackwell sm_120) → replace
+#   - cleanup-only     → nvcc supports the arch BUT stale 11.x libs remain on
+#                        the linker path. Purge + re-pin without reinstall.
+
 need_cuda_action=""
-nvcc_arch_ok=1
+active_cuda_prefix=""
+
 if command -v nvidia-smi >/dev/null 2>&1; then
     gpu_name=$(nvidia-smi --query-gpu=name --format=csv,noheader 2>/dev/null | head -n1)
     gpu_cc=$(nvidia-smi --query-gpu=compute_cap --format=csv,noheader 2>/dev/null | head -n1)
     gpu_sm="${gpu_cc//./}"   # "12.0" → "120"
 
-    if ! command -v nvcc >/dev/null 2>&1; then
+    if command -v nvcc >/dev/null 2>&1; then
+        # Resolve symlinks so `realpath` gives e.g. /usr/local/cuda-12.8 not /usr/local/cuda
+        active_cuda_prefix=$(realpath "$(dirname "$(command -v nvcc)")/.." 2>/dev/null || true)
+    fi
+
+    if [ -z "$active_cuda_prefix" ]; then
         need_cuda_action="install"
     elif [ -n "$gpu_sm" ] && ! nvcc --list-gpu-arch 2>/dev/null | grep -q "compute_${gpu_sm}\b"; then
-        nvcc_arch_ok=0
         need_cuda_action="upgrade"
+    elif ! verify_cuda_link_path "$active_cuda_prefix" >/dev/null 2>&1; then
+        need_cuda_action="cleanup-only"
     fi
 fi
 
@@ -222,6 +317,26 @@ if [ -z "$need_cuda_action" ] && ! command -v nvidia-smi >/dev/null 2>&1; then
     echo "Skipping CUDA install: nvidia-smi not found (no NVIDIA driver)."
     echo "  ZisK will run in CPU-only mode. Install the NVIDIA driver first if"
     echo "  you intend to use GPU acceleration, then re-run this script."
+
+elif [ "$need_cuda_action" = "cleanup-only" ]; then
+    echo
+    echo "NVIDIA GPU detected: ${gpu_name:-unknown} (compute capability ${gpu_cc:-unknown})"
+    echo "nvcc at $active_cuda_prefix supports your GPU, but stale CUDA 11.x"
+    echo "libraries remain on the linker path:"
+    verify_cuda_link_path "$active_cuda_prefix" 2>&1 | grep -E '^( |  )' || true
+    echo "Without cleanup, GPU builds fail with 'undefined symbol: cudaGetDeviceProperties_v2'."
+
+    if confirm "Purge stale CUDA 11.x packages?"; then
+        if [ "$DRY_RUN" = "1" ]; then
+            echo "DRY-RUN: would purge legacy CUDA 11.x packages and re-pin linker"
+        else
+            purge_old_cuda_packages
+            pin_cuda_linker_path "$active_cuda_prefix"
+            verify_cuda_link_path "$active_cuda_prefix" || exit 1
+            CHANGED=1
+        fi
+    fi
+
 elif [ -n "$need_cuda_action" ]; then
     echo
     echo "NVIDIA GPU detected: ${gpu_name:-unknown} (compute capability ${gpu_cc:-unknown})"
@@ -229,7 +344,6 @@ elif [ -n "$need_cuda_action" ]; then
         nvcc_ver=$(nvcc --version 2>/dev/null | grep -oE 'release [0-9]+\.[0-9]+' | head -n1)
         echo "Existing nvcc ($nvcc_ver, $(command -v nvcc)) does NOT support sm_${gpu_sm}."
         echo "ZisK GPU build will fail with 'Unsupported gpu architecture compute_${gpu_sm}'."
-        echo "Need to upgrade to a CUDA toolkit that supports your GPU arch."
     else
         echo "nvcc not present."
     fi
@@ -239,86 +353,13 @@ elif [ -n "$need_cuda_action" ]; then
 
     if confirm "${need_cuda_action^} CUDA toolkit $CUDA_VERSION?"; then
         if [ "$DRY_RUN" = "1" ]; then
-            echo "DRY-RUN: would install cuda-keyring + cuda-toolkit-$CUDA_VERSION"
+            echo "DRY-RUN: would purge old, install cuda-keyring + cuda-toolkit-$CUDA_VERSION, pin linker"
         else
-            # ── 1. Purge any pre-existing CUDA 11.x packages ────────────────────
-            # `apt-get remove nvidia-cuda-toolkit` only drops the meta-package;
-            # 30+ transitives (libcudart11.0, libcublas11, …) survive and end up
-            # ahead of /usr/local/cuda/lib64 in the linker search path, breaking
-            # CUDA 12 builds with "undefined symbol: cudaGetDeviceProperties_v2".
-            echo "Purging any CUDA 11.x packages so the linker can't pick them up..."
-            run_priv apt-get remove --purge -y \
-                'nvidia-cuda-toolkit' 'nvidia-cuda-toolkit-doc' \
-                'nvidia-cuda-dev' 'nvidia-cuda-gdb' \
-                'nvidia-profiler' 'nvidia-visual-profiler' \
-                'libcudart11*' \
-                'libcublas11*' 'libcublaslt11' \
-                'libcufft10' 'libcufftw10' \
-                'libcusolver11' 'libcusolvermg11' \
-                'libcusparse11' \
-                'libcurand10' \
-                'libnvjpeg11' \
-                'libnvrtc11.2' 'libnvrtc-builtins11.5' \
-                'libcupti11.5' \
-                'libcuinj64-11.5' \
-                'libnvtoolsext1' 'libnvvm4' 'libnvblas11' \
-                'libnppc11' 'libnpps11' 'libnppial11' 'libnppicc11' 'libnppidei11' \
-                'libnppif11' 'libnppig11' 'libnppim11' 'libnppist11' 'libnppisu11' 'libnppitc11' \
-                'libcub-dev' 'libthrust-dev' \
-                'libnvidia-ml-dev' 'libaccinj64-11.5' 2>/dev/null || true
-            run_priv apt-get autoremove -y --purge
-
-            # ── 2. Install CUDA 12.x from NVIDIA's repo ─────────────────────────
-            local_keyring=$(mktemp /tmp/cuda-keyring.XXXXXX.deb)
-            curl -fsSL -o "$local_keyring" \
-                "https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2204/x86_64/cuda-keyring_1.1-1_all.deb"
-            run_priv dpkg -i "$local_keyring"
-            rm -f "$local_keyring"
-            run_priv apt-get update
-            run_priv apt-get install -y "cuda-toolkit-$CUDA_VERSION"
-
-            # ── 3. Pin the linker to CUDA 12.x ──────────────────────────────────
-            cuda_prefix="/usr/local/cuda-${CUDA_VERSION/-/.}"
-            if [ -d "$cuda_prefix" ]; then
-                # Runtime loader: prepend cuda lib64 so `ldconfig -p` resolves to it
-                # before any /lib/x86_64-linux-gnu/libcudart.so.* leftover.
-                echo "$cuda_prefix/lib64" | run_priv tee /etc/ld.so.conf.d/000-cuda.conf >/dev/null
-                run_priv ldconfig
-
-                # Link-time + runtime env for this shell and future shells.
-                export PATH="$cuda_prefix/bin:$PATH"
-                export LD_LIBRARY_PATH="$cuda_prefix/lib64:${LD_LIBRARY_PATH:-}"
-                export LIBRARY_PATH="$cuda_prefix/lib64:${LIBRARY_PATH:-}"
-                if ! grep -q "cuda-${CUDA_VERSION/-/.}" "$HOME/.bashrc" 2>/dev/null; then
-                    {
-                        echo ""
-                        echo "# CUDA $CUDA_VERSION (added by install-zisk-deps.sh)"
-                        echo "export PATH=$cuda_prefix/bin:\$PATH"
-                        echo "export LD_LIBRARY_PATH=$cuda_prefix/lib64:\${LD_LIBRARY_PATH:-}"
-                        echo "export LIBRARY_PATH=$cuda_prefix/lib64:\${LIBRARY_PATH:-}"
-                    } >> "$HOME/.bashrc"
-                    echo "Added CUDA $CUDA_VERSION PATH/LD_LIBRARY_PATH/LIBRARY_PATH to $HOME/.bashrc"
-                fi
-            fi
-
-            # ── 4. Verify only CUDA 12.x libcudart is reachable ────────────────
-            stale=$(ldconfig -p 2>/dev/null | awk '/libcudart\.so/ {print $NF}' | grep -v "$cuda_prefix" || true)
-            if [ -n "$stale" ]; then
-                echo "Error: libcudart from outside $cuda_prefix is still on the linker path:"
-                echo "$stale" | sed 's/^/    /'
-                echo "These will shadow CUDA 12 symbols at link time. Manual cleanup needed:"
-                echo "    sudo find /usr/lib/x86_64-linux-gnu /lib -name 'libcudart.so*' -ls"
-                echo "    (then 'sudo dpkg -S <path>' and 'sudo apt-get remove --purge <pkg>')"
-                exit 1
-            fi
-            stray_files=$(find /usr/lib/x86_64-linux-gnu /lib/x86_64-linux-gnu -maxdepth 1 -name 'libcudart.so*' 2>/dev/null)
-            if [ -n "$stray_files" ]; then
-                echo "Error: stray libcudart files outside $cuda_prefix:"
-                echo "$stray_files" | sed 's/^/    /'
-                echo "Run: sudo dpkg -S <one-of-those-paths> to find the offending package and purge it."
-                exit 1
-            fi
-            echo "Linker path clean: only $cuda_prefix/lib64/libcudart.so* will resolve."
+            target_prefix="/usr/local/cuda-${CUDA_VERSION/-/.}"
+            purge_old_cuda_packages
+            install_cuda_toolkit
+            pin_cuda_linker_path "$target_prefix"
+            verify_cuda_link_path "$target_prefix" || exit 1
             CHANGED=1
         fi
     fi
