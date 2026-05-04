@@ -1,5 +1,19 @@
 # Changelog
 
+## [26.1.0-surge](https://github.com/NethermindEth/raiko/compare/v26.0.1-surge...v26.1.0-surge) (2026-05-04)
+
+
+### Features
+
+* add a script to check and install dependencies ([#65](https://github.com/NethermindEth/raiko/issues/65)) ([0a56981](https://github.com/NethermindEth/raiko/commit/0a56981b40b73ce293b8282100c6ab1a7d72bb83))
+
+
+### Bug Fixes
+
+* return value before removing request with use_cache: false ([9ff8a13](https://github.com/NethermindEth/raiko/commit/9ff8a131be550573a294032b686bcce15f146428))
+* update install script ~/.zisk/bin path ([9fc8e5a](https://github.com/NethermindEth/raiko/commit/9fc8e5ac1f81aa7c57f3e5cd6d96c66c24c4f1db))
+* use_cache in config.json ([03794a1](https://github.com/NethermindEth/raiko/commit/03794a17d04e9809e081ea28dd52598fa3e0447a))
+
 ## [1.12.0](https://github.com/taikoxyz/raiko/compare/v1.10.0...v1.12.0) (2025-10-09)
 
 
