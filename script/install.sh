@@ -167,14 +167,33 @@ install_zisk_cli() {
         return 0
     fi
     echo "Installing Zisk v$ZISK_VERSION..."
-    run_ziskup --version "$ZISK_VERSION" --nokey
+
+    # Workaround for upstream ZisK v0.16.x: the post-extract "Configuring GPU
+    # binaries..." step calls `mv cargo-zisk-gpu ...`, but the CPU release
+    # tarball at github.com/0xPolygonHermez/zisk/releases/download/v$VER/
+    # cargo_zisk_linux_amd64.tar.gz never ships cargo-zisk-gpu, and no separate
+    # GPU asset is published. Tolerate that specific failure: the tarball does
+    # extract cargo-zisk before the mv runs, so the binary is usable.
+    run_ziskup --version "$ZISK_VERSION" --nokey || true
+
+    # Provide cargo-zisk-gpu so any subsequent invocation of cargo-zisk's
+    # GPU-config code path finds the file it expects (idempotent on re-runs).
+    if [ -x "$ZISK_DIR/bin/cargo-zisk" ] && [ ! -e "$ZISK_DIR/bin/cargo-zisk-gpu" ]; then
+        cp "$ZISK_DIR/bin/cargo-zisk" "$ZISK_DIR/bin/cargo-zisk-gpu"
+        echo "Created cargo-zisk-gpu (copy of cargo-zisk) to satisfy ziskup post-install hook"
+    fi
+
     source "$HOME/.bashrc" 2>/dev/null || true
     export PATH="$ZISK_DIR/bin:$PATH"
-    command -v cargo-zisk >/dev/null 2>&1 || [ -x "$ZISK_DIR/bin/cargo-zisk" ] || {
-        echo "Error: Failed to install Zisk. Install manually:"
+
+    # Sanity check — even if ziskup exited non-zero above, the binary must be
+    # functional. If `cargo-zisk --version` fails, that's a real install break.
+    if ! "$ZISK_DIR/bin/cargo-zisk" --version >/dev/null 2>&1; then
+        echo "Error: cargo-zisk installed but not functional. Install manually:"
         echo "  curl https://raw.githubusercontent.com/0xPolygonHermez/zisk/main/ziskup/install.sh | bash"
         exit 1
-    }
+    fi
+    echo "cargo-zisk verified: $("$ZISK_DIR/bin/cargo-zisk" --version)"
 }
 
 install_zisk_toolchain() {
@@ -242,7 +261,12 @@ build_zisk_gpu() {
         git clone --depth=1 --branch "v$ZISK_VERSION" \
             https://github.com/0xPolygonHermez/zisk.git "$tmp/zisk"
         cd "$tmp/zisk"
-        if cargo build --release --features gpu; then
+        # CARGO_BUILD_JOBS=1 serializes cargo's build-script execution, which
+        # avoids the upstream lib-float / lib-c Makefile race that produces
+        # "can't create build/<x>.o: No such file or directory" mid-compile.
+        # MAKEFLAGS=-j1 alone isn't enough — upstream uses $(MAKE) recursively
+        # in places that drop the env flag.
+        if CARGO_BUILD_JOBS=1 cargo build --release --features gpu; then
             copy_zisk_gpu_binaries "target/release"
             echo "$ZISK_VERSION" > "$marker"
             echo "Zisk successfully built with GPU support!"
