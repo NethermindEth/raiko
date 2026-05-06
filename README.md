@@ -2,6 +2,19 @@
 
 Taiko's multi-prover for Taiko & Ethereum blocks. Currently supports Risc0, SP1, TDX, and Zisk.
 
+## Surge — quick pointer
+
+This is Nethermind's fork of Raiko, wired for Surge's real-time-proving inbox. If you're setting Raiko up to back a Surge devnet, **don't follow the generic upstream instructions below** — they cover Taiko-mainnet flows and expect different chain specs and verifiers. Use the Surge guide instead:
+
+- [docs.surge.wtf/guides/running-surge/provers](https://docs.surge.wtf/guides/running-surge/provers) — full ZisK prover setup (two-VM and single-VM)
+- [docs.surge.wtf/guides/running-surge](https://docs.surge.wtf/guides/running-surge) — full Surge stack deploy
+
+Surge-specific helper in this repo:
+
+- [`script/install-zisk-deps.sh`](./script/install-zisk-deps.sh) — one-shot apt + Rust + CUDA toolkit installer for Ubuntu prover hosts. Detects and purges legacy CUDA 11.x leftovers that break ZisK builds on Hopper/Blackwell GPUs. Run this **before** `TARGET=zisk make install` on a fresh prover VM.
+
+The rest of this README is the upstream multi-prover reference (Risc0, SP1, TDX, ZisK).
+
 ## Usage
 
 ### Installing
