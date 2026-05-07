@@ -109,6 +109,23 @@ pub struct Opts {
         help = "e.g. {\"Sp1\":0.1,\"Risc0\":0.2}"
     )]
     pub ballot_zk: String,
+
+    /// Realtime blob privacy mode. When true, encrypted blob payloads are decrypted
+    /// in the guest using the keys below. Must match the proposer's `SURGE_PRIVACY_MODE`.
+    #[arg(long, require_equals = true, env = "SURGE_PRIVACY_MODE")]
+    #[serde(default)]
+    pub privacy_mode: bool,
+
+    /// Hex-encoded 32-byte AES-256-GCM key for scheme 0x01 (normal proposal blobs).
+    /// Required when `privacy_mode` is true.
+    #[arg(long, require_equals = true, env = "SURGE_PRIVACY_SYMMETRIC_KEY")]
+    pub privacy_symmetric_key: Option<String>,
+
+    /// Hex-encoded 32-byte secp256k1 system FI private key for scheme 0x02 (forced
+    /// inclusion blobs). Required when `privacy_mode` is true *and* the chain accepts
+    /// forced inclusions.
+    #[arg(long, require_equals = true, env = "SURGE_PRIVACY_FI_PRIVKEY")]
+    pub privacy_fi_private_key: Option<String>,
 }
 
 impl Opts {

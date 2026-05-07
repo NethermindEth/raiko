@@ -103,6 +103,14 @@ pub struct TaikoGuestBatchInput {
     /// L2 grandparent header for the first block in the batch (used for EIP-4396 base fee calculation)
     #[serde_as(as = "Option<BincodeCompactHeader>")]
     pub l2_grandparent_header: Option<Header>,
+    /// Realtime blob privacy keys forwarded to the guest. The guest verifies that the
+    /// keccak256 of each provided key matches a compile-time hash baked into the guest
+    /// (`SURGE_PRIVACY_*_KEY_HASH`) — this binds the proof's vkey to the keys without
+    /// committing the secrets in the public input.
+    #[serde(default)]
+    pub privacy_symmetric_key: Option<[u8; 32]>,
+    #[serde(default)]
+    pub privacy_fi_private_key: Option<[u8; 32]>,
 }
 
 /// External block input.

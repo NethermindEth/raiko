@@ -33,6 +33,7 @@ pub mod libhash;
 pub mod manifest;
 pub mod mem_db;
 pub mod primitives;
+pub mod privacy;
 pub mod proof_type;
 pub mod protocol_instance;
 pub mod prover;
