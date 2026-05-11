@@ -34,8 +34,12 @@ RAIKO_ROOT="$(pwd)"
 ENV_FILE="${RAIKO_ROOT}/docker/.env"
 OUT_DIR="${RAIKO_ROOT}/docker/guest-elfs"
 
-TOOLCHAIN_IMAGE="${SURGE_RAIKO_TOOLCHAIN_IMAGE:-docker.io/nethermind/surge-raiko-zk-toolchain:latest}"
-RUNTIME_IMAGE="${SURGE_RAIKO_RUNTIME_IMAGE:-docker.io/nethermind/surge-raiko-zk:latest}"
+# Image pins. Canonical source is simple-surge-node/.env.devnet's IMAGES
+# section (RAIKO_ZK_TOOLCHAIN_IMAGE, RAIKO_ZK_IMAGE). deploy-prover.sh exports
+# them into the shell before invoking this script. When run standalone from
+# the raiko repo (outside simple-surge-node), the fallbacks to :latest apply.
+TOOLCHAIN_IMAGE="${RAIKO_ZK_TOOLCHAIN_IMAGE:-docker.io/nethermind/surge-raiko-zk-toolchain:latest}"
+RUNTIME_IMAGE="${RAIKO_ZK_IMAGE:-docker.io/nethermind/surge-raiko-zk:latest}"
 
 red()    { printf '\033[31m%s\033[0m\n' "$*"; }
 green()  { printf '\033[32m%s\033[0m\n' "$*"; }
