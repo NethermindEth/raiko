@@ -44,16 +44,30 @@ jobs:
             variant: zk
             dockerfile: Dockerfile.zk
             repository: nethermind/surge-raiko-zk
+            # Empty target → builds the final raiko-zk runtime stage.
+            target: ""
+          # Toolchain image — the Rust + ZisK toolchain + raiko source tree,
+          # consumed locally on prover VMs by `./script/build-guest-with-hashes.sh`
+          # to recompile the ZisK guest ELFs with privacy hashes baked in.
+          # Same Dockerfile.zk, just stops at the guest-builder stage.
+          - os: ubuntu-latest
+            platform: linux/amd64
+            variant: zk-toolchain
+            dockerfile: Dockerfile.zk
+            repository: nethermind/surge-raiko-zk-toolchain
+            target: guest-builder
           - os: ubuntu-latest
             platform: linux/amd64
             variant: mock
             dockerfile: Dockerfile.mock
             repository: nethermind/surge-raiko-mock
+            target: ""
           - os: ubuntu-24.04-arm
             platform: linux/arm64
             variant: mock
             dockerfile: Dockerfile.mock
             repository: nethermind/surge-raiko-mock
+            target: ""
     steps:
       - name: Prepare Environment
         run: |
@@ -109,6 +123,11 @@ jobs:
           platforms: ${{ matrix.platform }}
           context: .
           file: ./${{ matrix.dockerfile }}
+          # Empty target → docker/build-push-action ignores the field and
+          # builds the final stage (Dockerfile default). Set per matrix entry
+          # so the toolchain variant stops at the guest-builder stage instead
+          # of producing the full runtime image.
+          target: ${{ matrix.target }}
           push: true
           tags: ${{ env.DOCKER_REGISTRY }}/${{ matrix.repository }}
           labels: ${{ steps.meta.outputs.labels }}
@@ -137,6 +156,8 @@ jobs:
         include:
           - variant: zk
             repository: nethermind/surge-raiko-zk
+          - variant: zk-toolchain
+            repository: nethermind/surge-raiko-zk-toolchain
           - variant: mock
             repository: nethermind/surge-raiko-mock
     steps:

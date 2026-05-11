@@ -32,6 +32,16 @@ fn main() {
     println!("cargo:rerun-if-changed={}", setup_path.display());
     println!("cargo:rerun-if-env-changed=KZG_TRUSTED_SETUP");
 
+    // Privacy-mode hashes consumed by `option_env!()` in src/utils/realtime.rs
+    // are macro-expanded at compile time. Cargo's incremental rebuild doesn't
+    // track arbitrary env vars used inside macros, so without these lines a
+    // key rotation that runs `cargo build` on an already-warm target dir
+    // (e.g. inside the surge-raiko-zk-toolchain image) would silently reuse
+    // the previously-baked hash → host runtime keys would mismatch the
+    // guest's compile-time hash → "privacy dispatch failed: Truncated" panic.
+    println!("cargo:rerun-if-env-changed=SURGE_PRIVACY_SYMMETRIC_KEY_HASH");
+    println!("cargo:rerun-if-env-changed=SURGE_PRIVACY_FI_PRIVKEY_HASH");
+
     // Helpful message during build (shows which file was used).
     println!(
         "cargo:warning=Using trusted setup: {}",
