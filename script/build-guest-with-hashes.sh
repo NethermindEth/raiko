@@ -19,8 +19,19 @@
 #      docker-compose-zk.yml.
 #
 # Usage (run from the raiko repo root on the prover VM):
-#   ./script/build-guest-with-hashes.sh           # uses values from docker/.env
-#   ./script/build-guest-with-hashes.sh --print-hashes  # debug — show what we'd bake
+#   ./script/build-guest-with-hashes.sh           # default: build inside the
+#                                                  # surge-raiko-zk-toolchain image
+#   ./script/build-guest-with-hashes.sh --local   # build on the host with
+#                                                  # ~/.zisk's toolchain instead.
+#                                                  # Use this if raiko panics
+#                                                  # with pil2-proofman
+#                                                  # out-of-bounds at proof time
+#                                                  # (ZisK-version drift between
+#                                                  # the toolchain image's ZisK
+#                                                  # and the proving keys at
+#                                                  # ~/.zisk/provingKey).
+#                                                  # Also: BUILD_GUEST_LOCAL=true env.
+#   ./script/build-guest-with-hashes.sh --print-hashes  # debug
 #
 # Idempotency: re-runs are safe. The toolchain image is cached after the first
 # pull; the cargo build cache lives inside the container layer too. Identical
@@ -57,11 +68,33 @@ fi
 SYM_HASH=$(grep -E '^SURGE_PRIVACY_SYMMETRIC_KEY_HASH=' "$ENV_FILE" | tail -n1 | cut -d= -f2- | tr -d '"' | tr -d "'")
 FI_HASH=$(grep -E '^SURGE_PRIVACY_FI_PRIVKEY_HASH=' "$ENV_FILE"  | tail -n1 | cut -d= -f2- | tr -d '"' | tr -d "'")
 
-if [[ "${1:-}" == "--print-hashes" ]]; then
-    echo "SURGE_PRIVACY_SYMMETRIC_KEY_HASH=$SYM_HASH"
-    echo "SURGE_PRIVACY_FI_PRIVKEY_HASH=$FI_HASH"
-    exit 0
-fi
+BUILD_LOCAL="${BUILD_GUEST_LOCAL:-false}"
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --print-hashes)
+            echo "SURGE_PRIVACY_SYMMETRIC_KEY_HASH=$SYM_HASH"
+            echo "SURGE_PRIVACY_FI_PRIVKEY_HASH=$FI_HASH"
+            exit 0
+            ;;
+        --local)
+            # Build the guest directly on the host (using ~/.zisk + cargo from
+            # the host's `TARGET=zisk make install`) instead of inside the
+            # surge-raiko-zk-toolchain image. Use this when raiko panics with
+            # pil2-proofman out-of-bounds (`len N / index N`) at proof time —
+            # that's a signature of ZisK-version drift between the host's
+            # proving keys and the guest's compile-time ZisK. A host-side
+            # build forces both sides to use the same version.
+            BUILD_LOCAL=true
+            shift
+            ;;
+        -h|--help)
+            sed -n '2,30p' "$0" | sed 's/^# \{0,1\}//'
+            echo "Flags: --local  --print-hashes  --help"
+            exit 0
+            ;;
+        *) red "Unknown flag: $1"; exit 2 ;;
+    esac
+done
 
 mkdir -p "$OUT_DIR"
 
@@ -92,11 +125,53 @@ if [[ -z "$SYM_HASH" && -z "$FI_HASH" ]]; then
     exit 0
 fi
 
-log "Toolchain image: $TOOLCHAIN_IMAGE"
 log "Hashes (one or both non-empty → privacy mode ON):"
 log "  SURGE_PRIVACY_SYMMETRIC_KEY_HASH=${SYM_HASH:-<empty>}"
 log "  SURGE_PRIVACY_FI_PRIVKEY_HASH=${FI_HASH:-<empty>}"
 log "Output dir: $OUT_DIR"
+
+if [[ "$BUILD_LOCAL" == "true" ]]; then
+    # Local build mode: skip the toolchain image entirely; compile on the host
+    # with whatever ZisK toolchain `TARGET=zisk make install` set up. Matches
+    # the ZisK version baked into the host's proving keys (~/.zisk/provingKey)
+    # so pil2-proofman doesn't see a version skew between guest verifier
+    # circuits and proving keys.
+    log "Mode: --local (building on host, NOT inside $TOOLCHAIN_IMAGE)"
+    if [[ ! -d "$HOME/.zisk" ]]; then
+        red "ERROR: \$HOME/.zisk not found — host doesn't have the ZisK SDK installed."
+        red "Run \`TARGET=zisk make install\` first (deploy-prover.sh does this in Step 3)."
+        exit 1
+    fi
+    (
+        cd "$RAIKO_ROOT"
+        # Surface cargo + zisk-toolchain in PATH for non-interactive shells
+        # (deploy-prover.sh runs us under ssh / docker exec etc.).
+        # shellcheck disable=SC1091
+        [[ -f "$HOME/.cargo/env" ]] && source "$HOME/.cargo/env"
+        export PATH="$HOME/.zisk/bin:$HOME/.sp1/bin:$PATH"
+        export SURGE_PRIVACY_SYMMETRIC_KEY_HASH="$SYM_HASH"
+        export SURGE_PRIVACY_FI_PRIVKEY_HASH="$FI_HASH"
+        log "  cargo:        $(command -v cargo || echo MISSING)"
+        log "  cargo-zisk:   $(command -v cargo-zisk || echo MISSING)"
+        log "  TARGET=zisk make guest ..."
+        TARGET=zisk make guest
+    ) || { red "Local make guest failed."; exit 1; }
+    for elf in zisk-batch zisk-aggregation zisk-shasta-aggregation; do
+        src="$RAIKO_ROOT/provers/zisk/guest/elf/$elf"
+        if [[ ! -f "$src" ]]; then
+            red "ERROR: expected ELF not produced: $src"; exit 1
+        fi
+        cp "$src" "$OUT_DIR/"
+        sha256sum "$OUT_DIR/$elf" | sed "s|$OUT_DIR/||"
+    done
+    chmod a+rw "$OUT_DIR"/*
+    green "Local guest build complete: $OUT_DIR"
+    log "Next: restart the runtime container to pick up the new ELFs:"
+    log "  docker compose -f docker/docker-compose-zk.yml up -d --force-recreate raiko-zk"
+    exit 0
+fi
+
+log "Mode: docker toolchain image ($TOOLCHAIN_IMAGE)"
 
 # Pull only if missing — saves bandwidth on repeat rotations.
 if ! docker image inspect "$TOOLCHAIN_IMAGE" >/dev/null 2>&1; then
