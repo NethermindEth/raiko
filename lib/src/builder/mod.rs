@@ -7,6 +7,7 @@ use crate::primitives::keccak::keccak;
 use crate::primitives::mpt::StateAccount;
 use crate::utils::txs::generate_transactions;
 use crate::utils::txs::generate_transactions_for_batch_blocks;
+use crate::l1_precompiles::prepare_l1_precompiles_for_execution;
 use crate::{
     consts::MAX_BLOCK_HASH_AGE,
     guest_mem_forget,
@@ -253,6 +254,14 @@ pub static SURGE_MAINNET: LazyLock<Arc<TaikoChainSpec>> = LazyLock::new(|| {
 });
 
 pub fn calculate_block_header(input: &mut GuestInput) -> Header {
+    // Hold the L1-precompile lock across the entire prepare → execute → finalize cycle so
+    // concurrent proving tasks can't cross-contaminate the global L1SLOAD/L1STATICCALL
+    // cache mid-flight. The guard drops at function end after `mem::take(&mut builder.input)`.
+    let cycle_tracker = CycleTracker::start("prepare_l1_precompiles");
+    let _l1_precompile_guard = prepare_l1_precompiles_for_execution(input)
+        .expect("L1 precompile prep failed");
+    cycle_tracker.end();
+
     let cycle_tracker = CycleTracker::start("initialize_database");
     let db = create_mem_db(input).unwrap();
     cycle_tracker.end();
@@ -287,6 +296,12 @@ pub fn calculate_batch_blocks_final_header(input: &mut GuestBatchInput) -> Vec<T
     let pool_txs_list = generate_transactions_for_batch_blocks(&input);
     let mut final_blocks = Vec::new();
     for (i, pool_txs) in pool_txs_list.iter().enumerate() {
+        // Hold the L1-precompile lock across each per-block re-execution. Each block in a
+        // batch gets its own (anchor, l1_max_anchor) context — clearing + re-populating
+        // between blocks is intentional and matches the host preflight behavior.
+        let _l1_precompile_guard = prepare_l1_precompiles_for_execution(&input.inputs[i])
+            .expect("L1 precompile prep failed");
+
         // First, create the MemDb using a mutable reference (no clone needed —
         // create_mem_db only mem::takes `contracts` and storage `slots`).
         let db = create_mem_db(&mut input.inputs[i]).unwrap();

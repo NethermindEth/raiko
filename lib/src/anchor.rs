@@ -225,3 +225,42 @@ pub fn decode_anchor_shasta(bytes: &[u8]) -> Result<anchorV4Call> {
 pub fn decode_anchor_realtime(bytes: &[u8]) -> Result<anchorV4WithSignalSlotsCall> {
     anchorV4WithSignalSlotsCall::abi_decode_validate(bytes).map_err(|e| anyhow!(e))
 }
+
+/// Returns the (anchor block height, anchor state root) pair extracted from the anchor tx
+/// for the active fork. Used by both raiko-core (host preflight) and the guest builder
+/// to set the L1 precompile context (`anchor_block_id`) before block re-execution.
+///
+/// The fork dispatch covers:
+/// - Pre-fork (`anchor`): `(l1BlockId, l1StateRoot)`
+/// - Ontake (`anchorV2`): `(_anchorBlockId, _anchorStateRoot)`
+/// - Pacaya (`anchorV3`): `(_anchorBlockId, _anchorStateRoot)`
+/// - Shasta (`anchorV4`): `(_checkpoint.blockNumber, _checkpoint.stateRoot)`
+/// - RealTime (`anchorV4WithSignalSlots`): `(_checkpoint.blockNumber, _checkpoint.stateRoot)`
+pub fn get_anchor_tx_info_by_fork(
+    fork: alethia_reth_evm::spec::TaikoSpecId,
+    anchor_tx_input: &[u8],
+) -> Result<(u64, alloy_primitives::B256)> {
+    use alethia_reth_evm::spec::TaikoSpecId;
+    match fork {
+        TaikoSpecId::REALTIME => {
+            let call = decode_anchor_realtime(anchor_tx_input)?;
+            Ok((call._checkpoint.blockNumber.to(), call._checkpoint.stateRoot))
+        }
+        TaikoSpecId::SHASTA => {
+            let call = decode_anchor_shasta(anchor_tx_input)?;
+            Ok((call._checkpoint.blockNumber.to(), call._checkpoint.stateRoot))
+        }
+        TaikoSpecId::PACAYA => {
+            let call = decode_anchor_pacaya(anchor_tx_input)?;
+            Ok((call._anchorBlockId, call._anchorStateRoot))
+        }
+        TaikoSpecId::ONTAKE => {
+            let call = decode_anchor_ontake(anchor_tx_input)?;
+            Ok((call._anchorBlockId, call._anchorStateRoot))
+        }
+        _ => {
+            let call = decode_anchor(anchor_tx_input)?;
+            Ok((call.l1BlockId, call.l1StateRoot))
+        }
+    }
+}

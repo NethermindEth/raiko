@@ -25,6 +25,7 @@ alloy-primitives = { workspace = true }
 alloy-rpc-types = { workspace = true }
 alloy-consensus = { workspace = true, features = ["crypto-backend"] }
 alloy-chains = { workspace = true }
+alloy-trie = { workspace = true }
 
 # Crypto deps (re-exported for guest crate)
 k256 = { version = "0.13", default-features = false, features = ["ecdsa"] }
@@ -83,6 +84,7 @@ alethia-reth-primitives = { workspace = true, features = ["serde"] }
 
 [dev-dependencies]
 hex-literal = { workspace = true }
+serial_test = { workspace = true }
 
 [build-dependencies]
 rkyv = { workspace = true }

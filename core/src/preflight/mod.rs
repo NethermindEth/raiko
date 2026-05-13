@@ -1,32 +1,187 @@
 use crate::{
     interfaces::{RaikoError, RaikoResult},
     preflight::util::get_grandparent_timestamp,
-    provider::BlockDataProvider,
+    provider::{rpc::RpcBlockDataProvider, BlockDataProvider},
 };
 use alethia_reth_primitives::TaikoTxEnvelope;
 use futures::future::join_all;
 use raiko_lib::{
+    builder::{create_mem_db, RethBlockBuilder},
     consts::ChainSpec,
     input::{
         BlobProofType, BlockProposedFork, GuestBatchInput, GuestInput, TaikoGuestInput,
         TaikoProverData,
     },
+    l1_precompiles::{
+        clear_l1_rpc_fetcher, clear_l1_rpc_served_calls, clear_l1_staticcall_rpc_fetcher,
+        clear_l1_staticcall_rpc_served_calls, prepare_l1_precompiles_for_execution,
+        set_l1_rpc_fetcher, set_l1_staticcall_rpc_fetcher, take_l1_rpc_served_calls,
+        take_l1_staticcall_rpc_served_calls,
+    },
     proof_type::ProofType,
-    utils::txs::generate_transactions_for_batch_blocks,
+    utils::txs::{generate_transactions, generate_transactions_for_batch_blocks},
     Measurement,
 };
 use tracing::{debug, info};
 
 use util::{
-    get_batch_blocks_and_parent_data, get_block_and_parent_data, prepare_taiko_chain_batch_input,
-    prepare_taiko_chain_input,
+    extend_l1_headers_for_l1staticcall_witnesses, fetch_l1_proofs_for_rpc_served_calls,
+    fetch_l1_staticcall_witnesses, get_batch_blocks_and_parent_data, get_block_and_parent_data,
+    make_l1_staticcall_rpc_fetcher, prepare_taiko_chain_batch_input, prepare_taiko_chain_input,
 };
 
 pub use util::{
     parse_l1_batch_proposal_tx_for_pacaya_fork, parse_l1_batch_proposal_tx_for_shasta_fork,
 };
 
-mod util;
+pub(crate) mod util;
+
+/// Run the L1 precompile discovery + fetch pass for a single GuestInput that has already
+/// had its witness-driven `parent_state_trie`, `parent_storage`, `contracts`, and
+/// `ancestor_headers` populated. Mutates `input` in place to add `l1_storage_proofs`,
+/// `l1_staticcall_witnesses`, and `l1_headers`.
+///
+/// Architecture (post PR #58 — debug_executionWitness-based preflight):
+///
+/// 1. Build a temp `MemDb` from the witness data (the same data the host's verification
+///    re-execution will use later).
+/// 2. Set the `(anchor, l1_max_anchor)` precompile context — required for the precompile's
+///    block-range check to pass during discovery.
+/// 3. Install L1SLOAD + L1STATICCALL RPC fetchers pointed at the L1 RPC. The fetchers
+///    record served calls as side-effects; serving the actual L1 data is what makes the
+///    L2 re-execution succeed during discovery.
+/// 4. Re-execute the L2 block once (discovery pass).
+/// 5. Take the served-call lists.
+/// 6. Clear the fetchers — the verification re-execution must hit the cache, not RPC.
+/// 7. Fetch L1 storage proofs (`eth_getProof`) and L1STATICCALL execution witnesses
+///    (`debug_executionWitnessCall`) from the L1 RPC for each served call.
+/// 8. Populate `input.l1_storage_proofs`, `input.l1_staticcall_witnesses`, `input.l1_headers`.
+///
+/// At the end, the GuestInput carries everything the verification re-execution and the ZK
+/// guest need to populate the L1 precompile cache deterministically.
+/// Run the L1 precompile discovery for one input. The caller supplies `pool_txs` (the
+/// transaction list this block actually executes) — for a single-block path that comes from
+/// `generate_transactions(...)`, for a batch path it comes from
+/// `generate_transactions_for_batch_blocks(...)`. We must use the caller-supplied list and
+/// not re-derive it here, because realtime stores its tx data in the *batch-level*
+/// `data_sources` (per-block `taiko.tx_data` is empty), and re-deriving via
+/// `generate_transactions` would feed `decode_blob_data` an empty buffer and panic.
+async fn discover_and_fetch_l1_precompile_data(
+    input: &mut GuestInput,
+    pool_txs: Vec<TaikoTxEnvelope>,
+    l1_chain_spec: &ChainSpec,
+) -> RaikoResult<()> {
+    if !input.chain_spec.is_taiko() {
+        return Ok(());
+    }
+
+    // Discovery + harvest is the only stage that needs the synchronous L1SLOAD lock — it
+    // mutates the global precompile context and the served-calls list. The lock is held in
+    // a non-async block so the `MutexGuard` (which is `!Send`) never crosses an `await`.
+    // Subsequent L1 RPC fetches happen *after* the guard drops; the cache itself isn't read
+    // until the host's verification re-execution, which re-acquires the lock through
+    // `prepare_l1_precompiles_for_execution`.
+    let l1_rpc_url = l1_chain_spec.rpc.clone();
+    let l1_max_anchor_block_number = input.taiko.l1_header.number;
+
+    let (l1sload_served_calls, l1staticcall_served_calls) = {
+        let _l1_precompile_guard = prepare_l1_precompiles_for_execution(input)
+            .map_err(|e| RaikoError::Preflight(format!("L1 precompile prep (discovery): {e}")))?;
+        clear_l1_rpc_served_calls();
+        clear_l1_staticcall_rpc_served_calls();
+
+        // Install L1 RPC fetchers.
+        let parsed_url = reqwest::Url::parse(&l1_rpc_url)
+            .map_err(|e| RaikoError::Preflight(format!("invalid L1 RPC URL: {e}")))?;
+        let l1_client = alloy_rpc_client::ClientBuilder::default().http(parsed_url);
+        let handle = tokio::runtime::Handle::current();
+        {
+            let l1_client = l1_client.clone();
+            let handle = handle.clone();
+            set_l1_rpc_fetcher(move |address, storage_key, block_number| {
+                let client = l1_client.clone();
+                let handle = handle.clone();
+                tokio::task::block_in_place(move || {
+                    handle.block_on(async move {
+                        let block_id = alloy_rpc_types::BlockId::Number(block_number.into());
+                        let value: alloy_primitives::U256 = client
+                            .request("eth_getStorageAt", (address, storage_key, Some(block_id)))
+                            .await
+                            .map_err(|e| format!("eth_getStorageAt failed: {e}"))?;
+                        Ok(alloy_primitives::B256::from(value.to_be_bytes::<32>()))
+                    })
+                })
+            });
+        }
+        {
+            let l1_staticcall_fetcher =
+                make_l1_staticcall_rpc_fetcher(l1_rpc_url.clone(), handle)?;
+            set_l1_staticcall_rpc_fetcher(l1_staticcall_fetcher);
+        }
+
+        // Discovery re-execution. We clone `input` because RethBlockBuilder consumes the
+        // GuestInput; the verification re-execution later re-creates its own builder from
+        // the original input.
+        let discovery_input = input.clone();
+        let mut discovery_input_for_db = input.clone();
+        let db = create_mem_db(&mut discovery_input_for_db).map_err(|e| {
+            RaikoError::Preflight(format!("create_mem_db (discovery) failed: {e}"))
+        })?;
+        let mut discovery_builder = RethBlockBuilder::new(discovery_input, db);
+        if let Err(e) = discovery_builder.execute_transactions(pool_txs, false) {
+            // Don't propagate — discovery's only job is to harvest served calls. A failure
+            // here means some L1 RPC call errored mid-execution; we still take whatever was
+            // served so the user gets a clear "RPC unreachable" or similar at fetch time.
+            tracing::warn!(
+                "preflight discovery: L2 re-execution returned error \
+                 (continuing to fetch what was served): {e}"
+            );
+        }
+
+        // Take served calls, clear fetchers (so the host's verification re-execution must
+        // hit the cache, not RPC), then drop the guard.
+        let l1sload = take_l1_rpc_served_calls();
+        let l1staticcall = take_l1_staticcall_rpc_served_calls();
+        clear_l1_rpc_fetcher();
+        clear_l1_staticcall_rpc_fetcher();
+        (l1sload, l1staticcall)
+    };
+
+    info!(
+        "preflight discovery: L1SLOAD served={}, L1STATICCALL served={}",
+        l1sload_served_calls.len(),
+        l1staticcall_served_calls.len(),
+    );
+
+    // No L1 calls observed → leave input unchanged.
+    if l1sload_served_calls.is_empty() && l1staticcall_served_calls.is_empty() {
+        return Ok(());
+    }
+
+    let l1_provider = RpcBlockDataProvider::new(&l1_rpc_url).await?;
+
+    // Step 7a: L1SLOAD proofs + their L1 ancestor headers.
+    if !l1sload_served_calls.is_empty() {
+        let collection = fetch_l1_proofs_for_rpc_served_calls(
+            &l1_provider,
+            &l1sload_served_calls,
+            l1_max_anchor_block_number,
+        )
+        .await?;
+        input.l1_storage_proofs = collection.proofs;
+        input.l1_headers = collection.l1_headers;
+    }
+
+    // Step 7b + 8: L1STATICCALL witnesses (and extend l1_headers if needed).
+    if !l1staticcall_served_calls.is_empty() {
+        input.l1_staticcall_witnesses =
+            fetch_l1_staticcall_witnesses(&l1_rpc_url, &l1staticcall_served_calls).await?;
+        extend_l1_headers_for_l1staticcall_witnesses(input, &l1_provider, l1_max_anchor_block_number)
+            .await?;
+    }
+
+    Ok(())
+}
 
 pub struct PreflightData {
     pub block_number: u64,
@@ -159,6 +314,25 @@ pub async fn preflight<BDP: BlockDataProvider>(
     };
 
     info!("preflight: witness-based input done");
+
+    // L1 precompile discovery + witness collection. The L2 block witness fetched above
+    // covers L2 state but not the L1 data the L1SLOAD/L1STATICCALL precompiles fetched at
+    // L2 execution time. We re-execute the L2 block locally with L1 RPC fetchers installed
+    // to discover what L1 data is needed, then fetch verifiable proofs/witnesses from L1.
+    //
+    // The single-block `preflight()` entry point doesn't support Shasta or RealTime forks
+    // (see `prepare_taiko_chain_input` in util.rs) — those go through `batch_preflight`
+    // instead. So `generate_transactions(...)` here is safe (Ontake/Pacaya/Hekla pull from
+    // `taiko.tx_data` which is non-empty for those forks).
+    let mut input = input;
+    let pool_txs = generate_transactions(
+        &input.chain_spec,
+        &input.taiko.block_proposed,
+        &input.taiko.tx_data,
+        &input.taiko.anchor_tx,
+    );
+    discover_and_fetch_l1_precompile_data(&mut input, pool_txs, &l1_chain_spec).await?;
+
     Ok(input)
 }
 
@@ -354,6 +528,30 @@ pub async fn batch_preflight<BDP: BlockDataProvider>(
             ancestor_headers,
             ..input
         });
+    }
+
+    // L1 precompile discovery + witness collection — per-block, mirrors the single-block
+    // path above. Each input in the batch gets its own (anchor, l1_max_anchor) context and
+    // its own served-call set, so we run discovery sequentially. The global precompile lock
+    // serializes the cache state across the per-block iterations.
+    //
+    // Reuse the per-block `pool_txs_list` we already computed via
+    // `generate_transactions_for_batch_blocks` (which decodes from the *batch-level*
+    // `data_sources` — required for Shasta + RealTime where per-block `taiko.tx_data` is
+    // empty). Calling `generate_transactions` per-block here would panic in
+    // `decode_blob_data` for those forks.
+    let final_with_pool_txs = final_inputs
+        .iter_mut()
+        .zip(pool_txs_list.iter())
+        .collect::<Vec<_>>();
+    for (input, (pool_txs, _is_force_inclusion)) in final_with_pool_txs {
+        // Prepend the anchor tx — RethBlockBuilder.execute_transactions expects the anchor
+        // first, matching `Raiko::execute_transaction_batch` in core/src/lib.rs.
+        let mut full_pool_txs = vec![input.taiko.anchor_tx.clone().ok_or_else(|| {
+            RaikoError::Preflight("missing anchor tx in batch input".to_string())
+        })?];
+        full_pool_txs.extend_from_slice(pool_txs.as_slice());
+        discover_and_fetch_l1_precompile_data(input, full_pool_txs, &l1_chain_spec).await?;
     }
 
     Ok(GuestBatchInput {

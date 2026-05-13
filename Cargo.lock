@@ -120,7 +120,7 @@ dependencies = [
 [[package]]
 name = "alethia-reth-block"
 version = "0.6.0"
-source = "git+https://github.com/NethermindEth/alethia-reth.git?branch=real-time-proving-migration#93ac809a39652ddad3f5710b39628b3a9a89f18e"
+source = "git+https://github.com/NethermindEth/alethia-reth.git?branch=jmadibekov%2Fl1precompiles-realtime#9773e0e23b7a190049eb8e5fde11a4a6f0bf865e"
 dependencies = [
  "alethia-reth-chainspec",
  "alethia-reth-consensus",
@@ -152,7 +152,7 @@ dependencies = [
 [[package]]
 name = "alethia-reth-chainspec"
 version = "0.6.0"
-source = "git+https://github.com/NethermindEth/alethia-reth.git?branch=real-time-proving-migration#93ac809a39652ddad3f5710b39628b3a9a89f18e"
+source = "git+https://github.com/NethermindEth/alethia-reth.git?branch=jmadibekov%2Fl1precompiles-realtime#9773e0e23b7a190049eb8e5fde11a4a6f0bf865e"
 dependencies = [
  "alloy-chains",
  "alloy-consensus",
@@ -175,7 +175,7 @@ dependencies = [
 [[package]]
 name = "alethia-reth-consensus"
 version = "0.6.0"
-source = "git+https://github.com/NethermindEth/alethia-reth.git?branch=real-time-proving-migration#93ac809a39652ddad3f5710b39628b3a9a89f18e"
+source = "git+https://github.com/NethermindEth/alethia-reth.git?branch=jmadibekov%2Fl1precompiles-realtime#9773e0e23b7a190049eb8e5fde11a4a6f0bf865e"
 dependencies = [
  "alethia-reth-chainspec",
  "alethia-reth-evm",
@@ -208,7 +208,7 @@ dependencies = [
 [[package]]
 name = "alethia-reth-evm"
 version = "0.6.0"
-source = "git+https://github.com/NethermindEth/alethia-reth.git?branch=real-time-proving-migration#93ac809a39652ddad3f5710b39628b3a9a89f18e"
+source = "git+https://github.com/NethermindEth/alethia-reth.git?branch=jmadibekov%2Fl1precompiles-realtime#9773e0e23b7a190049eb8e5fde11a4a6f0bf865e"
 dependencies = [
  "alloy-evm",
  "alloy-primitives",
@@ -224,7 +224,7 @@ dependencies = [
 [[package]]
 name = "alethia-reth-primitives"
 version = "0.6.0"
-source = "git+https://github.com/NethermindEth/alethia-reth.git?branch=real-time-proving-migration#93ac809a39652ddad3f5710b39628b3a9a89f18e"
+source = "git+https://github.com/NethermindEth/alethia-reth.git?branch=jmadibekov%2Fl1precompiles-realtime#9773e0e23b7a190049eb8e5fde11a4a6f0bf865e"
 dependencies = [
  "alethia-reth-chainspec",
  "alethia-reth-consensus",
@@ -9495,6 +9495,7 @@ dependencies = [
  "alloy-rlp-derive",
  "alloy-rpc-types",
  "alloy-sol-types",
+ "alloy-trie",
  "anyhow",
  "async-trait",
  "base64 0.22.1",
@@ -9529,6 +9530,7 @@ dependencies = [
  "serde",
  "serde_json",
  "serde_with",
+ "serial_test 2.0.0",
  "sha2",
  "thiserror 1.0.69",
  "thiserror-no-std",
