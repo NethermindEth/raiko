@@ -28,15 +28,12 @@ pub struct WitnessDb {
 
 impl WitnessDb {
     /// Builds a `WitnessDb` from a raw `ExecutionWitness`, verifying the state root.
+    ///
+    /// Falls back to RLP-decoding `witness.headers` to populate the BLOCKHASH-opcode
+    /// lookup table. Prefer [`Self::build_with_block_hashes`] when the caller has already
+    /// decoded the headers (e.g. the L1STATICCALL verifier does so during its trusted-
+    /// chain binding check) to avoid the redundant second decode pass.
     pub fn build(witness: &ExecutionWitness, state_root: B256) -> Result<Self> {
-        let (state_trie, storage) = witness_to_tries(state_root, witness)?;
-
-        let mut codes: HashMap<B256, Bytes> = HashMap::new();
-        for raw_code in &witness.codes {
-            let hash: B256 = keccak(raw_code.as_ref()).into();
-            codes.insert(hash, raw_code.clone());
-        }
-
         let mut block_hashes: HashMap<u64, B256> = HashMap::new();
         for header_bytes in &witness.headers {
             let header: reth_primitives::Header =
@@ -44,6 +41,24 @@ impl WitnessDb {
                     .context("Failed to RLP-decode witness header")?;
             let header_hash = alloy_primitives::keccak256(header_bytes.as_ref());
             block_hashes.insert(header.number, header_hash);
+        }
+        Self::build_with_block_hashes(witness, state_root, block_hashes)
+    }
+
+    /// Like [`Self::build`] but takes the (already-decoded) `block_number → header_hash`
+    /// map from the caller. Used by the L1STATICCALL verifier to avoid decoding each
+    /// witness header twice (once for the trusted-chain binding check, once here).
+    pub fn build_with_block_hashes(
+        witness: &ExecutionWitness,
+        state_root: B256,
+        block_hashes: HashMap<u64, B256>,
+    ) -> Result<Self> {
+        let (state_trie, storage) = witness_to_tries(state_root, witness)?;
+
+        let mut codes: HashMap<B256, Bytes> = HashMap::new();
+        for raw_code in &witness.codes {
+            let hash: B256 = keccak(raw_code.as_ref()).into();
+            codes.insert(hash, raw_code.clone());
         }
 
         Ok(Self {

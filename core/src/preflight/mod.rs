@@ -119,31 +119,56 @@ async fn discover_and_fetch_l1_precompile_data(
             set_l1_staticcall_rpc_fetcher(l1_staticcall_fetcher);
         }
 
-        // Discovery re-execution. We clone `input` because RethBlockBuilder consumes the
-        // GuestInput; the verification re-execution later re-creates its own builder from
-        // the original input.
+        // Discovery re-execution. We deliberately clone `input` *twice*:
+        //   1. `discovery_input_for_db` — `create_mem_db` `mem::take`s `contracts` and storage
+        //      `slots` out of its argument, so we can't reuse the same struct for both the
+        //      MemDb construction and the builder.
+        //   2. `discovery_input` — `RethBlockBuilder::new` consumes the GuestInput by value,
+        //      so we need a fresh copy for the builder.
+        //
+        // Both clones are throwaway: the verification re-execution later (in the host's
+        // `Raiko::execute_transactions`) re-creates its own builder from the *original*
+        // `input` that this function mutates. Matches the existing pattern in
+        // `core/src/lib.rs::execute_transactions`.
         let discovery_input = input.clone();
         let mut discovery_input_for_db = input.clone();
         let db = create_mem_db(&mut discovery_input_for_db).map_err(|e| {
             RaikoError::Preflight(format!("create_mem_db (discovery) failed: {e}"))
         })?;
         let mut discovery_builder = RethBlockBuilder::new(discovery_input, db);
-        if let Err(e) = discovery_builder.execute_transactions(pool_txs, false) {
-            // Don't propagate — discovery's only job is to harvest served calls. A failure
-            // here means some L1 RPC call errored mid-execution; we still take whatever was
-            // served so the user gets a clear "RPC unreachable" or similar at fetch time.
-            tracing::warn!(
-                "preflight discovery: L2 re-execution returned error \
-                 (continuing to fetch what was served): {e}"
-            );
-        }
+        let exec_result = discovery_builder.execute_transactions(pool_txs, false);
 
-        // Take served calls, clear fetchers (so the host's verification re-execution must
-        // hit the cache, not RPC), then drop the guard.
+        // Take served calls FIRST so we can report them even on failure — they reveal
+        // whether the failure happened before or after any L1 reads were observed.
         let l1sload = take_l1_rpc_served_calls();
         let l1staticcall = take_l1_staticcall_rpc_served_calls();
         clear_l1_rpc_fetcher();
         clear_l1_staticcall_rpc_fetcher();
+
+        if let Err(e) = exec_result {
+            // Discovery's only job is to harvest served calls. A *clean* failure with zero
+            // served calls is fine (we proceed with empty witness sets). A failure *after*
+            // at least one served call landed is a partial-prefix signal: the host's
+            // verification re-execution will hit "no verified state root for block X" or
+            // a 3-way assertion failure far from the root cause, so we surface the served
+            // counts here so the operator can correlate.
+            if l1sload.is_empty() && l1staticcall.is_empty() {
+                tracing::warn!(
+                    "preflight discovery: L2 re-execution returned error before any L1 read \
+                     (no precompile calls observed; continuing): {e}"
+                );
+            } else {
+                tracing::error!(
+                    "preflight discovery: L2 re-execution returned error AFTER {} L1SLOAD + {} \
+                     L1STATICCALL reads were already served. This is a partial prefix — the \
+                     host's verification step may now fail with a misleading downstream error. \
+                     Underlying cause: {e}",
+                    l1sload.len(),
+                    l1staticcall.len(),
+                );
+            }
+        }
+
         (l1sload, l1staticcall)
     };
 
@@ -324,6 +349,10 @@ pub async fn preflight<BDP: BlockDataProvider>(
     // (see `prepare_taiko_chain_input` in util.rs) — those go through `batch_preflight`
     // instead. So `generate_transactions(...)` here is safe (Ontake/Pacaya/Hekla pull from
     // `taiko.tx_data` which is non-empty for those forks).
+    // Shadow `input` as mutable so `discover_and_fetch_l1_precompile_data` can populate
+    // `l1_storage_proofs` / `l1_staticcall_witnesses` / `l1_headers` in place. The above
+    // `GuestInput { ..input }` block already consumed the original binding by ownership,
+    // so this is a re-binding rather than a re-let on the same name.
     let mut input = input;
     let pool_txs = generate_transactions(
         &input.chain_spec,

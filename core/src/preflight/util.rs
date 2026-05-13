@@ -1627,15 +1627,18 @@ pub struct L1StorageProofCollection {
 ///
 /// All L1SLOAD calls go through the live L1 RPC fallback during preflight execution.
 /// The ZK prover needs Merkle proofs for these calls, so we fetch them after execution.
+///
+/// `eth_getProof` calls are issued in parallel via `futures::future::join_all`. They are
+/// independent per `(block, contract)` tuple, so on L1SLOAD-heavy blocks this is the
+/// dominant preflight latency reduction — same pattern as the companion
+/// [`fetch_l1_staticcall_witnesses`].
 pub async fn fetch_l1_proofs_for_rpc_served_calls(
     l1_provider: &RpcBlockDataProvider,
     calls: &std::collections::HashSet<(Address, B256, B256)>,
     l1_max_anchor_block_number: u64,
 ) -> RaikoResult<L1StorageProofCollection> {
-    let mut proofs = Vec::new();
-
-    // Group calls by block number, then by address, so eth_getProof requests batch storage
-    // keys per (block, contract).
+    // Group calls by block number, then by address, so each eth_getProof request batches
+    // every storage key needed for a single (block, contract) tuple.
     let mut calls_by_block: HashMap<u64, Vec<(Address, B256, B256)>> = HashMap::new();
     for (contract_address, storage_key, block_number_b256) in calls {
         let block_number_u256 = U256::from_be_bytes(block_number_b256.0);
@@ -1652,6 +1655,8 @@ pub async fn fetch_l1_proofs_for_rpc_served_calls(
     }
 
     let mut min_requested_block: Option<u64> = None;
+    // Flat list of `(block, contract, keys)` tuples — one eth_getProof per entry.
+    let mut fetch_units: Vec<(u64, Address, Vec<B256>)> = Vec::new();
     for (block_number_u64, block_calls) in &calls_by_block {
         min_requested_block = Some(
             min_requested_block.map_or(*block_number_u64, |m| m.min(*block_number_u64)),
@@ -1664,43 +1669,56 @@ pub async fn fetch_l1_proofs_for_rpc_served_calls(
                 .or_default()
                 .push(*storage_key);
         }
+        for (contract_address, keys) in keys_by_address {
+            fetch_units.push((*block_number_u64, contract_address, keys));
+        }
+    }
 
-        for (contract_address, keys) in &keys_by_address {
-            let proof = l1_provider
-                .provider()
-                .get_proof(*contract_address, keys.clone())
-                .block_id(BlockId::Number((*block_number_u64).into()))
+    // Issue all eth_getProof requests in parallel. Each future returns the raw `(block,
+    // contract, keys, proof)` tuple so the post-processing loop below can assemble
+    // `L1StorageProof` entries without further async work.
+    let fetches = fetch_units.into_iter().map(|(block, contract, keys)| {
+        let provider = l1_provider.provider();
+        async move {
+            let proof = provider
+                .get_proof(contract, keys.clone())
+                .block_id(BlockId::Number(block.into()))
                 .await
                 .map_err(|e| {
                     RaikoError::Preflight(format!(
-                        "eth_getProof failed for L1SLOAD contract={contract_address:?} \
-                         block={block_number_u64}: {e}"
+                        "eth_getProof failed for L1SLOAD contract={contract:?} block={block}: {e}"
+                    ))
+                })?;
+            Ok::<_, RaikoError>((block, contract, keys, proof))
+        }
+    });
+    let results = futures::future::join_all(fetches).await;
+
+    let mut proofs = Vec::with_capacity(calls.len());
+    for result in results {
+        let (block_number_u64, contract_address, keys, proof) = result?;
+        for storage_key_b256 in &keys {
+            let storage_proof = proof
+                .storage_proof
+                .iter()
+                .find(|p| p.key.as_b256() == *storage_key_b256)
+                .ok_or_else(|| {
+                    RaikoError::Preflight(format!(
+                        "Missing storage proof for L1SLOAD: contract={contract_address:?}, \
+                         key={storage_key_b256:?}, block={block_number_u64}"
                     ))
                 })?;
 
-            for storage_key_b256 in keys {
-                let storage_proof = proof
-                    .storage_proof
-                    .iter()
-                    .find(|p| p.key.as_b256() == *storage_key_b256)
-                    .ok_or_else(|| {
-                        RaikoError::Preflight(format!(
-                            "Missing storage proof for L1SLOAD: contract={contract_address:?}, \
-                             key={storage_key_b256:?}, block={block_number_u64}"
-                        ))
-                    })?;
+            let block_number_b256 = B256::from(U256::from(block_number_u64));
 
-                let block_number_b256 = B256::from(U256::from(*block_number_u64));
-
-                proofs.push(L1StorageProof {
-                    contract_address: *contract_address,
-                    storage_key: *storage_key_b256,
-                    block_number: block_number_b256,
-                    value: B256::from(storage_proof.value),
-                    account_proof: proof.account_proof.clone(),
-                    storage_proof: storage_proof.proof.clone(),
-                });
-            }
+            proofs.push(L1StorageProof {
+                contract_address,
+                storage_key: *storage_key_b256,
+                block_number: block_number_b256,
+                value: B256::from(storage_proof.value),
+                account_proof: proof.account_proof.clone(),
+                storage_proof: storage_proof.proof.clone(),
+            });
         }
     }
 

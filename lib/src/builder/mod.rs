@@ -258,8 +258,12 @@ pub fn calculate_block_header(input: &mut GuestInput) -> Header {
     // concurrent proving tasks can't cross-contaminate the global L1SLOAD/L1STATICCALL
     // cache mid-flight. The guard drops at function end after `mem::take(&mut builder.input)`.
     let cycle_tracker = CycleTracker::start("prepare_l1_precompiles");
+    // `calculate_block_header` is the ZK-guest entry point and currently returns plain
+    // `Header` (no `Result`). Surface the underlying error in the panic message so
+    // operators can triage from a single log line instead of reading the previous
+    // 200 lines of context.
     let _l1_precompile_guard = prepare_l1_precompiles_for_execution(input)
-        .expect("L1 precompile prep failed");
+        .unwrap_or_else(|e| panic!("L1 precompile prep failed: {e}"));
     cycle_tracker.end();
 
     let cycle_tracker = CycleTracker::start("initialize_database");
@@ -299,8 +303,10 @@ pub fn calculate_batch_blocks_final_header(input: &mut GuestBatchInput) -> Vec<T
         // Hold the L1-precompile lock across each per-block re-execution. Each block in a
         // batch gets its own (anchor, l1_max_anchor) context — clearing + re-populating
         // between blocks is intentional and matches the host preflight behavior.
+        // Same reason as in `calculate_block_header`: the batch entry point doesn't return
+        // a `Result`, so propagate the cause via the panic message.
         let _l1_precompile_guard = prepare_l1_precompiles_for_execution(&input.inputs[i])
-            .expect("L1 precompile prep failed");
+            .unwrap_or_else(|e| panic!("L1 precompile prep failed (batch block {i}): {e}"));
 
         // First, create the MemDb using a mutable reference (no clone needed —
         // create_mem_db only mem::takes `contracts` and storage `slots`).

@@ -198,7 +198,12 @@ pub fn verify_and_populate_l1_staticcall_witnesses_with_headers(
         // belong to the verified L1 chain at the same hash, or be rejected.
         //
         // Any block_number absent from `header_map` is also rejected — the witness must
-        // not claim headers outside the verified chain.
+        // not claim headers outside the verified chain. We collect the validated
+        // (block_number → witness_hash) pairs here so `WitnessDb` doesn't need to decode
+        // the same headers again — the cross-check and the BLOCKHASH lookup table share
+        // a single decode pass.
+        let mut block_hashes: HashMap<u64, B256> =
+            HashMap::with_capacity(w.execution_witness.headers.len());
         for (h_idx, hdr_bytes) in w.execution_witness.headers.iter().enumerate() {
             let hdr: Header =
                 alloy_rlp::Decodable::decode(&mut hdr_bytes.as_ref()).map_err(|e| {
@@ -218,11 +223,15 @@ pub fn verify_and_populate_l1_staticcall_witnesses_with_headers(
                  (witness={witness_hash}, trusted={trusted_hash})",
                 hdr.number,
             );
+            block_hashes.insert(hdr.number, witness_hash);
         }
 
-        // 1b. Build WitnessDb from the (now-validated) execution witness.
-        let db = WitnessDb::build(&w.execution_witness, *state_root)
-            .map_err(|e| anyhow!("L1STATICCALL #{i}: WitnessDb build: {e}"))?;
+        // 1b. Build WitnessDb from the (now-validated) execution witness. Pass the
+        // already-decoded block_hashes map to avoid a second RLP-decode pass over
+        // the witness headers.
+        let db =
+            WitnessDb::build_with_block_hashes(&w.execution_witness, *state_root, block_hashes)
+                .map_err(|e| anyhow!("L1STATICCALL #{i}: WitnessDb build: {e}"))?;
 
         let block_number = w.block_number;
         let header = header_map.get(&w.block_number).copied();
@@ -1334,6 +1343,63 @@ mod tests {
         assert!(
             msg.contains("gas_used mismatch"),
             "binding passed but later check should hit gas_used. Got: {msg}"
+        );
+    }
+
+    // ───────────────────────────────────────────────
+    // Asymmetric WitnessDb error handling — defense-in-depth coverage
+    // ───────────────────────────────────────────────
+
+    /// Regression test for the `WitnessDb::lookup_account` `Err(_) → Ok(None)` asymmetry
+    /// documented at `witness_db.rs:62-79`. A malicious prover could craft a witness
+    /// whose state trie deliberately *omits* the target contract — revm would then see
+    /// the target as having no code, execute an empty-call, and return success with an
+    /// empty output. The witness lies by claiming non-empty `return_data`, so the
+    /// three-way assertion in this verifier must catch the divergence.
+    ///
+    /// This test pins that final-line-of-defense behavior: any future change to
+    /// `lookup_account` (e.g. making `Err` propagate as a hard error) would still leave
+    /// the 3-way assertion as the canonical catch — but we need a regression test that
+    /// the assertion actually fires when the state trie hides the called contract.
+    #[test]
+    #[serial]
+    fn test_verify_catches_missing_account_via_three_way_assertion() {
+        reset_all();
+        // Build a state trie that contains ONE *unrelated* account — not the contract
+        // the witness claims to have called. The trie hash is honest (so `witness_to_tries`
+        // passes), but the target_address isn't in the trie.
+        let unrelated = Address::from([0x99u8; 20]);
+        let (other_witness, state_root, _) =
+            sload_target_witness(unrelated, 250, U256::from(0xCAFEu64));
+
+        // Re-use the (state, codes, keys) from `sload_target_witness` for the unrelated
+        // address but flip `target_address` to a different contract. revm will try to
+        // load that target, fail, treat it as empty, and return Success("", base_gas).
+        let target = Address::from([0xAAu8; 20]); // different from `unrelated`
+        let witness = L1StaticCallWitness {
+            target_address: target,
+            block_number: 250,
+            calldata: Bytes::new(),
+            // Lie: claim non-empty return_data even though revm will see an empty call.
+            return_data: Bytes::from(vec![0xDEu8, 0xADu8, 0xBEu8, 0xEFu8]),
+            gas_used: 50_000, // arbitrary, doesn't matter — we expect return_data to mismatch first
+            is_reverted: false,
+            execution_witness: other_witness.execution_witness,
+        };
+
+        let state_root_map: HashMap<u64, B256> = HashMap::from([(250, state_root)]);
+        let err = verify_test(&[witness], &state_root_map)
+            .expect_err("missing-account witness lie must be caught by 3-way assertion");
+        let msg = err.to_string();
+        assert!(
+            msg.contains("return_data mismatch"),
+            "expected return_data mismatch (revm returned empty, witness claims non-empty). \
+             Got: {msg}"
+        );
+        // The error should also surface the target address so an operator can correlate.
+        assert!(
+            msg.contains("target="),
+            "error should name the diverging target address, got: {msg}"
         );
     }
 }
