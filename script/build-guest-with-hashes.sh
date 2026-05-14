@@ -142,6 +142,27 @@ if [[ "$BUILD_LOCAL" == "true" ]]; then
         red "Run \`TARGET=zisk make install\` first (deploy-prover.sh does this in Step 3)."
         exit 1
     fi
+    # GLIBC pre-flight: the bundled riscv64-unknown-elf-gcc under ~/.sp1/riscv/
+    # links against GLIBC ≥ 2.36. Ubuntu 22.04 ships GLIBC 2.35, so the host
+    # build hits `version GLIBC_2.36 not found` mid-cargo-build. Fail loud now
+    # with a useful message instead of an opaque linker error 5 minutes in.
+    local _glibc_ver
+    if _glibc_ver=$(ldd --version 2>/dev/null | head -n1 | grep -oE '[0-9]+\.[0-9]+' | head -n1); then
+        local _major _minor
+        _major="${_glibc_ver%%.*}"
+        _minor="${_glibc_ver##*.}"
+        if (( _major < 2 || ( _major == 2 && _minor < 36 ) )); then
+            red "ERROR: GLIBC $_glibc_ver detected — --local needs GLIBC ≥ 2.36."
+            red "The bundled riscv64-unknown-elf-gcc (\$HOME/.sp1/riscv/) won't link here."
+            red "Options:"
+            red "  • Stay on the docker toolchain path (drop --local; uses ubuntu:24.04 inside)."
+            red "  • Upgrade host to Ubuntu 24.04 (GLIBC 2.39) — see surge-docs prover guide."
+            red "  • Provide a riscv64-unknown-elf-gcc built against GLIBC 2.35 and put it on PATH."
+            exit 1
+        fi
+    else
+        yellow "Could not detect GLIBC version (ldd missing?). Proceeding; build may fail at link time."
+    fi
     (
         cd "$RAIKO_ROOT"
         # Surface cargo + zisk-toolchain in PATH for non-interactive shells
