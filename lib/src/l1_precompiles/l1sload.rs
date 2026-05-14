@@ -7,33 +7,10 @@ use alloy_trie::{proof::verify_proof, Nibbles};
 use anyhow::{anyhow, bail, ensure, Context, Result};
 use reth_primitives::Header;
 use std::collections::HashMap;
-use std::sync::{LazyLock, Mutex, MutexGuard};
 use tracing::{debug, info, trace};
 
 use crate::input::L1StorageProof;
 use crate::primitives::keccak::keccak;
-
-/// Execution lock to serialize L1SLOAD cache operations across concurrent proving tasks.
-/// The L1SLOAD precompile uses global state (L1_STORAGE_CACHE, CURRENT_ANCHOR_BLOCK_ID)
-/// which is not safe for concurrent block execution. This lock must be held during the
-/// entire clear → populate → EVM execute cycle.
-static L1SLOAD_EXECUTION_LOCK: LazyLock<Mutex<()>> = LazyLock::new(|| Mutex::new(()));
-
-/// Acquire the L1SLOAD execution lock. Returns a MutexGuard that must be held
-/// during the entire populate → EVM execute cycle to prevent concurrent cache races.
-///
-/// Recovers from `PoisonError`: if a previous holder panicked while holding the lock, the
-/// next acquirer takes ownership of the inner guard via `into_inner()` instead of panicking.
-/// The next acquirer also clears the global precompile state via [`clear_l1sload_cache`] +
-/// [`super::clear_l1_staticcall_cache`] in [`super::prepare_l1_precompiles_for_execution`],
-/// so a transient panic in one proving task can't permanently wedge subsequent attempts.
-/// Without this, a single panic during preflight discovery (e.g., a flaky L1 RPC) would
-/// poison the lock and every subsequent proof would fail with the same `PoisonError`.
-pub fn acquire_l1sload_lock() -> MutexGuard<'static, ()> {
-    L1SLOAD_EXECUTION_LOCK
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner())
-}
 
 /// Verify L1SLOAD proofs via MPT against header-chain state roots, then populate the cache.
 ///
@@ -502,44 +479,44 @@ mod tests {
     // Lock poison recovery
     // ───────────────────────────────────────────────
 
-    /// Regression test for the lock-poison hardening in `acquire_l1sload_lock`.
+    /// Regression test for the lock-poison hardening in `acquire_l1_precompile_lock`.
     ///
-    /// Before commit `d47f8719`, `acquire_l1sload_lock()` called `.expect(...)` on the
+    /// Before commit `d47f8719`, the acquire function called `.expect(...)` on the
     /// `LockResult`, which panicked on `PoisonError`. A single panic during preflight
     /// discovery (e.g., an L1 RPC flake mid-execution) would poison the global
-    /// `L1SLOAD_EXECUTION_LOCK` and every subsequent proof attempt would fail with
-    /// `L1SLOAD execution lock poisoned`. The fix routes through `into_inner()` so the
-    /// next acquirer takes ownership of the inner guard and can clear state.
+    /// `L1_PRECOMPILE_EXECUTION_LOCK` and every subsequent proof attempt would fail with
+    /// `L1 precompile execution lock poisoned`. The fix routes through `into_inner()` so
+    /// the next acquirer takes ownership of the inner guard and can clear state.
     ///
     /// This test deliberately panics inside a thread holding the lock to poison it, then
-    /// asserts that the next `acquire_l1sload_lock()` call still succeeds (returns a guard
-    /// instead of panicking).
+    /// asserts that the next `acquire_l1_precompile_lock()` call still succeeds (returns
+    /// a guard instead of panicking).
     #[test]
-    fn acquire_l1sload_lock_recovers_from_poison() {
+    fn acquire_l1_precompile_lock_recovers_from_poison() {
         // Force the lock into a poisoned state by panicking while holding it. We use a
         // separate thread so the panic doesn't tear down the test process; the join
         // returns Err(_) carrying the panic payload, which we discard.
         let poisoner = std::thread::spawn(|| {
-            let _guard = super::acquire_l1sload_lock();
+            let _guard = super::super::acquire_l1_precompile_lock();
             panic!("intentional panic to poison the lock");
         });
         let _ = poisoner.join(); // Err(_) carrying the panic; ignored.
 
         // Sanity: the underlying mutex IS poisoned now.
         assert!(
-            super::L1SLOAD_EXECUTION_LOCK.is_poisoned(),
+            super::super::L1_PRECOMPILE_EXECUTION_LOCK.is_poisoned(),
             "lock must be poisoned after a thread panics while holding it"
         );
 
-        // The hardened acquire_l1sload_lock() should NOT panic — it should return a
+        // The hardened acquire_l1_precompile_lock() should NOT panic — it should return a
         // valid guard via PoisonError::into_inner().
-        let guard = super::acquire_l1sload_lock();
+        let guard = super::super::acquire_l1_precompile_lock();
         drop(guard);
 
         // After successful acquisition (and drop), the lock remains poisoned for any
-        // direct `.lock()` call, but acquire_l1sload_lock() keeps recovering — verify
-        // the second acquisition also works to lock in the regression.
-        let guard2 = super::acquire_l1sload_lock();
+        // direct `.lock()` call, but acquire_l1_precompile_lock() keeps recovering —
+        // verify the second acquisition also works to lock in the regression.
+        let guard2 = super::super::acquire_l1_precompile_lock();
         drop(guard2);
     }
 
@@ -938,13 +915,13 @@ mod tests {
     }
 
     // ───────────────────────────────────────────────
-    // acquire_l1sload_lock
+    // acquire_l1_precompile_lock
     // ───────────────────────────────────────────────
 
     #[test]
     #[serial]
     fn test_acquire_lock_returns_guard() {
-        let guard = acquire_l1sload_lock();
+        let guard = super::super::acquire_l1_precompile_lock();
         // Just verify it doesn't panic and we can drop it
         drop(guard);
     }

@@ -3,7 +3,7 @@ mod l1staticcall;
 pub(crate) mod witness_db;
 
 use std::collections::HashMap;
-use std::sync::MutexGuard;
+use std::sync::{LazyLock, Mutex, MutexGuard};
 
 use anyhow::{anyhow, Result};
 use reth_primitives::Header;
@@ -13,8 +13,8 @@ use crate::anchor::get_anchor_tx_info_by_fork;
 use crate::input::GuestInput;
 
 pub use l1sload::{
-    acquire_l1sload_lock, build_verified_state_root_map, clear_l1sload_cache,
-    populate_l1sload_cache, verify_and_populate_l1sload_proofs,
+    build_verified_state_root_map, clear_l1sload_cache, populate_l1sload_cache,
+    verify_and_populate_l1sload_proofs,
 };
 
 pub use l1staticcall::{
@@ -34,6 +34,39 @@ pub use alethia_reth_evm::precompiles::l1staticcall::{
     take_l1_staticcall_rpc_served_calls, L1StaticCallRecord,
 };
 
+/// Execution lock that serializes the `prepare → execute → finalize` cycle for both the
+/// L1SLOAD and the L1STATICCALL precompiles. Both precompiles read the same process-global
+/// state — the shared `(anchor, l1_max_anchor)` context plus per-precompile caches, fetchers,
+/// and served-call lists — so any concurrent execution would cross-contaminate cache hits
+/// and produce incorrect proofs. One lock covers both because the call sites always wrap the
+/// whole `prepare_l1_precompiles_for_execution` cycle, which sets up state for both at once.
+///
+/// **Trade-off.** Holding this lock through proof construction serializes proving tasks that
+/// would otherwise run in parallel. That is acceptable for the current real-time deployment
+/// where the host config pins `concurrency_limit = 1` (see `simple-surge-node/configs/config.json`)
+/// and each Zisk proof is itself driven by a single `tokio::task::spawn_blocking` — so the
+/// lock is never contended in practice. Lifting the limit above 1 would require redesigning
+/// the precompiles to take per-call context instead of relying on these globals; until that
+/// happens, the lock is the correctness boundary.
+static L1_PRECOMPILE_EXECUTION_LOCK: LazyLock<Mutex<()>> = LazyLock::new(|| Mutex::new(()));
+
+/// Acquire the L1 precompile execution lock. Returns a `MutexGuard` that must be held
+/// during the entire `clear → populate → EVM execute → finalize` cycle to prevent
+/// concurrent cache races between the L1SLOAD and L1STATICCALL precompiles.
+///
+/// Recovers from `PoisonError`: if a previous holder panicked while holding the lock, the
+/// next acquirer takes ownership of the inner guard via `into_inner()` instead of panicking.
+/// The next acquirer also clears the global precompile state via [`reset_l1_precompile_state`]
+/// in [`prepare_l1_precompiles_for_execution`], so a transient panic in one proving task
+/// can't permanently wedge subsequent attempts. Without this, a single panic during preflight
+/// discovery (e.g., a flaky L1 RPC) would poison the lock and every subsequent proof would
+/// fail with the same `PoisonError`.
+pub fn acquire_l1_precompile_lock() -> MutexGuard<'static, ()> {
+    L1_PRECOMPILE_EXECUTION_LOCK
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
 /// Reset every piece of L1 precompile global state to a known-clean baseline.
 ///
 /// `clear_l1sload_cache` already sweeps the L1SLOAD half (cache + context + fetcher +
@@ -41,7 +74,7 @@ pub use alethia_reth_evm::precompiles::l1staticcall::{
 /// historically only cleared its cache; if a previous task panicked between
 /// `set_l1_staticcall_rpc_fetcher` and `clear_l1_staticcall_rpc_fetcher`, a stale
 /// fetcher could survive into the next proving task — recovered via
-/// `acquire_l1sload_lock`'s poison-into-inner — and silently fire during discovery.
+/// `acquire_l1_precompile_lock`'s poison-into-inner — and silently fire during discovery.
 /// Sweeping both halves here makes the lock-recovery path resilient.
 fn reset_l1_precompile_state() {
     clear_l1sload_cache();
@@ -77,7 +110,7 @@ fn reset_l1_precompile_state() {
 /// guest (witness-driven re-execution); the precompile state machine is identical in both
 /// contexts.
 pub fn prepare_l1_precompiles_for_execution(input: &GuestInput) -> Result<MutexGuard<'static, ()>> {
-    let guard = acquire_l1sload_lock();
+    let guard = acquire_l1_precompile_lock();
 
     reset_l1_precompile_state();
 
