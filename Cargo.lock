@@ -120,7 +120,7 @@ dependencies = [
 [[package]]
 name = "alethia-reth-block"
 version = "0.6.0"
-source = "git+https://github.com/NethermindEth/alethia-reth.git?rev=ce208bb#ce208bb5c03cc8d3c6b9dc9ba3ad2c594851601e"
+source = "git+https://github.com/NethermindEth/alethia-reth.git?rev=5e87092#5e8709289f9b3f46f61ee2b2b2320b2962385288"
 dependencies = [
  "alethia-reth-chainspec",
  "alethia-reth-consensus",
@@ -152,7 +152,7 @@ dependencies = [
 [[package]]
 name = "alethia-reth-chainspec"
 version = "0.6.0"
-source = "git+https://github.com/NethermindEth/alethia-reth.git?rev=ce208bb#ce208bb5c03cc8d3c6b9dc9ba3ad2c594851601e"
+source = "git+https://github.com/NethermindEth/alethia-reth.git?rev=5e87092#5e8709289f9b3f46f61ee2b2b2320b2962385288"
 dependencies = [
  "alloy-chains",
  "alloy-consensus",
@@ -175,7 +175,7 @@ dependencies = [
 [[package]]
 name = "alethia-reth-consensus"
 version = "0.6.0"
-source = "git+https://github.com/NethermindEth/alethia-reth.git?rev=ce208bb#ce208bb5c03cc8d3c6b9dc9ba3ad2c594851601e"
+source = "git+https://github.com/NethermindEth/alethia-reth.git?rev=5e87092#5e8709289f9b3f46f61ee2b2b2320b2962385288"
 dependencies = [
  "alethia-reth-chainspec",
  "alethia-reth-evm",
@@ -208,7 +208,7 @@ dependencies = [
 [[package]]
 name = "alethia-reth-evm"
 version = "0.6.0"
-source = "git+https://github.com/NethermindEth/alethia-reth.git?rev=ce208bb#ce208bb5c03cc8d3c6b9dc9ba3ad2c594851601e"
+source = "git+https://github.com/NethermindEth/alethia-reth.git?rev=5e87092#5e8709289f9b3f46f61ee2b2b2320b2962385288"
 dependencies = [
  "alloy-evm",
  "alloy-primitives",
@@ -224,7 +224,7 @@ dependencies = [
 [[package]]
 name = "alethia-reth-primitives"
 version = "0.6.0"
-source = "git+https://github.com/NethermindEth/alethia-reth.git?rev=ce208bb#ce208bb5c03cc8d3c6b9dc9ba3ad2c594851601e"
+source = "git+https://github.com/NethermindEth/alethia-reth.git?rev=5e87092#5e8709289f9b3f46f61ee2b2b2320b2962385288"
 dependencies = [
  "alethia-reth-chainspec",
  "alethia-reth-consensus",
