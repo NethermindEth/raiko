@@ -6,6 +6,7 @@ use raiko_lib::{
     builder::{create_mem_db, RethBlockBuilder},
     consts::ChainSpec,
     input::{GuestBatchInput, GuestBatchOutput, GuestInput, GuestOutput, TaikoProverData},
+    l1_precompiles::prepare_l1_precompiles_for_execution,
     protocol_instance::ProtocolInstance,
     prover::{IdStore, IdWrite, Proof, ProofKey},
     utils::txs::{generate_transactions, generate_transactions_for_batch_blocks},
@@ -126,6 +127,13 @@ impl Raiko {
     }
 
     fn execute_transactions(&self, input: &GuestInput) -> RaikoResult<()> {
+        // Hold the L1-precompile lock across the entire prepare → execute → finalize cycle so
+        // concurrent proving tasks can't cross-contaminate the global L1SLOAD/L1STATICCALL
+        // cache mid-flight.
+        let _l1_precompile_guard = prepare_l1_precompiles_for_execution(input).map_err(|e| {
+            RaikoError::Guest(raiko_lib::prover::ProverError::GuestError(e.to_string()))
+        })?;
+
         let mut input_owned = input.clone();
         let db = create_mem_db(&mut input_owned)
             .map_err(|e| RaikoError::Preflight(format!("create_mem_db failed: {e}")))?;
@@ -136,9 +144,10 @@ impl Raiko {
             &input.taiko.tx_data,
             &input.taiko.anchor_tx,
         );
-        builder
-            .execute_transactions(pool_tx, false)
-            .expect("execute");
+        builder.execute_transactions(pool_tx, false).map_err(|e| {
+            warn!("Block re-execution failed: {e}");
+            RaikoError::Guest(raiko_lib::prover::ProverError::GuestError(e.to_string()))
+        })?;
         let result = builder.finalize();
 
         let header = result.map_err(|e| {
@@ -210,6 +219,14 @@ impl Raiko {
         origin_pool_txs: Vec<TaikoTxEnvelope>,
         input: &GuestInput,
     ) -> RaikoResult<()> {
+        // Hold the L1-precompile lock across prepare → execute → finalize for the same reason
+        // as in `execute_transactions`. Each per-block re-execution in a batch gets its own
+        // (anchor, l1_max_anchor) context — clearing + re-populating between blocks is
+        // intentional.
+        let _l1_precompile_guard = prepare_l1_precompiles_for_execution(input).map_err(|e| {
+            RaikoError::Guest(raiko_lib::prover::ProverError::GuestError(e.to_string()))
+        })?;
+
         let mut input_owned = input.clone();
         let db = create_mem_db(&mut input_owned)
             .map_err(|e| RaikoError::Preflight(format!("create_mem_db failed: {e}")))?;
@@ -218,9 +235,10 @@ impl Raiko {
         let mut pool_txs = vec![input.taiko.anchor_tx.clone().unwrap()];
         pool_txs.extend_from_slice(&origin_pool_txs.as_slice());
 
-        builder
-            .execute_transactions(pool_txs, false)
-            .expect("execute");
+        builder.execute_transactions(pool_txs, false).map_err(|e| {
+            warn!("Batch block re-execution failed: {e}");
+            RaikoError::Guest(raiko_lib::prover::ProverError::GuestError(e.to_string()))
+        })?;
         let result = builder.finalize_block();
 
         match result {

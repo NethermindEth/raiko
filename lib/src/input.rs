@@ -41,6 +41,53 @@ use reth_primitives::serde_bincode_compat::Block as BincodeCompactBlock;
 /// required values.
 pub type StorageEntry = (MptNode, Vec<U256>);
 
+/// L1 storage proof for L1SLOAD precompile calls.
+///
+/// Collected during preflight by walking the served-calls list from the L1SLOAD precompile,
+/// then calling `eth_getProof` on the L1 node for each `(contract, key, block)` triple. The
+/// guest re-verifies the proofs against the trusted L1 state root before populating the
+/// L1SLOAD cache for actual L2 block re-execution.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct L1StorageProof {
+    pub contract_address: Address,
+    pub storage_key: B256,
+    pub block_number: B256,
+    pub value: B256,
+    pub account_proof: Vec<Bytes>,
+    pub storage_proof: Vec<Bytes>,
+}
+
+/// Execution witness for a single L1STATICCALL — contains everything needed to statelessly
+/// re-execute the L1 view function call inside the ZK guest.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct L1StaticCallWitness {
+    pub target_address: Address,
+    pub block_number: u64,
+    pub calldata: Bytes,
+    pub return_data: Bytes,
+    /// Actual gas consumed on L1, as reported by `debug_traceCall`.
+    pub gas_used: u64,
+    #[serde(default)]
+    pub is_reverted: bool,
+    pub execution_witness: ExecutionWitness,
+}
+
+/// Self-contained witness package returned by NMC's `debug_executionWitnessCall`. Holds the
+/// MPT trie node preimages, contract bytecodes, key preimages, and ancestor block headers
+/// that the L1 view function touches. Used by the ZK guest to rebuild a `WitnessDb` against
+/// which revm re-executes the call.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct ExecutionWitness {
+    /// MPT trie node preimages.
+    pub state: Vec<Bytes>,
+    /// Contract bytecodes touched during the call.
+    pub codes: Vec<Bytes>,
+    /// Unhashed addresses and storage slots — cleartext keys for hashed-trie paths.
+    pub keys: Vec<Bytes>,
+    /// RLP-encoded block headers needed to satisfy `BLOCKHASH` opcode lookups.
+    pub headers: Vec<Bytes>,
+}
+
 /// External block input.
 #[serde_as]
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
@@ -64,6 +111,20 @@ pub struct GuestInput {
     pub ancestor_headers: Vec<Header>,
     /// Taiko specific data
     pub taiko: TaikoGuestInput,
+    /// L1 storage proofs for L1SLOAD precompile calls executed in this L2 block.
+    #[serde(default)]
+    pub l1_storage_proofs: Vec<L1StorageProof>,
+    /// L1 ancestor headers ordered oldest→newest, ending just below the L1 max-anchor block
+    /// (i.e., the highest header is `taiko.l1_header.parent_hash`'s block). Used by the L1
+    /// precompile guest to verify the backward chain walk from the trusted L1 max-anchor
+    /// header. The trust root itself is `taiko.l1_header`, anchored on-chain via
+    /// `maxAnchorBlockHash` (RealTime) / `originBlockHash` (Shasta).
+    #[serde_as(as = "Vec<BincodeCompactHeader>")]
+    #[serde(default)]
+    pub l1_headers: Vec<Header>,
+    /// L1STATICCALL execution witnesses for ZK guest verification.
+    #[serde(default)]
+    pub l1_staticcall_witnesses: Vec<L1StaticCallWitness>,
 }
 
 #[serde_as]
@@ -617,6 +678,9 @@ mod test {
             contracts: vec![],
             ancestor_headers: vec![],
             taiko: TaikoGuestInput::default(),
+            l1_storage_proofs: vec![],
+            l1_headers: vec![],
+            l1_staticcall_witnesses: vec![],
         };
         let input_ser = serde_json::to_string(&input).unwrap();
         let input_de: GuestInput = serde_json::from_str(&input_ser).unwrap();
@@ -634,6 +698,9 @@ mod test {
             contracts: vec![],
             ancestor_headers: vec![],
             taiko: TaikoGuestInput::default(),
+            l1_storage_proofs: vec![],
+            l1_headers: vec![],
+            l1_staticcall_witnesses: vec![],
         };
         let input_ser = serde_json::to_value(&input).unwrap();
         let input_de: GuestInput = serde_json::from_value(input_ser).unwrap();

@@ -7,3 +7,4 @@ pub use alloy_primitives::*;
 pub mod eip4844;
 pub mod keccak;
 pub mod mpt;
+pub mod witness;
