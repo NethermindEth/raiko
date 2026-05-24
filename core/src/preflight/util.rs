@@ -353,6 +353,8 @@ async fn prepare_pacaya_batch_input(
             blob_proof_type: blob_proof_type.clone(),
             is_forced_inclusion: is_forced_inclusion,
         }],
+        privacy_symmetric_key: None,
+        privacy_fi_private_key: None,
     })
 }
 
@@ -428,6 +430,8 @@ async fn prepare_shasta_batch_input(
         prover_data: prover_data,
         l2_grandparent_header: grandparent_header,
         data_sources,
+        privacy_symmetric_key: None,
+        privacy_fi_private_key: None,
     })
 }
 
@@ -574,6 +578,7 @@ async fn prepare_taiko_chain_batch_input_realtime(
     for derivation_source in realtime_event_data.proposal.sources.clone() {
         let blob_hashes = derivation_source.blobSlice.blobHashes;
         let l1_blob_timestamp: u64 = derivation_source.blobSlice.timestamp.to();
+        let is_forced_inclusion = derivation_source.isForcedInclusion;
 
         let (tx_data_from_calldata, blob_tx_buffers_with_proofs) = if blob_hashes.is_empty() {
             unimplemented!("calldata txlist is not supported in realtime");
@@ -641,11 +646,19 @@ async fn prepare_taiko_chain_batch_input_realtime(
                 .map(|(_, _, proof)| proof.clone())
                 .collect(),
             blob_proof_type: blob_proof_type.clone(),
-            is_forced_inclusion: false, // RealTime: forced inclusions removed
+            is_forced_inclusion,
         });
     }
 
     // 5. Return TaikoGuestBatchInput
+    //
+    // Privacy keys are read from operator env vars at preflight time. The guest verifies
+    // these against compile-time keccak256 hashes (`SURGE_PRIVACY_*_KEY_HASH`) baked into
+    // its binary, so a runtime mismatch produces an unverifiable proof rather than silent
+    // wrong-key decryption.
+    let privacy_symmetric_key = parse_hex_32_env("SURGE_PRIVACY_SYMMETRIC_KEY");
+    let privacy_fi_private_key = parse_hex_32_env("SURGE_PRIVACY_FI_PRIVKEY");
+
     Ok(TaikoGuestBatchInput {
         batch_id: 0, // RealTime has no on-chain proposal ID
         batch_proposed: BlockProposedFork::RealTime(realtime_event_data),
@@ -658,7 +671,31 @@ async fn prepare_taiko_chain_batch_input_realtime(
         prover_data,
         l2_grandparent_header: grandparent_header,
         data_sources,
+        privacy_symmetric_key,
+        privacy_fi_private_key,
     })
+}
+
+/// Reads a hex-encoded (with or without `0x` prefix) 32-byte value from the named env
+/// var. Returns `None` if the env var is unset; logs a warning if it is set but malformed.
+fn parse_hex_32_env(name: &str) -> Option<[u8; 32]> {
+    let raw = std::env::var(name).ok()?;
+    let s = raw.strip_prefix("0x").unwrap_or(&raw);
+    match hex::decode(s) {
+        Ok(bytes) if bytes.len() == 32 => {
+            let mut arr = [0u8; 32];
+            arr.copy_from_slice(&bytes);
+            Some(arr)
+        }
+        Ok(bytes) => {
+            tracing::warn!("{name}: expected 32 bytes, got {}", bytes.len());
+            None
+        }
+        Err(e) => {
+            tracing::warn!("{name}: invalid hex: {e}");
+            None
+        }
+    }
 }
 
 /// Prepare the input for a Taiko chain

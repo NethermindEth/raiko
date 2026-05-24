@@ -9,7 +9,23 @@ use crate::input::GuestBatchInput;
 use crate::manifest::DerivationSourceManifest;
 #[cfg(not(feature = "std"))]
 use crate::no_std::*;
+use crate::privacy::{self, DecryptKeys};
 use crate::utils::blobs::{decode_blob_data, zlib_decompress_data};
+
+/// Parses a hex-encoded 32-byte value (with or without `0x` prefix) at compile time
+/// or runtime. Returns `None` on malformed input.
+fn parse_hex_32(s: &str) -> Option<[u8; 32]> {
+    let s = s.strip_prefix("0x").unwrap_or(s);
+    if s.len() != 64 {
+        return None;
+    }
+    let mut out = [0u8; 32];
+    for i in 0..32 {
+        let byte = u8::from_str_radix(&s[i * 2..i * 2 + 2], 16).ok()?;
+        out[i] = byte;
+    }
+    Some(out)
+}
 use crate::utils::shasta_rules::{
     clamp_timestamp_lower_bound, validate_force_inc_proposal_manifest, validate_input_block_param,
     validate_realtime_proposal_manifest, validate_shasta_block_base_fee,
@@ -81,6 +97,38 @@ pub fn generate_transactions_for_realtime_blocks(
     let mut last_parent_block_timestamp = last_parent_block_header.timestamp;
     let mut last_parent_block_gas_limit = last_parent_block_header.gas_limit;
 
+    // Privacy keys forwarded by the host. Identical for every source within a batch.
+    //
+    // Bind the witness keys to compile-time hashes baked into the guest. The hash
+    // hex is provided via `SURGE_PRIVACY_*_KEY_HASH` build-time env vars; when
+    // unset we fall back to `0x00..00` and bypass the check (non-privacy builds).
+    // The hash check is what makes the proof's vkey commit to the keys without
+    // leaking the secret bytes through the public input.
+    if let Some(ref key) = taiko_guest_batch_input.privacy_symmetric_key {
+        if let Some(hash_hex) = option_env!("SURGE_PRIVACY_SYMMETRIC_KEY_HASH") {
+            if let Some(expected) = parse_hex_32(hash_hex) {
+                if expected != [0u8; 32] {
+                    privacy::assert_key_hash(key, &expected)
+                        .expect("privacy symmetric key hash mismatch — guest vkey rejects this key");
+                }
+            }
+        }
+    }
+    if let Some(ref key) = taiko_guest_batch_input.privacy_fi_private_key {
+        if let Some(hash_hex) = option_env!("SURGE_PRIVACY_FI_PRIVKEY_HASH") {
+            if let Some(expected) = parse_hex_32(hash_hex) {
+                if expected != [0u8; 32] {
+                    privacy::assert_key_hash(key, &expected)
+                        .expect("privacy FI private key hash mismatch — guest vkey rejects this key");
+                }
+            }
+        }
+    }
+    let privacy_keys = DecryptKeys {
+        symmetric: taiko_guest_batch_input.privacy_symmetric_key,
+        fi_private: taiko_guest_batch_input.privacy_fi_private_key,
+    };
+
     for (idx, data_source) in data_sources.iter().enumerate() {
         let use_blob = batch_proposal.blob_used();
         let compressed_tx_list_buf = if use_blob {
@@ -99,7 +147,23 @@ pub fn generate_transactions_for_realtime_blocks(
                         .map(|s| s.to_vec())
                 })
                 .unwrap_or_default();
-            sliced
+
+            // Privacy: dispatch on the leading scheme byte. For scheme 0x00 this is a
+            // pass-through (returns the bytes after the prefix). For 0x01 / 0x02 this
+            // decrypts using the witness-supplied keys. On failure for non-FI sources
+            // the caller will fall through to the default-manifest fallback below
+            // (matching the driver's behavior); for FI sources the same fallback path
+            // already handles arbitrary garbage payloads.
+            match privacy::dispatch_decrypt(&sliced, &privacy_keys) {
+                Ok(plaintext) => plaintext,
+                Err(e) => {
+                    warn!(
+                        "privacy dispatch failed for source idx={}, is_forced_inclusion={}: {:?}",
+                        idx, data_source.is_forced_inclusion, e
+                    );
+                    Vec::new()
+                }
+            }
         } else {
             unreachable!("realtime does not use calldata");
         };

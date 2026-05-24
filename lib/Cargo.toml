@@ -28,8 +28,12 @@ alloy-chains = { workspace = true }
 alloy-trie = { workspace = true }
 
 # Crypto deps (re-exported for guest crate)
-k256 = { version = "0.13", default-features = false, features = ["ecdsa"] }
+k256 = { version = "0.13", default-features = false, features = ["ecdsa", "ecdh"] }
 tiny-keccak = { version = "2.0", features = ["keccak"] }
+
+# Privacy / blob encryption (no_std-compatible RustCrypto crates).
+aes-gcm = { version = "0.10", default-features = false, features = ["aes", "alloc"] }
+hkdf = { version = "0.12", default-features = false }
 
 # errors
 anyhow = { workspace = true }
