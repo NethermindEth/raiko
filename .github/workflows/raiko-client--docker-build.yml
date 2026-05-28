@@ -123,10 +123,6 @@ jobs:
           platforms: ${{ matrix.platform }}
           context: .
           file: ./${{ matrix.dockerfile }}
-          # Empty target → docker/build-push-action ignores the field and
-          # builds the final stage (Dockerfile default). Set per matrix entry
-          # so the toolchain variant stops at the guest-builder stage instead
-          # of producing the full runtime image.
           target: ${{ matrix.target }}
           push: true
           tags: ${{ env.DOCKER_REGISTRY }}/${{ matrix.repository }}
@@ -142,11 +138,6 @@ jobs:
       - name: Upload digest
         uses: actions/upload-artifact@v5
         with:
-          # Double-dash separator between variant and platform so the merge
-          # job's `digests-<variant>--*` pattern doesn't accidentally match
-          # longer variants. Single-dash matched `digests-zk-*` against both
-          # `digests-zk-linux-amd64` AND `digests-zk-toolchain-linux-amd64`,
-          # mixing two repos' manifest digests and failing imagetools create.
           name: digests-${{ matrix.variant }}--${{ env.PLATFORM_PAIR }}
           path: /tmp/digests/*
           if-no-files-found: error
@@ -170,9 +161,6 @@ jobs:
         uses: actions/download-artifact@v6
         with:
           path: /tmp/digests
-          # Double-dash anchors the variant so e.g. `digests-zk--*` doesn't
-          # also pull in `digests-zk-toolchain--linux-amd64`. See the upload
-          # step's name pattern.
           pattern: digests-${{ matrix.variant }}--*
           merge-multiple: true
 
