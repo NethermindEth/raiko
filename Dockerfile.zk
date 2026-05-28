@@ -73,22 +73,6 @@ FROM toolchain-installer AS guest-builder
 ENV ZISK_RUSTC=/opt/zisk-toolchain/bin/rustc
 ENV ZISK_TOOLCHAIN_DIR=/opt/zisk-toolchain
 
-# Surge privacy-mode hashes (scheme 0x01 symmetric + scheme 0x02 FI).
-# Consumed at compile time by lib/src/utils/realtime.rs via `option_env!()`
-# and baked into the guest ELF. The matching plaintext keys are supplied
-# at runtime via SURGE_PRIVACY_SYMMETRIC_KEY / SURGE_PRIVACY_FI_PRIVKEY env
-# vars on the host; the guest's hash check enforces keccak(key) == hash.
-#
-# Two ways these arrive:
-#   - CI build: empty defaults → guest is built with privacy as a no-op.
-#     The published surge-raiko-zk-toolchain image carries this default.
-#   - Local rebuild on the prover VM: build-guest-with-hashes.sh runs
-#     `TARGET=zisk make guest` inside the toolchain image with the operator's
-#     hashes exported as env, re-compiles only this stage's guest crates,
-#     and the resulting ELFs override the image defaults via bind-mount.
-#
-# Generate the values with simple-surge-node's
-# surge-taiko-mono/packages/protocol/script/keygen/surge-privacy-keygen.sh.
 ARG SURGE_PRIVACY_SYMMETRIC_KEY_HASH=
 ARG SURGE_PRIVACY_FI_PRIVKEY_HASH=
 ENV SURGE_PRIVACY_SYMMETRIC_KEY_HASH=${SURGE_PRIVACY_SYMMETRIC_KEY_HASH}
@@ -165,24 +149,6 @@ FROM nvidia/cuda:12.4.0-devel-ubuntu22.04 AS builder
 ENV DEBIAN_FRONTEND=noninteractive
 ARG BUILD_FLAGS=""
 
-# Surge privacy-mode hashes (host-side, optional).
-#
-# In the canonical split-build flow these are NOT set: CI publishes the
-# host with empty defaults, the guest is rebuilt separately on the prover
-# VM via build-guest-with-hashes.sh, and the locally-built guest ELFs are
-# bind-mounted over the image's defaults. The host's own `option_env!()`
-# check in `lib::utils::realtime` is bypassed when these are empty, so it
-# just decrypts with the runtime key and forwards to the guest — which is
-# the authoritative enforcer of the keccak(runtime_key) == baked_hash
-# binding.
-#
-# They're kept here as an opt-in defense-in-depth knob for one-shot
-# monolithic builds (e.g. air-gapped / no registry access for the
-# toolchain image), where you'd run:
-#   docker build -f Dockerfile.zk \
-#     --build-arg SURGE_PRIVACY_SYMMETRIC_KEY_HASH=0x... \
-#     --build-arg SURGE_PRIVACY_FI_PRIVKEY_HASH=0x... .
-# and end up with both host and guest bound to the same hashes.
 ARG SURGE_PRIVACY_SYMMETRIC_KEY_HASH=
 ARG SURGE_PRIVACY_FI_PRIVKEY_HASH=
 ENV SURGE_PRIVACY_SYMMETRIC_KEY_HASH=${SURGE_PRIVACY_SYMMETRIC_KEY_HASH}

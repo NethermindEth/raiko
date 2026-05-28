@@ -221,15 +221,6 @@ ensure_zisk_proving_keys() {
     fi
 }
 
-# Constant trees are tied to the cargo-zisk binary's expected layout. When
-# ensure_zisk_proving_keys reuses an existing $ZISK_DIR/provingKey (e.g. a
-# May-4 install that pre-dates a newer cargo-zisk), the const trees on disk
-# can mismatch what the current cargo-zisk's proofman runtime walks. Symptom
-# (seen in production): raiko panics at proof time with
-#   pil2-proofman/verifier/src/verifier.rs:208:43:
-#   index out of bounds: the len is N but the index is N
-# The regen is fast and idempotent, so we run it unconditionally on every
-# install — much cheaper than diagnosing a verifier walk-off later.
 run_zisk_check_setup() {
     echo "Regenerating Zisk constant tree files..."
     "$ZISK_DIR/bin/cargo-zisk" check-setup -a --snark
@@ -270,11 +261,7 @@ build_zisk_gpu() {
         git clone --depth=1 --branch "v$ZISK_VERSION" \
             https://github.com/0xPolygonHermez/zisk.git "$tmp/zisk"
         cd "$tmp/zisk"
-        # CARGO_BUILD_JOBS=1 serializes cargo's build-script execution, which
-        # avoids the upstream lib-float / lib-c Makefile race that produces
-        # "can't create build/<x>.o: No such file or directory" mid-compile.
-        # MAKEFLAGS=-j1 alone isn't enough — upstream uses $(MAKE) recursively
-        # in places that drop the env flag.
+
         if CARGO_BUILD_JOBS=1 cargo build --release --features gpu; then
             copy_zisk_gpu_binaries "target/release"
             echo "$ZISK_VERSION" > "$marker"
@@ -360,9 +347,7 @@ if [ -z "$1" ] || [ "$1" == "zisk" ]; then
     # Install proving keys unless explicitly disabled (INSTALL_KEYS=false)
     if [ "${INSTALL_KEYS:-true}" != "false" ]; then
         ensure_zisk_proving_keys
-        # Always regen const trees regardless of whether the proving key was
-        # freshly downloaded or reused. See the function header for the
-        # pil2-proofman off-by-one panic this prevents.
+
         run_zisk_check_setup
     else
         echo "Skipping Zisk proving key installation (INSTALL_KEYS=false)"
