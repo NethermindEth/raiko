@@ -1,5 +1,12 @@
 # Changelog
 
+## [26.2.0-surge](https://github.com/NethermindEth/raiko/compare/v26.1.0-surge...v26.2.0-surge) (2026-06-01)
+
+
+### Features
+
+* realtime blob privacy with hash-bound guest decryption ([42aae28](https://github.com/NethermindEth/raiko/commit/42aae28126aa0c527b6e32dd2c9e74de198eff0f))
+
 ## [1.12.0](https://github.com/taikoxyz/raiko/compare/v1.10.0...v1.12.0) (2025-10-09)
 
 
