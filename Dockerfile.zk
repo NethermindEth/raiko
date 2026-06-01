@@ -73,6 +73,11 @@ FROM toolchain-installer AS guest-builder
 ENV ZISK_RUSTC=/opt/zisk-toolchain/bin/rustc
 ENV ZISK_TOOLCHAIN_DIR=/opt/zisk-toolchain
 
+ARG SURGE_PRIVACY_SYMMETRIC_KEY_HASH=
+ARG SURGE_PRIVACY_FI_PRIVKEY_HASH=
+ENV SURGE_PRIVACY_SYMMETRIC_KEY_HASH=${SURGE_PRIVACY_SYMMETRIC_KEY_HASH}
+ENV SURGE_PRIVACY_FI_PRIVKEY_HASH=${SURGE_PRIVACY_FI_PRIVKEY_HASH}
+
 WORKDIR /opt/raiko
 
 # Copy only what make guest needs (builders depend on pipeline + harness, so include them)
@@ -143,6 +148,11 @@ FROM nvidia/cuda:12.4.0-devel-ubuntu22.04 AS builder
 
 ENV DEBIAN_FRONTEND=noninteractive
 ARG BUILD_FLAGS=""
+
+ARG SURGE_PRIVACY_SYMMETRIC_KEY_HASH=
+ARG SURGE_PRIVACY_FI_PRIVKEY_HASH=
+ENV SURGE_PRIVACY_SYMMETRIC_KEY_HASH=${SURGE_PRIVACY_SYMMETRIC_KEY_HASH}
+ENV SURGE_PRIVACY_FI_PRIVKEY_HASH=${SURGE_PRIVACY_FI_PRIVKEY_HASH}
 
 # Install system dependencies (needed for cargo build, including zisk native C++ deps)
 RUN apt-get update && \

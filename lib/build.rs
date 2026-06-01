@@ -32,6 +32,10 @@ fn main() {
     println!("cargo:rerun-if-changed={}", setup_path.display());
     println!("cargo:rerun-if-env-changed=KZG_TRUSTED_SETUP");
 
+    // Privacy-mode hashes consumed by `option_env!()` in src/utils/realtime.rs are macro-expanded at compile time. 
+    println!("cargo:rerun-if-env-changed=SURGE_PRIVACY_SYMMETRIC_KEY_HASH");
+    println!("cargo:rerun-if-env-changed=SURGE_PRIVACY_FI_PRIVKEY_HASH");
+
     // Helpful message during build (shows which file was used).
     println!(
         "cargo:warning=Using trusted setup: {}",

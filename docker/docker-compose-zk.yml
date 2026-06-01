@@ -1,12 +1,14 @@
 services:
   raiko-zk:
-    platform: linux/amd64
-    build:
-      context: ..
-      dockerfile: Dockerfile.zk
-      platforms:
-        - linux/amd64
+    # Prebuilt host image. CI publishes this with empty SURGE_PRIVACY_*_HASH
+    # baked in — the host's hash check is bypassed when option_env!() is empty
+    # (only the guest enforces it). For privacy mode, the guest ELFs are
+    # rebuilt locally on this VM via `./script/build-guest-with-hashes.sh`
+    # and bind-mounted in over the image's defaults (see `volumes:` below).
+    # No `build:` block here means key rotation is a 30-second guest rebuild
+    # plus a container restart, not a multi-minute CUDA cargo build.
     image: docker.io/nethermind/surge-raiko-zk:latest
+    platform: linux/amd64
     pull_policy: always
     container_name: raiko-zk
     network_mode: host
@@ -23,6 +25,14 @@ services:
       ZISK_PROVING_KEY: "${HOME}/.zisk/provingKey"
       ZISK_PROVING_KEY_SNARK: "${HOME}/.zisk/provingKeySnark"
       ZISK_OUTPUT_DIR: "/tmp/zisk-proofs"
+      # Runtime privacy keys (plaintext). The host uses these to decrypt blobs
+      # for the guest; the guest verifies keccak256(key) matches the hash baked
+      # in at build time (see build.args above). Empty by default → privacy
+      # bypass; identical SURGE_PRIVACY_*_HASH at build & SURGE_PRIVACY_*_KEY
+      # at runtime are required for end-to-end privacy mode.
+      SURGE_PRIVACY_MODE: ${SURGE_PRIVACY_MODE:-false}
+      SURGE_PRIVACY_SYMMETRIC_KEY: ${SURGE_PRIVACY_SYMMETRIC_KEY:-}
+      SURGE_PRIVACY_FI_PRIVKEY: ${SURGE_PRIVACY_FI_PRIVKEY:-}
     restart: unless-stopped
     runtime: nvidia
     privileged: true
@@ -34,3 +44,14 @@ services:
       - ${HOME}/.sp1:${HOME}/.sp1
       - ${HOME}/.risc0:${HOME}/.risc0
       - ${HOME}/.zisk:${HOME}/.zisk
+      # Locally-compiled guest ELFs override the image's baked-in defaults.
+      # Produced by `./script/build-guest-with-hashes.sh` next to this file.
+      # If the files don't exist, Docker treats them as new empty files —
+      # we explicitly bind individual files (not the directory) so the
+      # bind-mount only fires when the operator has actually run the build
+      # script. Compose will fail at startup with "source path does not exist"
+      # if the operator forgets — that's intentional (fail-loud is better
+      # than running with stale/mismatched ELFs).
+      - ./guest-elfs/zisk-batch:/opt/raiko/bin/zisk-batch:ro
+      - ./guest-elfs/zisk-aggregation:/opt/raiko/bin/zisk-aggregation:ro
+      - ./guest-elfs/zisk-shasta-aggregation:/opt/raiko/bin/zisk-shasta-aggregation:ro

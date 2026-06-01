@@ -223,7 +223,7 @@ ensure_zisk_proving_keys() {
 
 run_zisk_check_setup() {
     echo "Regenerating Zisk constant tree files..."
-    "$ZISK_DIR/bin/cargo-zisk" check-setup -a --snark 
+    "$ZISK_DIR/bin/cargo-zisk" check-setup -a --snark
 }
 
 copy_zisk_gpu_binaries() {
@@ -261,11 +261,7 @@ build_zisk_gpu() {
         git clone --depth=1 --branch "v$ZISK_VERSION" \
             https://github.com/0xPolygonHermez/zisk.git "$tmp/zisk"
         cd "$tmp/zisk"
-        # CARGO_BUILD_JOBS=1 serializes cargo's build-script execution, which
-        # avoids the upstream lib-float / lib-c Makefile race that produces
-        # "can't create build/<x>.o: No such file or directory" mid-compile.
-        # MAKEFLAGS=-j1 alone isn't enough — upstream uses $(MAKE) recursively
-        # in places that drop the env flag.
+
         if CARGO_BUILD_JOBS=1 cargo build --release --features gpu; then
             copy_zisk_gpu_binaries "target/release"
             echo "$ZISK_VERSION" > "$marker"
@@ -351,6 +347,8 @@ if [ -z "$1" ] || [ "$1" == "zisk" ]; then
     # Install proving keys unless explicitly disabled (INSTALL_KEYS=false)
     if [ "${INSTALL_KEYS:-true}" != "false" ]; then
         ensure_zisk_proving_keys
+
+        run_zisk_check_setup
     else
         echo "Skipping Zisk proving key installation (INSTALL_KEYS=false)"
     fi
